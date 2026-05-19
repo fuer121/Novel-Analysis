@@ -2,6 +2,16 @@
 
 独立本地 Web 服务：用自托管 Dify 分批获取章节原文，只获取一次；章节正文和 GPT 分析结果加密落本地 SQLite；后续不同 Prompt 的 GPT 分析直接读取本地加密章节库。
 
+## 项目基线
+
+当前项目现状、关键决策、安全边界、运行配置和中长期迭代计划统一维护在：
+
+```text
+docs/PROJECT_CONTROL_BASELINE.md
+```
+
+后续任何架构、运行、合规或路线图变化，都以该文件为唯一真实信息源并持续更新。
+
 ## 安全边界
 
 - 章节正文不写明文文件、不进浏览器 localStorage、不出现在普通日志。
@@ -76,6 +86,34 @@ http://你的本机局域网IP:5174
 ```
 
 例如本机 IP 是 `172.16.75.46` 时，访问 `http://172.16.75.46:5174`。只在可信局域网/VPN 内使用，不要暴露到公网。
+
+## 本机预览环境
+
+开发新版但不想重启线上局域网服务时，可以启动只绑定本机的预览环境：
+
+```bash
+npm run preview:local
+```
+
+预览地址：
+
+```text
+http://127.0.0.1:5194/
+```
+
+预览环境使用 `data-preview/` 和 `dist-preview/`。`data-preview/` 是从正式 `data/novel-chapters.sqlite` 复制出来的一次性快照，预览里的导入、L1、分析任务不会写入正式数据库，也不会影响 `5184` 线上服务。
+
+如果只想刷新预览数据副本：
+
+```bash
+npm run preview:prepare-data
+```
+
+如果在非交互式环境中确认覆盖预览数据：
+
+```bash
+npm run preview:prepare-data -- --force
+```
 
 ## API
 

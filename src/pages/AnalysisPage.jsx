@@ -3,7 +3,6 @@ import {
   ChevronDown,
   ChevronRight,
   Copy,
-  FileJson,
   FileText,
   Layers,
   Loader2,
@@ -15,25 +14,37 @@ import {
   Table2,
   Trash2
 } from "lucide-react";
-import { apiDelete, apiGet, apiPost, apiPut, followTask, formatTime } from "../api.js";
+import { apiDelete, apiGet, apiPut, formatTime } from "../api.js";
 import { ChapterTable, IconButton, Panel, ResultActions, StatusPill, TaskBox } from "../ui.jsx";
 import {
   normalizePrompt,
   outputSchemaForPrompt,
-  parseSchema,
-  resultColumnsFromPrompt,
-  schemaFieldTypes,
-  schemaFromFields
+  resultColumnsFromPrompt
 } from "../schemaTools.js";
 
 const initialAnalysisForm = {
   name: "",
   book_id: "",
-  start_chapter: 1,
-  end_chapter: 20
+  start_chapter: "1",
+  end_chapter: "20"
 };
 
-export function AnalysisPage({ books, config, prompts, promptGroups = [], onPromptsChanged, setError }) {
+export function AnalysisPage({
+  books,
+  config,
+  prompts,
+  promptGroups = [],
+  l1Task,
+  analysisTask,
+  analysisBusy,
+  onStartAnalysis,
+  onResumeAnalysisRun,
+  onAnalysisCancel,
+  onAnalysisPause,
+  onAnalysisResume,
+  onPromptsChanged,
+  setError
+}) {
   const [analyses, setAnalyses] = useState([]);
   const [chapters, setChapters] = useState([]);
   const [chaptersBookId, setChaptersBookId] = useState("");
@@ -42,14 +53,23 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
     book_id: books[0]?.book_id || ""
   });
   const [promptDraft, setPromptDraft] = useState(() => normalizePrompt(prompts));
+  const defaultPrompt = useMemo(() => normalizePrompt(prompts), [prompts]);
   const [selectedPromptGroupId, setSelectedPromptGroupId] = useState("");
   const [selectedIndexes, setSelectedIndexes] = useState([]);
+  const [useL1Context, setUseL1Context] = useState(false);
+  const [l1Coverage, setL1Coverage] = useState(null);
   const selectionOverrideRef = useRef(null);
   const [selectionOverrideToken, setSelectionOverrideToken] = useState(0);
   const [chaptersExpanded, setChaptersExpanded] = useState(false);
-  const [analysisTask, setAnalysisTask] = useState(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState(null);
   const [busy, setBusy] = useState({ analysis: false, prompts: false, chapters: false, list: false });
+
+  useEffect(() => {
+    if (analysisTask?.result?.analysisId && selectedAnalysis?.id === analysisTask.result.analysisId) {
+      void loadAnalysisResult(analysisTask.result.analysisId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisTask?.status, analysisTask?.updatedAt]);
 
   useEffect(() => {
     void loadAnalyses();
@@ -67,8 +87,10 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
       setSelectedIndexes([]);
       return;
     }
+    const startChapter = chapterNumber(analysisForm.start_chapter);
+    const endChapter = chapterNumber(analysisForm.end_chapter, startChapter);
     const inRange = chapters
-      .filter((chapter) => chapter.chapter_index >= analysisForm.start_chapter && chapter.chapter_index <= analysisForm.end_chapter)
+      .filter((chapter) => chapter.chapter_index >= startChapter && chapter.chapter_index <= endChapter)
       .map((chapter) => chapter.chapter_index);
     const selectionOverride = selectionOverrideRef.current;
     if (selectionOverride) {
@@ -86,9 +108,29 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
   );
 
   const chaptersInRange = useMemo(
-    () => chapters.filter((chapter) => chapter.chapter_index >= analysisForm.start_chapter && chapter.chapter_index <= analysisForm.end_chapter),
+    () => {
+      const startChapter = chapterNumber(analysisForm.start_chapter);
+      const endChapter = chapterNumber(analysisForm.end_chapter, startChapter);
+      return chapters.filter((chapter) => chapter.chapter_index >= startChapter && chapter.chapter_index <= endChapter);
+    },
     [chapters, analysisForm.start_chapter, analysisForm.end_chapter]
   );
+  const selectedRangeSummary = useMemo(
+    () => summarizeSelection(selectedIndexes, chaptersInRange.length, l1Coverage),
+    [selectedIndexes, chaptersInRange.length, l1Coverage]
+  );
+  const promptDirty = useMemo(
+    () => isPromptDirty(promptDraft, defaultPrompt),
+    [promptDraft, defaultPrompt]
+  );
+
+  useEffect(() => {
+    if (!analysisForm.book_id || !validChapterNumber(analysisForm.start_chapter) || !validChapterNumber(analysisForm.end_chapter)) {
+      return;
+    }
+    void loadL1Coverage();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisForm.book_id, analysisForm.start_chapter, analysisForm.end_chapter, l1Task?.id, l1Task?.status]);
 
   async function loadAnalyses() {
     setBusy((state) => ({ ...state, list: true }));
@@ -122,37 +164,72 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
     }
   }
 
+  async function loadL1Coverage() {
+    if (!analysisForm.book_id || !validChapterNumber(analysisForm.start_chapter) || !validChapterNumber(analysisForm.end_chapter)) {
+      return;
+    }
+    try {
+      const query = `start_chapter=${encodeURIComponent(analysisForm.start_chapter)}&end_chapter=${encodeURIComponent(analysisForm.end_chapter)}`;
+      const data = await apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l1-indexes/coverage?${query}`);
+      setL1Coverage(data.coverage);
+    } catch (error) {
+      setError(error.message);
+    }
+  }
+
   async function startAnalysis() {
+    if (!validChapterNumber(analysisForm.start_chapter) || !validChapterNumber(analysisForm.end_chapter)) {
+      setError("起始章节和结束章节必须填写为大于 0 的整数。");
+      return;
+    }
     const chapterIndexes = [...new Set(selectedIndexes)].sort((left, right) => left - right);
     if (!chapterIndexes.length) {
       setError("请至少选择一个已导入章节。");
       return;
     }
 
-    setBusy((state) => ({ ...state, analysis: true }));
     setError("");
-    setAnalysisTask(null);
     setSelectedAnalysis(null);
-    try {
-      const data = await apiPost("/api/analyses", {
-        ...analysisForm,
-        chapter_indexes: chapterIndexes,
-        prompt: {
-          ...promptDraft,
-          output_schema: outputSchemaForPrompt(promptDraft)
-        }
-      });
-      setAnalysisTask(data.task);
-      followTask(`/api/analyses/${encodeURIComponent(data.task.id)}/events`, setAnalysisTask, async (task) => {
-        setBusy((state) => ({ ...state, analysis: false }));
+    const task = await onStartAnalysis({
+      ...analysisForm,
+      start_chapter: Number(analysisForm.start_chapter),
+      end_chapter: Number(analysisForm.end_chapter),
+      chapter_indexes: chapterIndexes,
+      use_l1_context: useL1Context,
+      prompt: {
+        ...promptDraft,
+        output_schema: outputSchemaForPrompt(promptDraft)
+      }
+    }, {
+      onTerminal: async (task) => {
         await loadAnalyses();
         if (task.result?.analysisId) await loadAnalysisResult(task.result.analysisId);
         if (task.status === "failed") setError(task.error || "分析失败");
-      });
-    } catch (error) {
-      setError(error.message);
-      setBusy((state) => ({ ...state, analysis: false }));
-    }
+      }
+    });
+    if (task?.result?.analysisId) await loadAnalysisResult(task.result.analysisId);
+  }
+
+  async function controlAnalysis(action) {
+    if (!analysisTask?.id) return;
+    setError("");
+    if (action === "cancel") await onAnalysisCancel?.();
+    if (action === "pause") await onAnalysisPause?.();
+    if (action === "resume") await onAnalysisResume?.();
+    if (action === "cancel") await loadAnalyses();
+  }
+
+  async function resumeSelectedAnalysis() {
+    if (!selectedAnalysis?.id) return;
+    setError("");
+    const task = await onResumeAnalysisRun(selectedAnalysis.id, {
+      onTerminal: async (finishedTask) => {
+        await loadAnalyses();
+        await loadAnalysisResult(selectedAnalysis.id);
+        if (finishedTask.status === "failed") setError(finishedTask.error || "分析失败");
+      }
+    });
+    if (task) await loadAnalysisResult(selectedAnalysis.id);
   }
 
   async function loadAnalysisResult(id) {
@@ -186,8 +263,8 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
     setAnalysisForm({
       name: `${analysis.name || "分析任务"} 复制`,
       book_id: analysis.book_id,
-      start_chapter: analysis.start_chapter,
-      end_chapter: analysis.end_chapter
+      start_chapter: String(analysis.start_chapter),
+      end_chapter: String(analysis.end_chapter)
     });
     selectionOverrideRef.current = analysis.chapter_indexes || [];
     setSelectionOverrideToken((value) => value + 1);
@@ -225,6 +302,9 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
 
   function updateAnalysisForm(patch) {
     setAnalysisForm((form) => ({ ...form, ...patch }));
+    if (patch.book_id !== undefined || patch.start_chapter !== undefined || patch.end_chapter !== undefined) {
+      setL1Coverage(null);
+    }
   }
 
   function toggleChapter(index) {
@@ -294,19 +374,21 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
             <label>
               <span>起始章节</span>
               <input
-                type="number"
-                min="1"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={analysisForm.start_chapter}
-                onChange={(event) => updateAnalysisForm({ start_chapter: Number(event.target.value) })}
+                onChange={(event) => updateAnalysisForm({ start_chapter: sanitizeChapterInput(event.target.value) })}
               />
             </label>
             <label>
               <span>结束章节</span>
               <input
-                type="number"
-                min="1"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={analysisForm.end_chapter}
-                onChange={(event) => updateAnalysisForm({ end_chapter: Number(event.target.value) })}
+                onChange={(event) => updateAnalysisForm({ end_chapter: sanitizeChapterInput(event.target.value) })}
               />
             </label>
           </div>
@@ -321,7 +403,7 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
                 {chaptersExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
                 章节选择
               </span>
-              <span>{selectedIndexes.length} / {chaptersInRange.length} 章已选择</span>
+              <span>{selectedRangeSummary}</span>
             </button>
 
             {chaptersExpanded ? (
@@ -346,10 +428,19 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
               </>
             ) : null}
           </div>
+          <label className="check-row l1-context-row">
+            <input
+              type="checkbox"
+              checked={useL1Context}
+              onChange={(event) => setUseL1Context(event.target.checked)}
+            />
+            <span>附加 L1 上下文</span>
+            <small>{formatCoverage(l1Coverage)}</small>
+          </label>
         </Panel>
 
         <div className="split">
-          <Panel icon={Settings2} title="Prompt 与 Schema">
+          <Panel icon={Settings2} title="Prompt 配置">
             <PromptEditor
               prompt={promptDraft}
               promptGroups={promptGroups}
@@ -358,6 +449,7 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
               onChange={setPromptDraft}
               onSave={savePrompts}
               busy={busy.prompts}
+              dirty={promptDirty}
             />
           </Panel>
 
@@ -366,12 +458,17 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
               className="primary"
               type="button"
               onClick={startAnalysis}
-              disabled={busy.analysis || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length}
+              disabled={analysisBusy || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length}
             >
-              {busy.analysis ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-              {busy.analysis ? "分析中" : "开始分析"}
+              {analysisBusy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+              {analysisBusy ? "分析中" : "开始分析"}
             </button>
-            <TaskBox task={analysisTask} />
+            <TaskBox
+              task={analysisTask}
+              onCancel={() => controlAnalysis("cancel")}
+              onPause={() => controlAnalysis("pause")}
+              onResume={() => controlAnalysis("resume")}
+            />
           </Panel>
         </div>
 
@@ -380,7 +477,11 @@ export function AnalysisPage({ books, config, prompts, promptGroups = [], onProm
           title="最终结果"
           action={<ResultActions analysis={selectedAnalysis} />}
         >
-          <ResultView analysis={selectedAnalysis} />
+          <ResultView
+            analysis={selectedAnalysis}
+            analysisBusy={analysisBusy}
+            onResume={resumeSelectedAnalysis}
+          />
         </Panel>
       </section>
     </section>
@@ -394,6 +495,52 @@ function TaskStats({ book, selectedCount, totalInRange }) {
       <span>{selectedCount}/{totalInRange} 已选</span>
     </div>
   );
+}
+
+function chapterNumber(value, fallback = 1) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0 ? number : fallback;
+}
+
+function validChapterNumber(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0;
+}
+
+function sanitizeChapterInput(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.replace(/^0+(?=\d)/, "").replace(/^0$/, "");
+}
+
+function formatCoverage(coverage) {
+  if (!coverage) return "L1 覆盖率读取中";
+  return `章节 ${coverage.chapters.completed}/${coverage.chapters.total}`;
+}
+
+function summarizeSelection(selectedIndexes, totalInRange, coverage) {
+  const selected = selectedIndexes.length;
+  const selectedText = `${selected}/${totalInRange} 章已选`;
+  if (!coverage?.chapters) return selectedText;
+  const missing = coverage.chapters.missing || 0;
+  const failed = coverage.chapters.failed || 0;
+  const suffix = missing || failed ? `L1 缺失 ${missing} · 失败 ${failed}` : "L1 已覆盖";
+  return `${selectedText} · ${suffix}`;
+}
+
+function isPromptDirty(left, right) {
+  return JSON.stringify({
+    name: left.name,
+    model: left.model,
+    reasoning_effort: left.reasoning_effort,
+    chapter_prompt: left.chapter_prompt,
+    summary_prompt: left.summary_prompt
+  }) !== JSON.stringify({
+    name: right.name,
+    model: right.model,
+    reasoning_effort: right.reasoning_effort,
+    chapter_prompt: right.chapter_prompt,
+    summary_prompt: right.summary_prompt
+  });
 }
 
 function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDelete }) {
@@ -423,41 +570,16 @@ function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDele
   );
 }
 
-function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGroupChange, onChange, onSave, busy }) {
-  const schemaValid = Boolean(parseSchema(outputSchemaForPrompt(prompt)));
-
+function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGroupChange, onChange, onSave, busy, dirty }) {
   function updatePrompt(patch) {
-    onChange((current) => {
-      const next = { ...current, ...patch };
-      if (next.schema_mode === "fields") {
-        next.output_schema = JSON.stringify(schemaFromFields(next.schema_fields), null, 2);
-      }
-      return next;
-    });
-  }
-
-  function updateField(index, patch) {
-    const fields = prompt.schema_fields.map((field, fieldIndex) => (
-      fieldIndex === index ? { ...field, ...patch } : field
-    ));
-    updatePrompt({ schema_fields: fields });
-  }
-
-  function addField() {
-    updatePrompt({
-      schema_fields: [
-        ...prompt.schema_fields,
-        { name: `field_${prompt.schema_fields.length + 1}`, label: "新字段", type: "string", required: true, description: "" }
-      ]
-    });
-  }
-
-  function removeField(index) {
-    updatePrompt({ schema_fields: prompt.schema_fields.filter((_, fieldIndex) => fieldIndex !== index) });
+    onChange((current) => ({ ...current, ...patch }));
   }
 
   return (
     <div className="prompt-editor">
+      <div className={dirty ? "draft-banner active" : "draft-banner"}>
+        {dirty ? "当前 Prompt 已修改。开始分析会使用这份草稿；保存后才会更新默认 Prompt。" : "当前使用默认 Prompt 或已保存模板。"}
+      </div>
       <label>
         <span>Prompt 组</span>
         <select value={selectedPromptGroupId} onChange={(event) => onPromptGroupChange(event.target.value)}>
@@ -496,39 +618,7 @@ function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGro
         <textarea value={prompt.summary_prompt} onChange={(event) => updatePrompt({ summary_prompt: event.target.value })} />
       </label>
 
-      <div className="segmented">
-        <button
-          type="button"
-          className={prompt.schema_mode === "fields" ? "active" : ""}
-          onClick={() => updatePrompt({ schema_mode: "fields" })}
-        >
-          <Table2 size={15} />
-          字段表
-        </button>
-        <button
-          type="button"
-          className={prompt.schema_mode === "raw" ? "active" : ""}
-          onClick={() => updatePrompt({ schema_mode: "raw" })}
-        >
-          <FileJson size={15} />
-          原始 JSON
-        </button>
-      </div>
-
-      {prompt.schema_mode === "fields" ? (
-        <SchemaFieldTable fields={prompt.schema_fields} onUpdate={updateField} onAdd={addField} onRemove={removeField} />
-      ) : (
-        <label>
-          <span>最终 JSON Schema</span>
-          <textarea
-            className={schemaValid ? "schema-box" : "schema-box invalid"}
-            value={prompt.output_schema}
-            onChange={(event) => updatePrompt({ output_schema: event.target.value })}
-          />
-        </label>
-      )}
-
-      <button className="secondary" type="button" onClick={onSave} disabled={busy || !schemaValid}>
+      <button className="secondary" type="button" onClick={onSave} disabled={busy}>
         {busy ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
         保存为默认 Prompt
       </button>
@@ -536,68 +626,15 @@ function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGro
   );
 }
 
-function SchemaFieldTable({ fields, onUpdate, onAdd, onRemove }) {
-  return (
-    <div className="schema-fields">
-      <div className="schema-field-head">
-        <strong>最终 items 表字段</strong>
-        <IconButton icon={Plus} label="添加字段" onClick={onAdd} />
-      </div>
-      <div className="table-wrap compact-table">
-        <table>
-          <thead>
-            <tr>
-              <th>字段名</th>
-              <th>显示名</th>
-              <th>类型</th>
-              <th>必填</th>
-              <th>描述</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {fields.map((field, index) => (
-              <tr key={`${field.name}-${index}`}>
-                <td>
-                  <input value={field.name} onChange={(event) => onUpdate(index, { name: event.target.value })} />
-                </td>
-                <td>
-                  <input value={field.label} onChange={(event) => onUpdate(index, { label: event.target.value })} />
-                </td>
-                <td>
-                  <select value={field.type} onChange={(event) => onUpdate(index, { type: event.target.value })}>
-                    {schemaFieldTypes.map((type) => (
-                      <option key={type} value={type}>{type}</option>
-                    ))}
-                  </select>
-                </td>
-                <td className="check-cell">
-                  <input
-                    type="checkbox"
-                    checked={field.required}
-                    onChange={(event) => onUpdate(index, { required: event.target.checked })}
-                  />
-                </td>
-                <td>
-                  <input value={field.description} onChange={(event) => onUpdate(index, { description: event.target.value })} />
-                </td>
-                <td>
-                  <button type="button" className="icon-only danger-icon" onClick={() => onRemove(index)} title="删除字段">
-                    <Trash2 size={15} />
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </div>
-  );
-}
-
-function ResultView({ analysis }) {
-  if (!analysis?.finalResult) return <div className="empty-state tall">没有已完成的最终结果</div>;
-  const columns = resultColumnsFromPrompt(analysis.prompt, analysis.finalResult);
+function ResultView({ analysis, analysisBusy, onResume }) {
+  if (!analysis) return <div className="empty-state tall">选择一个分析任务查看结果</div>;
+  if (!analysis.finalResult) {
+    return <PartialResultView analysis={analysis} analysisBusy={analysisBusy} onResume={onResume} />;
+  }
+  if (typeof analysis.finalResult === "string") {
+    return <TextPreview value={analysis.finalResult} />;
+  }
+  const columns = resultColumnsFromPrompt(null, analysis.finalResult);
   const rows = Array.isArray(analysis.finalResult.items) ? analysis.finalResult.items : [];
 
   if (rows.length && columns.length) {
@@ -640,8 +677,65 @@ function ResultView({ analysis }) {
   return <JsonPreview value={analysis.finalResult} />;
 }
 
+function PartialResultView({ analysis, analysisBusy, onResume }) {
+  const completed = analysis.chapterResults || [];
+  const failed = analysis.failedChapterIndexes || [];
+  const pending = analysis.pendingChapterIndexes || [];
+  return (
+    <div className="partial-result-stack">
+      <div className="partial-result-header">
+        <div>
+          <h3>任务尚未生成最终结果</h3>
+          <p>
+            已完成 {completed.length} 章
+            {failed.length ? ` · 失败 ${failed.length} 章` : ""}
+            {pending.length ? ` · 待续跑 ${pending.length} 章` : ""}
+          </p>
+        </div>
+        {analysis.canResume ? (
+          <button className="secondary" type="button" onClick={onResume} disabled={analysisBusy}>
+            {analysisBusy ? <Loader2 className="spin" size={16} /> : <Play size={16} />}
+            继续分析
+          </button>
+        ) : null}
+      </div>
+
+      {failed.length ? (
+        <div className="inline-warning">
+          <FileText size={15} />
+          失败章节：{failed.join(", ")}
+        </div>
+      ) : null}
+      {pending.length ? (
+        <div className="muted-line">待续跑章节：{compactIndexes(pending)}</div>
+      ) : null}
+
+      {completed.length ? (
+        <div className="partial-chapter-list">
+          {completed.map((entry) => (
+            <details key={entry.chapter_index} className="partial-chapter-item">
+              <summary>
+                第 {entry.chapter_index} 章
+                {entry.result?.chapter_title ? ` · ${entry.result.chapter_title}` : ""}
+              </summary>
+              {entry.result?.summary ? <p>{entry.result.summary}</p> : null}
+              <JsonPreview value={entry.result} />
+            </details>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state tall">还没有可展示的逐章分析结果</div>
+      )}
+    </div>
+  );
+}
+
 function JsonPreview({ value }) {
   return <pre className="json-preview">{JSON.stringify(value, null, 2)}</pre>;
+}
+
+function TextPreview({ value }) {
+  return <pre className="text-preview">{value}</pre>;
 }
 
 function formatCell(value) {
@@ -649,4 +743,10 @@ function formatCell(value) {
   if (value && typeof value === "object") return JSON.stringify(value);
   if (value === undefined || value === null || value === "") return "-";
   return String(value);
+}
+
+function compactIndexes(indexes) {
+  const values = (indexes || []).slice(0, 40);
+  const suffix = indexes.length > values.length ? ` 等 ${indexes.length} 章` : "";
+  return `${values.join(", ")}${suffix}`;
 }

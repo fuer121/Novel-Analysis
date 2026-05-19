@@ -9,6 +9,9 @@ import {
   deletePromptGroup,
   getPromptGroup,
   getPromptSettings,
+  getL1Coverage,
+  listL1ChapterIndexes,
+  listL1WindowIndexes,
   listAnalysisRuns,
   listBooks,
   listChapterMetadata,
@@ -16,11 +19,13 @@ import {
   updatePromptGroup,
   savePromptSettings
 } from "./db.js";
-import { getTask, publicTask, cancelTask, subscribeTask } from "./tasks.js";
+import { cancelTask, getTask, listTasks, pauseTask, publicTask, resumeTask, subscribeTask } from "./tasks.js";
 import { sanitizeError } from "./sanitize.js";
 import { testDifyConnection } from "./dify.js";
 import {
   publicAnalysisRunWithResult,
+  resumeAnalysisRunTask,
+  startL1IndexTask,
   startAnalysisTask,
   startImportTask
 } from "./workflows.js";
@@ -28,6 +33,7 @@ import { testOpenAIConnection } from "./openai.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+const staticDir = config.staticDir || path.resolve(__dirname, "..", "dist");
 
 app.use(express.json({ limit: "2mb" }));
 
@@ -49,6 +55,16 @@ app.get("/api/dify/test", async (_request, response, next) => {
   } catch (error) {
     next(error);
   }
+});
+
+app.get("/api/tasks", (request, response) => {
+  response.json({
+    ok: true,
+    tasks: listTasks({
+      type: request.query.type,
+      status: request.query.status
+    })
+  });
 });
 
 app.get("/api/books", (_request, response) => {
@@ -88,12 +104,130 @@ app.post("/api/imports/:id/cancel", (request, response, next) => {
   }
 });
 
+app.post("/api/imports/:id/pause", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: pauseTask(request.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/imports/:id/resume", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: resumeTask(request.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/books/:bookId/l1-indexes", (request, response, next) => {
+  try {
+    const task = startL1IndexTask({
+      ...(request.body || {}),
+      book_id: request.params.bookId
+    });
+    response.status(202).json({ ok: true, task: publicTask(task) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/l1-indexes/:id", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: publicTask(getTask(request.params.id)) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/l1-indexes/:id/events", (request, response, next) => {
+  try {
+    subscribeTask(request.params.id, response);
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/l1-indexes/:id/cancel", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: cancelTask(request.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/l1-indexes/:id/pause", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: pauseTask(request.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/l1-indexes/:id/resume", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: resumeTask(request.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.get("/api/books/:bookId/chapters", (request, response) => {
   response.json({
     ok: true,
     bookId: request.params.bookId,
     chapters: listChapterMetadata(request.params.bookId)
   });
+});
+
+app.get("/api/books/:bookId/l1-indexes/coverage", (request, response, next) => {
+  try {
+    const settings = getPromptSettings();
+    response.json({
+      ok: true,
+      coverage: getL1Coverage({
+        bookId: request.params.bookId,
+        startChapter: request.query.start_chapter || request.query.startChapter || 1,
+        endChapter: request.query.end_chapter || request.query.endChapter || 1,
+        model: settings.model,
+        promptHash: "l1-v1-chapter-window-10",
+        windowSize: 10,
+        includeWindows: false
+      })
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/books/:bookId/l1-indexes/chapters", (request, response, next) => {
+  try {
+    response.json({
+      ok: true,
+      chapters: listL1ChapterIndexes(
+        request.params.bookId,
+        request.query.start_chapter || request.query.startChapter || 1,
+        request.query.end_chapter || request.query.endChapter || 1
+      )
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/books/:bookId/l1-indexes/windows", (request, response, next) => {
+  try {
+    response.json({
+      ok: true,
+      windows: listL1WindowIndexes(
+        request.params.bookId,
+        request.query.start_chapter || request.query.startChapter || 1,
+        request.query.end_chapter || request.query.endChapter || 1
+      )
+    });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.post("/api/books/:bookId/delete", (request, response) => {
@@ -137,9 +271,34 @@ app.get("/api/analyses/:id/events", (request, response, next) => {
   }
 });
 
+app.post("/api/analyses/:id/resume-run", (request, response, next) => {
+  try {
+    const task = resumeAnalysisRunTask(request.params.id);
+    response.status(202).json({ ok: true, task: publicTask(task) });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/analyses/:id/cancel", (request, response, next) => {
   try {
     response.json({ ok: true, task: cancelTask(request.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/analyses/:id/pause", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: pauseTask(request.params.id) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/analyses/:id/resume", (request, response, next) => {
+  try {
+    response.json({ ok: true, task: resumeTask(request.params.id) });
   } catch (error) {
     next(error);
   }
@@ -199,9 +358,9 @@ app.delete("/api/prompt-groups/:id", (request, response, next) => {
   }
 });
 
-app.use(express.static(path.resolve(__dirname, "..", "dist")));
+app.use(express.static(staticDir));
 app.get(/.*/, (_request, response) => {
-  response.sendFile(path.resolve(__dirname, "..", "dist", "index.html"));
+  response.sendFile(path.resolve(staticDir, "index.html"));
 });
 
 app.use((error, _request, response, _next) => {

@@ -1,152 +1,224 @@
-# Project Control Baseline
+# 小说章节安全分析台：项目基线
 
-Last checkpoint: 2026-05-17, Asia/Shanghai
+最后更新：2026-05-19 20:56，Asia/Shanghai
 
-This file is the single source of truth for the Novel Chapter GPT Service control thread. Future work should update this file whenever project-level assumptions, ports, security posture, deployment details, or operating rules change.
+本文档是当前项目的唯一真实信息源。后续线程、后续迭代，只要涉及项目目标、架构、安全边界、运行配置、关键决策、路线图或运维方式变化，都必须同步更新本文档。
 
-## Project Identity
+## 1. 项目身份
 
-- Name: Novel Chapter GPT Service / 小说章节安全分析台
-- Local path: `/Users/staff/Desktop/Vibe coding/novel-chapter-gpt-service`
-- Git remote: `git@github.com:fuer121/Dify-Flow.git`
-- Default branch: `main`
-- Current pushed baseline commit: `bdfafe1 Initial novel chapter GPT service`
-- GitHub CLI: installed at `~/.local/bin/gh`, authenticated as `fuer121`
+- 产品名称：Novel Chapter GPT Service / 小说章节安全分析台
+- 本地路径：`/Users/staff/Desktop/Vibe coding/novel-chapter-gpt-service`
+- Git 远程仓库：`git@github.com:fuer121/Dify-Flow.git`
+- 默认分支：`main`
+- 当前线程已知的最近推送基线提交：`bdfafe1 Initial novel chapter GPT service`
+- GitHub CLI：已安装在 `~/.local/bin/gh`，当前登录用户为 `fuer121`
 
-## Purpose
+## 2. 项目目标
 
-The service imports novel chapters once from a minimal Dify workflow, stores chapter text encrypted locally, and lets the user run repeatable GPT analysis tasks against already-imported chapters. The frontend must never display or store full chapter text by default.
+建设一个本地运行、可在局域网访问的小说长文本分析服务：
 
-Primary workflows:
+- 通过自托管 Dify 的最小工作流，一次性导入小说章节。
+- 章节正文导入后本地加密保存。
+- 后续不同 Prompt、不同分析任务复用本地章节库，不重复调用 Dify。
+- 前端不展示、不保存整章正文。
+- 日志、Git、普通文件、浏览器存储中不出现章节正文。
+- 逐步通过可复用索引和更安全的重试机制，提高长篇小说分析效率。
 
-- Import a book/range from Dify in small batches.
-- Store chapter metadata in SQLite and chapter content as AES-256-GCM ciphertext.
-- Create analysis tasks using stored chapter ranges or selected chapter indexes.
-- Configure prompt groups and task-level prompts.
-- Render final JSON results as tables when possible.
+当前产品定位是本地/内网自用工具，不是公网 SaaS 服务。
 
-## Architecture
+## 3. 当前运行快照
 
-- Frontend: React + Vite.
-- Backend: Express on Node.js.
-- Storage: SQLite metadata and encrypted content under `data/`.
-- Dify integration: workflow API only, minimal chapter fetch workflow.
-- GPT integration: OpenAI-compatible Responses API with `store: false`.
-- Encryption:
-  - AES-256-GCM for chapter content and analysis results.
-  - HMAC-SHA256 for content verification.
-  - Master key stored in macOS Keychain by default.
+截至 2026-05-19 19:44：
 
-Key directories:
-
-- `src/`: React app.
-- `src/pages/AnalysisPage.jsx`: analysis task center.
-- `src/pages/LibraryPage.jsx`: book import and chapter metadata library.
-- `src/pages/PromptLibraryPage.jsx`: prompt group library.
-- `server/`: API, storage, encryption, Dify, OpenAI-compatible calls.
-- `dify-workflows/minimal-chapter-fetch.workflow.yml`: importable minimal Dify workflow.
-- `docs/security-notes.md`: security notes.
-- `docs/PROJECT_CONTROL_BASELINE.md`: this control baseline.
-
-## Runtime And Ports
-
-Local development:
-
-- Vite frontend: `http://127.0.0.1:5173`
-- Backend API in `.env`: `PORT=5184`
-- LAN production service: `http://192.168.1.163:5184/` as of 2026-05-16
-- The LAN IP can change with DHCP; re-check with `ifconfig | rg -n "inet (172|192|10)\\."`.
-
-Launch service:
+- 服务进程：Node.js，监听 `*:5184`
+- 当前监听进程：`PID 99739`
+- 本机地址：`http://127.0.0.1:5184/`
+- 当前局域网地址：`http://172.16.75.46:5184/`
+- 局域网 IP 可能随 DHCP 变化，重新确认命令：
 
 ```bash
-npm run build
-HOST=0.0.0.0 PORT=5184 node server/index.js
+ifconfig | rg -n "inet (10|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.168)\\."
 ```
 
-Current launchctl label used locally:
+当前非敏感运行配置：
 
-```text
-com.novel-chapter-gpt-service
-```
+- `HOST=0.0.0.0`
+- `PORT=5184`
+- `DIFY_API_BASE=https://dify.qmniu.com/v1`
+- `OPENAI_API_BASE=https://apitokenzz.xyz/v1`
+- `OPENAI_MODEL=gpt-5.5`
+- `OPENAI_RETENTION_MODE=zdr`
+- `IMPORT_BATCH_SIZE=10`
+- `OPENAI_CHAPTER_CONCURRENCY=1`
+- `OPENAI_PROXY_URL=` 当前为空，因为 `http://127.0.0.1:7897` 曾导致 TLS/代理链路不稳定。
 
-## Configuration Contract
+本机预览环境：
 
-Required `.env` keys:
+- 用途：在不提交、不重启线上 `5184` 服务的情况下，查看和验证新版效果。
+- 地址：`http://127.0.0.1:5194/`
+- 绑定：`HOST=127.0.0.1`，只允许本机访问，不开放局域网。
+- 端口：`PORT=5194`
+- 环境标识：`APP_ENV=preview`，`APP_LABEL=本机预览`
+- 数据目录：`DATA_DIR=./data-preview`
+- 静态资源目录：`STATIC_DIR=./dist-preview`
+- 数据来源：通过 `scripts/prepare-preview-data.js` 使用 SQLite 安全备份方式从 `data/novel-chapters.sqlite` 生成一次性快照。
+- 数据边界：预览环境里的导入、L1、分析任务只写入 `data-preview/`，不会写入正式 `data/`。
+- 密钥边界：预览环境复用同一个 macOS Keychain 主密钥，因此可以解密从正式数据复制出来的章节和分析结果。
+- 同步规则：`data-preview/` 是快照，不会自动同步线上新增数据；需要刷新时手动重新运行 `npm run preview:prepare-data`。
+- 覆盖提醒：刷新 `data-preview/` 会丢弃预览环境里临时产生的任务和结果。
 
-- `DIFY_API_BASE`
-- `DIFY_CHAPTER_WORKFLOW_API_KEY`
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- `OPENAI_RETENTION_MODE`
-- `HOST`
-- `PORT`
-- `DATA_DIR`
-- `IMPORT_BATCH_SIZE`
-- `OPENAI_CHAPTER_CONCURRENCY`
-- `OPENAI_PROXY_URL`
-- `OPENAI_API_BASE`
+当前内存任务快照：
 
-Current non-secret runtime shape:
+- 当前没有导入任务或 L1 构建任务在跑。
+- 当前有 1 个分析任务正在运行：
+  - 任务 ID：`aa9010ea-6a25-40a0-84c5-968951bcba3b`
+  - 任务名：`前 100 章提炼分析`
+  - 书籍：`143170` / `剑来`
+  - 范围：`1-100`
+  - 当前进度：`3` 章完成，`2` 章失败，当前到 `GPT 理解章节 6`
+  - 已观察失败类型：`OpenAI 返回不是合法 JSON：Unexpected end of JSON input`
 
-- Dify base: `https://dify.qmniu.com/v1`
-- OpenAI-compatible base: `https://apitokenzz.xyz/v1`
-- Model: `gpt-5.5`
-- Retention mode flag: `zdr`
-- Import batch size: `10`
-- Chapter analysis concurrency: `1`
-- Proxy: configured via `OPENAI_PROXY_URL`; do not commit its value if it becomes sensitive.
+重要安全说明：
 
-Important: `OPENAI_API_BASE=https://apitokenzz.xyz/v1` is a third-party OpenAI-compatible endpoint, not proven to be official OpenAI ZDR/MAM. Before sending real copyrighted chapter text through it, the user must confirm its data retention and legal/security posture.
+- `https://apitokenzz.xyz/v1` 是 OpenAI 兼容网关，不是已确认的官方 OpenAI ZDR/MAM 项目地址。大规模发送真实版权章节前，必须确认该网关的数据保留、转发链路、合规和安全承诺。
 
-## Security Rules
+## 4. 当前数据快照
 
-Never commit or paste:
+SQLite 数据目录：`data/`
 
-- `.env`
-- API keys or bearer tokens
-- `data/`
-- SQLite files, WAL/SHM files, logs, exports, or backups containing encrypted book data
-- Full chapter text
-- Raw Dify workflow outputs containing chapter text
-- OpenAI request bodies or prompt bodies containing real chapter text
+当前已导入书籍：
 
-`.gitignore` must keep excluding:
+- `1721648` / `废材那又怎样`：已导入 755 章，范围 `1-755`，导入状态 `completed`
+- `143170` / `剑来`：已导入 1279 章，范围 `1-1279`，导入状态 `completed`
+- `215243` / `第一瞳术师`：已导入 20 章，范围 `1-20`，导入状态 `completed`
 
-- `.env`
-- `.env.*` except `.env.example`
-- `data/*`
-- `node_modules/`
-- `dist/`
-- logs
-- OS/editor files
+当前 L1 逐章索引状态：
 
-When adding diagnostics:
+- `143170`：482 个完成，797 个失败
+- `1721648`：63 个完成
 
-- Log only task IDs, chapter indexes, status codes, sanitized messages, and counts.
-- Do not log prompts, chapter text, Dify raw output, or OpenAI request bodies.
-- Use `/api/openai/test` for no-chapter connectivity checks before analysis.
+当前分析任务历史状态：
 
-## Current Public Interfaces
+- `completed`：2 个
+- `cancelled`：2 个
+- `failed`：1 个
+- `queued`：1 个。新版本开始，分析运行时会写入 `analysis_runs.status=running`；旧历史任务可能仍保留旧状态。
 
-Backend:
+历史窗口索引数据：
+
+- `l1_window_indexes` 里可能保留了早期 10 章窗口索引实验产生的失败记录。
+- 这些窗口数据只作为历史数据保留，不再参与新构建，也不能自动删除。
+
+## 5. 架构概览
+
+前端：
+
+- React + Vite
+- `src/App.jsx`：应用壳、轻量路由、全局任务状态
+- `src/pages/AnalysisPage.jsx`：分析任务中心
+- `src/pages/LibraryPage.jsx`：书籍导入、章节元数据、L1 索引控制
+- `src/pages/PromptLibraryPage.jsx`：Prompt 组管理
+- `src/ui.jsx`：通用 UI 组件
+- `src/schemaTools.js`：Schema 和结果展示辅助逻辑
+
+后端：
+
+- Express on Node.js
+- `server/index.js`：HTTP 接口
+- `server/workflows.js`：导入、L1、分析任务编排
+- `server/tasks.js`：内存任务生命周期、SSE、暂停/继续/取消、时间估算
+- `server/db.js`：SQLite 表结构、加密落库、元数据接口
+- `server/openai.js`：OpenAI 兼容 Responses API 调用
+- `server/dify.js`：Dify 工作流 API 调用和返回解析
+- `server/crypto.js`：AES-GCM、HMAC、macOS Keychain 主密钥
+
+存储：
+
+- SQLite 位于 `data/`
+- 章节正文使用 AES-256-GCM 加密
+- 分析结果使用 AES-256-GCM 加密
+- 章节内容校验使用 HMAC-SHA256
+- L1 逐章索引当前按内测决策明文存储，但仍视为敏感内容
+- 主密钥默认存储在 macOS Keychain：service 为 `novel-chapter-gpt-service`，account 为 `master-key`
+
+## 6. 已实现页面
+
+- `/`：分析任务中心
+  - 创建分析任务
+  - 选择书籍和章节范围
+  - 章节选择模块默认收起
+  - 支持非连续章节选择
+  - 支持任务级 Prompt/Schema 快照
+  - 支持可选 L1 逐章上下文
+  - 章节选择收起态会显示已选章节数、L1 缺失数和 L1 失败数
+  - Prompt 编辑区会提示当前草稿是否未保存
+  - 最终结果如果 `finalResult.items` 可表格化，则表格展示，否则回退到 JSON/文本展示
+
+- `/library`：书籍章节库
+  - 导入书籍章节
+  - 绑定 `book_name` 和 `book_id`，同一 `book_id` 不能绑定两个书名
+  - 只查看章节元数据，不查看整章正文
+  - 删除本地书籍数据
+  - 构建逐章 L1 索引
+  - 支持导入任务和 L1 任务的暂停/继续/取消
+  - 支持导入完成后自动启动 L1 构建
+  - 支持 L1 覆盖率卡片、章节表搜索、L1 完成/未完成/缺失/失败筛选
+  - 章节表显示每章 L1 状态；当章节不在当前 L1 查看范围内时显示为“未读取”，避免误判为缺失
+
+- `/prompts`：Prompt 库
+  - 新建、编辑、删除 Prompt 组
+  - 修改 Prompt 组名称
+  - 为 Prompt 组设置分类
+  - 每组包含逐章 Prompt 和汇总 Prompt
+  - 编辑 Prompt 组时提示未保存修改，切换或新建前会二次确认
+
+## 7. 当前公开接口
+
+基础接口：
 
 - `GET /api/config`
+- `GET /api/tasks`
 - `GET /api/dify/test`
 - `GET /api/openai/test`
+
+书籍与导入：
+
 - `GET /api/books`
 - `POST /api/books/imports`
 - `GET /api/imports/:id`
 - `GET /api/imports/:id/events`
 - `POST /api/imports/:id/cancel`
+- `POST /api/imports/:id/pause`
+- `POST /api/imports/:id/resume`
 - `GET /api/books/:bookId/chapters`
 - `POST /api/books/:bookId/delete`
+
+L1 索引：
+
+- `POST /api/books/:bookId/l1-indexes`
+- `GET /api/l1-indexes/:id`
+- `GET /api/l1-indexes/:id/events`
+- `POST /api/l1-indexes/:id/cancel`
+- `POST /api/l1-indexes/:id/pause`
+- `POST /api/l1-indexes/:id/resume`
+- `GET /api/books/:bookId/l1-indexes/coverage`
+- `GET /api/books/:bookId/l1-indexes/chapters`
+- `GET /api/books/:bookId/l1-indexes/windows`：仅用于查看历史窗口索引数据
+
+分析任务：
+
 - `GET /api/analyses`
 - `POST /api/analyses`
 - `GET /api/analyses/:id`
 - `GET /api/analyses/:id/events`
+- `POST /api/analyses/:id/resume-run`
 - `POST /api/analyses/:id/cancel`
+- `POST /api/analyses/:id/pause`
+- `POST /api/analyses/:id/resume`
 - `DELETE /api/analyses/:id`
+
+Prompt：
+
 - `GET /api/prompts`
 - `PUT /api/prompts`
 - `GET /api/prompt-groups`
@@ -155,38 +227,246 @@ Backend:
 - `PUT /api/prompt-groups/:id`
 - `DELETE /api/prompt-groups/:id`
 
-Frontend routes:
+## 8. 关键决策
 
-- `/`: analysis task center.
-- `/library`: book and chapter metadata library.
-- `/prompts`: prompt group library.
+### Dify
 
-## Known Implemented Behaviors
+- Dify 只负责章节原文获取。
+- Dify 工作流必须保持最小化：输入 `book_id`、`start_chapter`、`end_chapter`，输出章节 JSON。
+- Dify 工作流不接 LLM。
+- 章节导入后存入本地章节库，后续分析不再重复调用 Dify。
 
-- Book import supports `book_name` bound to `book_id`; one `book_id` cannot have two names.
-- Import tasks are owned by `App.jsx`, so switching pages does not lose import state.
-- Analysis tasks can select non-contiguous chapters.
-- Prompt groups can be created, edited, deleted, named, and categorized.
-- Prompt/schema snapshots are stored per analysis task.
-- OpenAI-compatible calls use Responses API shape with `store: false` and no `background`.
-- The service runs an OpenAI-compatible connectivity check before analysis starts, preventing per-chapter network/key failures.
-- Dify diagnostics are available at `/api/dify/test`; this checks Dify App API access without pulling chapter text.
-- Final results render as a table when `finalResult.items` can be tabular; otherwise JSON preview is shown.
+### OpenAI 兼容调用
 
-## Verification Commands
+- 使用 Responses API 形态。
+- 每次请求强制 `store: false`。
+- 不使用 Files、Vector Stores、Assistants、Threads、Batch、background mode。
+- 大型分析任务或 L1 任务前，先通过 `/api/openai/test` 做无正文连通性测试。
+- 当前网关是 OpenAI 兼容地址，不是官方 OpenAI 地址；在确认合规前，视为重要风险点。
 
-Use these before committing substantial changes:
+### L1 索引
+
+- 当前 L1 策略是逐章索引，不再构建 10 章窗口索引。
+- 已移除的 10 章窗口方案在大书测试中带来额外成本，窗口成功数为 0，并放大失败面。
+- 历史 L1 窗口数据保留，但新任务不能再生成窗口索引。
+- 已成功的逐章 L1 索引会继续复用。
+- L1 Prompt Hash 继续使用 `l1-v1-chapter-window-10`，避免已完成的逐章索引被误判为过期。
+- L1 的 `missing` 表示尚未构建，不等于模型失败。
+- L1 的 `failed` 表示已有失败记录。
+- 出现成本保护、quota、billing、rate-limit 等系统性上游错误时，L1 任务应提前停止，不能继续把后续章节批量打成失败。
+
+### 分析任务
+
+- 默认分析路径仍然是按所选章节提交完整章节正文。
+- `use_l1_context=false` 是默认值。
+- 当 `use_l1_context=true` 时，每章 Prompt 会附加对应章节的 L1 JSON。
+- L1 覆盖缺失只提示，不阻塞分析。
+- 汇总 Prompt 不再附加窗口 L1 上下文。
+- 分析任务逐章结果会写入 `analysis_chapters`，未完成、失败、取消或服务重启后，已完成章节结果仍可在任务详情中查看。
+- 未完成任务不生成临时最终结果；`finalResult` 只有最终汇总成功后才返回。
+- 断点续跑使用 `POST /api/analyses/:id/resume-run`，只允许复用原任务的 Prompt、模型、推理强度、Schema 和章节选择快照。
+- 续跑会跳过 `status=completed`、章节 HMAC 匹配、Prompt Hash 匹配且结果密文存在的章节，只重跑失败、缺失、正文变更或 Prompt Hash 不匹配的章节。
+- 服务重启后不会自动续跑分析任务，必须由用户在任务详情中手动点击“继续分析”。
+
+### UI/UX
+
+- 后台 UI 保持简洁、密集、偏操作台风格。
+- 不做营销页和落地页。
+- 避免嵌套卡片和纯装饰性视觉元素。
+- 长任务切换页面后仍要可见。
+- 服务重启前，已存在的内存任务可以通过 `GET /api/tasks` 在当前进程内找回；Node 进程重启后内存任务会丢失，但分析任务可通过已落库的逐章结果手动续跑。
+- 分析任务中的章节选择默认收起。
+- L1 覆盖信息必须区分“缺失”“失败”和“未读取当前范围”。
+
+## 9. 安全规则
+
+禁止提交或粘贴：
+
+- `.env`
+- API Key、Bearer Token
+- `data/`
+- SQLite 文件、WAL/SHM 文件
+- 包含加密或明文书籍数据的日志、导出、备份
+- 整章正文
+- 包含章节正文的 Dify 原始输出
+- OpenAI 请求体
+- 包含真实章节内容的 Prompt body
+- 真实版权书籍的 L1 索引内容
+
+`.gitignore` 必须持续覆盖：
+
+- `.env`
+- `.env.*`，但 `.env.example` 除外
+- `data/*`
+- `data-preview/`
+- `node_modules/`
+- `dist/`
+- `dist-preview/`
+- 日志文件
+- 系统和编辑器临时文件
+
+日志规则：
+
+- 只记录任务 ID、章节编号、数量、状态、状态码和脱敏错误信息。
+- 不记录章节正文、Prompt body、OpenAI 请求体、Dify 原始输出或 L1 索引内容。
+
+运行边界：
+
+- 服务只允许本机、局域网或 VPN 使用。
+- 不允许暴露到公网。
+- macOS 防火墙可能需要允许 Node.js，局域网设备才能访问。
+- Dify 和 SQLite 数据卷应放在 FileVault 或等效加密磁盘上。
+
+## 10. 已知问题
+
+### 长篇全量分析仍然昂贵
+
+即使已经有 L1，默认分析路径仍然会按所选章节提交完整章节正文。这个路径准确性高，但全书级任务仍然慢且成本高。
+
+### L1 构建仍然偏慢
+
+逐章 L1 已经比窗口 L1 便宜，但本质上仍是一章一次模型调用。对于 755 章或 1279 章的书，这仍然是大任务。
+
+### 上游稳定性不足
+
+已观察到的失败模式：
+
+- 代理在 TLS 握手前断开
+- OpenAI 兼容网关返回不完整 JSON
+- OpenAI 兼容网关返回非合法 JSON，典型错误为 `Unexpected end of JSON input`
+- 成本保护或额度保护
+- 请求超时
+
+当前缓解方案：
+
+- `OPENAI_PROXY_URL` 保持为空，优先直连 `OPENAI_API_BASE`
+- 对系统性上游错误提前停止任务
+
+### L1 重试流程太粗
+
+系统可以跳过已完成索引，UI 已经支持按 L1 缺失、失败、未完成筛选章节；但还没有“一键只构建缺失”“一键只重试失败”的独立动作，也没有足够直观的失败原因聚合。
+
+### L1 明文存储只是内测阶段取舍
+
+L1 内容是版权正文的派生信息，仍然敏感。生产化前应迁移为加密存储。
+
+### 任务状态仍在内存中
+
+当前进程内可以通过 `GET /api/tasks` 找回任务并重新订阅进度。Node 进程重启后，正在运行的任务状态仍会丢失。已写入 SQLite 的章节、索引和结果不会丢失。
+
+## 11. 中期优化计划
+
+优先级 1：让 L1 构建更可靠
+
+- 增加“只构建缺失章节”按钮。
+- 增加“只重试失败章节”按钮。
+- 增加覆盖范围快捷选项：当前范围、导入范围中缺失部分、全书。
+- 在 UI 中聚合展示失败原因。
+- 对临时网络错误增加小间隔自动重试。
+- 对非法 JSON 增加一次 JSON 修复重试。
+- 对章节分析任务也增加一次 JSON 修复重试，避免 `Unexpected end of JSON input` 造成大量章节失败。
+- 给单次任务增加硬上限：最大章节数、最大失败数。
+- 任务事件文案明确区分 missing、failed、skipped、completed。
+
+优先级 2：减少模型调用次数
+
+- 对较短章节探索批量 L1 抽取，同时仍按章节保存结果。
+- 为 L1 单独配置模型和推理强度，不必完全沿用分析模型。
+- 增加“低成本 L1”模式，使用更小 Schema 和更低推理强度。
+- 压缩分析任务中附加的 L1 上下文。
+
+优先级 3：提升分析效率
+
+- 增加分析模式：
+  - 全文模式：当前最高保真路径
+  - L1 辅助模式：全文 + L1 提示
+  - L1 草稿模式：只用 L1 做快速探索
+  - 定向全文精修：先用 L1 定位相关章节，再只对相关章节提交全文
+- 增加结果来源追踪：每个结果条目保留章节引用，并标记来源是全文还是 L1。
+- 增加分析任务断点续跑能力。
+
+优先级 4：安全加固和数据生命周期
+
+- 加密 L1 逐章索引。
+- 增加加密备份、导出和恢复。
+- 增加密钥轮换 UI。
+- 增加任务持久化表，让进行中的任务在进程重启后可恢复或标记为中断。
+- 增加管理诊断页，但不能展示密钥、正文或 L1 内容。
+- 增加局域网健康检查页。
+
+优先级 5：大书体验优化
+
+- 章节元数据和 L1 表格虚拟滚动。
+- 继续完善 L1 表格过滤器，增加失败原因筛选和最近失败优先排序。
+- 增加批量选择章节范围。
+- 增加清晰的任务历史和重试入口。
+- 当分析范围 L1 覆盖率低时，运行前给出提示。
+
+## 12. 长期方向
+
+长期目标是形成三层架构：
+
+1. 本地章节库
+   - 一次性加密导入
+   - 完整元数据
+   - 内容完整性校验
+
+2. 可复用知识层
+   - 加密的 L1 章节事实
+   - 只在被证明有价值时引入更高阶索引
+   - 覆盖率、重试、过期判断可控
+
+3. 查询和分析层
+   - 快速 L1 探索
+   - 定向全文精修
+   - 任务级 Prompt/Schema 快照
+   - 带来源追踪、可复现的分析结果
+
+核心原则：不要因为每一个新问题都重跑整本书。优先构建可复用的宽基础索引，再对新问题需要的章节做定向精修。
+
+## 13. 验证命令
+
+重要改动前后执行：
 
 ```bash
 npm run lint
 npm test
 npm run build
-curl -s http://127.0.0.1:5184/api/config | jq .
-curl -s http://127.0.0.1:5184/api/dify/test | jq .
-curl -s http://127.0.0.1:5184/api/openai/test | jq .
+curl -s http://127.0.0.1:5184/api/config
+curl -s http://127.0.0.1:5184/api/dify/test
+curl -s http://127.0.0.1:5184/api/openai/test
+curl -s http://127.0.0.1:5184/api/tasks
 ```
 
-Git checks before push:
+本机预览环境验证：
+
+```bash
+npm run preview:prepare-data
+npm run build:preview
+npm run start:preview
+curl -s http://127.0.0.1:5194/api/config
+curl -s http://127.0.0.1:5184/api/config
+```
+
+如果需要非交互式覆盖预览快照：
+
+```bash
+npm run preview:prepare-data -- --force
+```
+
+局域网检查：
+
+```bash
+curl -s http://172.16.75.46:5184/api/config
+```
+
+当前进程任务检查：
+
+```bash
+curl -s http://127.0.0.1:5184/api/tasks
+```
+
+推送前 Git 和密钥检查：
 
 ```bash
 git status --short --branch
@@ -194,28 +474,93 @@ git check-ignore -v .env data/novel-chapters.sqlite dist/index.html node_modules
 git grep --cached -n -I -E '(cg_[A-Za-z0-9_-]+|sk-(proj-)?[A-Za-z0-9_-]{12,}|app-[A-Za-z0-9]{12,}|OPENAI_API_KEY=.+|DIFY_CHAPTER_WORKFLOW_API_KEY=.+)' -- . || true
 ```
 
-## Git And Release Rules
+## 14. 运维手册
 
-- Commit only source, docs, tests, and safe examples.
-- Do not commit generated `dist/` unless explicitly required.
-- Do not commit `.env` or `data/`.
-- Prefer small commits with clear messages.
-- Before push, run lint/tests/build and staged secret scan.
-
-## Current Operational Notes
-
-- GitHub CLI is installed and authenticated as `fuer121`.
-- `gh` is on `~/.local/bin`; `.zshrc` adds this directory to `PATH`.
-- Git remote is currently SSH. If SSH fails due to port 22/network issues, switch remote to HTTPS:
+启动或重启局域网服务：
 
 ```bash
-git remote set-url origin https://github.com/fuer121/Dify-Flow.git
+npm run build
+lsof -tiTCP:5184 -sTCP:LISTEN | xargs -r kill
+PORT=5184 HOST=0.0.0.0 nohup npm start > /tmp/novel-chapter-gpt-service.log 2>&1 &
+curl -s http://127.0.0.1:5184/api/config
 ```
 
-## Future Work Queue
+无章节正文的 OpenAI 兼容接口连通性测试：
 
-- Add UI surface for `/api/openai/test` so users can test model connectivity before creating an analysis task.
-- Consider virtualizing long chapter metadata tables for very large books.
-- Add explicit retry controls for failed import batches and failed analysis chapters.
-- Add encrypted export/import for backups if needed.
-- Add a small admin page for runtime diagnostics that never displays secrets or chapter text.
+```bash
+curl -s http://127.0.0.1:5184/api/openai/test
+```
+
+如果代理错误再次出现：
+
+- 如果 `OPENAI_API_BASE` 可直连，优先直连。
+- 除非网络必须走代理，否则保持 `OPENAI_PROXY_URL=` 为空。
+- 如果必须使用代理，长任务前先测试代理：
+
+```bash
+curl -I -m 10 -x http://127.0.0.1:7897 https://apitokenzz.xyz/v1/models
+```
+
+启动本机预览环境：
+
+```bash
+npm run preview:local
+```
+
+说明：
+
+- 该命令会先准备 `data-preview/`，再构建 `dist-preview/`，最后启动 `5194` 预览服务。
+- 如果 `data-preview/novel-chapters.sqlite` 已存在，脚本会提示覆盖风险；非交互式环境需要使用 `npm run preview:prepare-data -- --force`。
+- 预览服务可以随时重启，不影响线上 `5184` 正在运行的任务。
+
+## 15. 变更记录
+
+- 2026-05-19：
+  - 新增分析任务断点续跑：`POST /api/analyses/:id/resume-run`。
+  - 分析任务状态提升到前端全局托管，切换到章节库或 Prompt 库时分析任务继续后台运行并显示顶部进度入口。
+  - `GET /api/analyses/:id` 扩展返回逐章部分结果、失败章节、待续跑章节和 `canResume`。
+  - 分析任务运行时写入 `analysis_runs.status=running`，已完成逐章结果继续加密保存在 `analysis_chapters`。
+  - 断点续跑只复用原任务快照，跳过已完成且章节 HMAC 与 Prompt Hash 匹配的章节。
+
+- 2026-05-19：
+  - 新增本机预览环境：`5194` 端口、`data-preview/` 数据副本、`dist-preview/` 静态资源目录。
+  - 后端静态资源目录改为可通过 `STATIC_DIR` 配置，正式环境默认仍使用 `dist/`。
+  - 新增预览数据准备脚本，使用 SQLite 安全备份方式从正式数据库生成预览快照。
+  - 前端在预览环境顶部显示“本机预览 · 数据副本”。
+  - 新增 `preview:prepare-data`、`build:preview`、`start:preview`、`preview:local` 命令。
+
+- 2026-05-19：
+  - 重启服务后启用新版前端与后端任务找回接口。
+  - 新增 `GET /api/tasks`，用于当前 Node 进程内找回导入、L1、分析等内存任务。
+  - 章节库新增 L1 覆盖率卡片、章节表搜索、L1 状态列和 L1 状态筛选。
+  - 分析页章节选择收起态新增 L1 覆盖提示，Prompt 编辑区新增未保存草稿提示。
+  - Prompt 库新增未保存修改提示和切换保护。
+  - 当前运行中分析任务出现 `OpenAI 返回不是合法 JSON：Unexpected end of JSON input`，后续应优先实现 JSON 修复重试。
+  - 更新当前数据快照：`剑来` L1 索引为 482 完成、797 失败；`废材那又怎样` L1 索引为 63 完成。
+
+- 2026-05-18：
+  - 将本文档改为中文项目基线，仅保留必要技术字段英文。
+
+- 2026-05-18：
+  - 清空 `OPENAI_PROXY_URL`，OpenAI 兼容调用改为直连。
+  - 确认 `/api/openai/test` 返回 `200`。
+  - 记录当前数据快照和中长期路线图。
+  - 再次确认本文档为项目唯一真实信息源。
+
+- 2026-05-18：
+  - 移除新的 10 章窗口 L1 构建路径。
+  - 分析任务不再附加窗口 L1 上下文。
+  - 保留历史 `l1_window_indexes` 数据。
+  - L1 覆盖率聚焦逐章覆盖。
+
+- 2026-05-17：
+  - 增加 L1 逐章索引表和任务流程。
+  - 增加 Prompt 库页面。
+  - 拆分分析任务中心和章节库页面。
+  - 增加暂停/继续/取消和任务时间估算。
+
+- 2026-05-15 至 2026-05-16：
+  - 创建本地服务。
+  - 增加加密章节导入和分析流程。
+  - 增加 Dify 最小章节工作流集成。
+  - 增加 `5184` 端口局域网访问。

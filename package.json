@@ -10,6 +10,10 @@
     "start": "node server/index.js",
     "start:lan": "HOST=0.0.0.0 node server/index.js",
     "build": "vite build",
+    "preview:prepare-data": "node scripts/prepare-preview-data.js",
+    "build:preview": "vite build --outDir dist-preview",
+    "start:preview": "APP_ENV=preview APP_LABEL=本机预览 HOST=127.0.0.1 PORT=5194 DATA_DIR=./data-preview STATIC_DIR=./dist-preview node server/index.js",
+    "preview:local": "npm run preview:prepare-data && npm run build:preview && npm run start:preview",
     "lint": "eslint .",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node --test test/*.test.js"

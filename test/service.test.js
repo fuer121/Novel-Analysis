@@ -20,6 +20,7 @@ process.env.OPENAI_REQUEST_TIMEOUT_MS = "30000";
 const db = await import("../server/db.js");
 const dify = await import("../server/dify.js");
 const openai = await import("../server/openai.js");
+const tasks = await import("../server/tasks.js");
 const workflows = await import("../server/workflows.js");
 
 test.after(async () => {
@@ -128,6 +129,110 @@ test("OpenAI request uses Responses API with store false and no background mode"
   }
 });
 
+test("OpenAI text request uses Responses API with store false and no schema format", async () => {
+  const previousFetch = global.fetch;
+  let capturedBody;
+  global.fetch = async (_url, request) => {
+    capturedBody = JSON.parse(request.body);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_text",
+        output: [
+          {
+            content: [
+              {
+                type: "output_text",
+                text: "纯文本汇总"
+              }
+            ]
+          }
+        ]
+      })
+    };
+  };
+
+  try {
+    const result = await openai.callOpenAIText({
+      model: "gpt-5.5",
+      reasoningEffort: "medium",
+      instructions: "test",
+      input: [{ role: "user", content: [{ type: "input_text", text: "test" }] }]
+    });
+    assert.equal(result.value, "纯文本汇总");
+    assert.equal(capturedBody.store, false);
+    assert.equal(Object.hasOwn(capturedBody, "background"), false);
+    assert.equal(Object.hasOwn(capturedBody, "text"), false);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("task lifecycle supports pause, resume, and cancel states", async () => {
+  const task = tasks.createTask("test-lifecycle");
+  tasks.markTaskRunning(task);
+
+  const paused = tasks.pauseTask(task.id);
+  assert.equal(paused.status, "paused");
+
+  let resumed = false;
+  const waiting = tasks.waitIfPaused(task).then(() => {
+    resumed = true;
+  });
+  setTimeout(() => tasks.resumeTask(task.id), 30);
+  await waiting;
+  assert.equal(resumed, true);
+  assert.equal(task.status, "running");
+
+  const cancelled = tasks.cancelTask(task.id);
+  assert.equal(cancelled.status, "cancelled");
+  assert.throws(() => tasks.assertNotCancelled(task), /任务已取消/);
+});
+
+test("task estimate uses processed units and excludes paused time", async () => {
+  const task = tasks.createTask("test-estimate");
+  tasks.markTaskRunning(task, {
+    progress: {
+      total: 5,
+      completed: 0,
+      failed: 0,
+      skipped: 0,
+      current: "开始"
+    }
+  });
+
+  await new Promise((resolve) => setTimeout(resolve, 25));
+  tasks.updateTask(task, {
+    progress: {
+      ...task.progress,
+      completed: 1,
+      current: "完成 1"
+    }
+  });
+  const firstEstimate = tasks.publicTask(task).estimate;
+  assert.equal(firstEstimate.processed, 1);
+  assert.equal(firstEstimate.total, 5);
+  assert.equal(firstEstimate.remainingMs > 0, true);
+
+  tasks.pauseTask(task.id);
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  const pausedEstimate = tasks.publicTask(task).estimate;
+  tasks.resumeTask(task.id);
+
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  tasks.updateTask(task, {
+    progress: {
+      ...task.progress,
+      skipped: 2,
+      current: "跳过 2"
+    }
+  });
+  const afterSkipEstimate = tasks.publicTask(task).estimate;
+  assert.equal(afterSkipEstimate.processed, 3);
+  assert.equal(afterSkipEstimate.elapsedMs < pausedEstimate.elapsedMs + 45, true);
+  assert.equal(afterSkipEstimate.sampleSize > 0, true);
+});
+
 test("generates output JSON Schema from table fields", () => {
   const prompt = db.normalizePromptSettings({
     schema_mode: "fields",
@@ -144,6 +249,189 @@ test("generates output JSON Schema from table fields", () => {
   assert.equal(schema.properties.items.items.properties.role_name.type, "string");
   assert.equal(schema.properties.items.items.properties.chapter_refs.items.type, "integer");
   assert.deepEqual(schema.properties.items.items.required, ["role_name", "chapter_refs"]);
+});
+
+test("builds L1 window ranges and reports coverage with stale indexes", async () => {
+  assert.deepEqual(db.buildAlignedWindowRanges(1, 25, 10), [
+    { startChapter: 1, endChapter: 10 },
+    { startChapter: 11, endChapter: 20 },
+    { startChapter: 21, endChapter: 30 }
+  ]);
+  assert.deepEqual(db.buildAlignedWindowRanges(8, 12, 10), [
+    { startChapter: 1, endChapter: 10 },
+    { startChapter: 11, endChapter: 20 }
+  ]);
+
+  await db.saveEncryptedChapter({
+    bookId: "book-l1-coverage",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章正文"
+  });
+  await db.saveEncryptedChapter({
+    bookId: "book-l1-coverage",
+    chapterIndex: 2,
+    title: "第二章",
+    content: "第二章正文"
+  });
+  const chapterOne = db.getChapterMetadata("book-l1-coverage", 1);
+  const chapterTwo = db.getChapterMetadata("book-l1-coverage", 2);
+
+  db.saveL1ChapterIndex({
+    bookId: "book-l1-coverage",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapterOne.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l1-v1-chapter-window-10",
+    value: {
+      summary: "第一章索引",
+      keywords: ["第一章"],
+      entities: ["角色甲"],
+      key_events: ["事件甲"],
+      items_places_orgs: [],
+      open_questions: [],
+      confidence: 0.9
+    }
+  });
+  db.saveL1ChapterIndex({
+    bookId: "book-l1-coverage",
+    chapterIndex: 2,
+    status: "failed",
+    sourceHmac: chapterTwo.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l1-v1-chapter-window-10",
+    errorSummary: "测试失败"
+  });
+  db.saveL1WindowIndex({
+    bookId: "book-l1-coverage",
+    windowStart: 1,
+    windowEnd: 10,
+    status: "completed",
+    sourceHmac: `1:${chapterOne.content_hmac}`,
+    model: "gpt-5.5",
+    promptHash: "l1-v1-chapter-window-10",
+    value: {
+      summary: "窗口索引",
+      timeline: [],
+      entity_changes: [],
+      relationship_changes: [],
+      foreshadowing: [],
+      covered_chapters: [1],
+      missing_chapters: [2],
+      confidence: 0.8
+    }
+  });
+
+  const coverage = db.getL1Coverage({
+    bookId: "book-l1-coverage",
+    startChapter: 1,
+    endChapter: 2,
+    model: "gpt-5.5",
+    promptHash: "l1-v1-chapter-window-10",
+    windowSize: 10
+  });
+  assert.equal(coverage.chapters.completed, 1);
+  assert.equal(coverage.chapters.failed, 1);
+  assert.equal(coverage.windows.completed, 1);
+
+  await db.saveEncryptedChapter({
+    bookId: "book-l1-coverage",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章正文-修订"
+  });
+  const staleCoverage = db.getL1Coverage({
+    bookId: "book-l1-coverage",
+    startChapter: 1,
+    endChapter: 2,
+    model: "gpt-5.5",
+    promptHash: "l1-v1-chapter-window-10",
+    windowSize: 10
+  });
+  assert.equal(staleCoverage.chapters.outdated, 1);
+  assert.equal(staleCoverage.windows.outdated, 1);
+});
+
+test("builds chapter-only L1 indexes, skips fresh indexes, and keeps OpenAI requests ZDR-shaped", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-l1-task",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章正文"
+  });
+  await db.saveEncryptedChapter({
+    bookId: "book-l1-task",
+    chapterIndex: 2,
+    title: "第二章",
+    content: "第二章正文"
+  });
+
+  const previousFetch = global.fetch;
+  let responseCalls = 0;
+  const capturedBodies = [];
+
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] })
+      };
+    }
+
+    if (!String(url).includes("api.openai.com/v1/responses")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+
+    responseCalls += 1;
+    const body = JSON.parse(request.body);
+    capturedBodies.push(body);
+    const outputValue = {
+      summary: "章节摘要",
+      keywords: ["关键词"],
+      entities: ["角色"],
+      key_events: ["事件"],
+      items_places_orgs: ["地点"],
+      open_questions: ["伏笔"],
+      confidence: 0.9
+    };
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_l1_${responseCalls}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify(outputValue) }] }]
+      })
+    };
+  };
+
+  try {
+    const task = workflows.startL1IndexTask({
+      book_id: "book-l1-task",
+      start_chapter: 1,
+      end_chapter: 2
+    });
+    await waitForTask(task);
+    assert.equal(task.status, "completed");
+    assert.equal(responseCalls, 2);
+    assert.equal(db.getL1ChapterIndex("book-l1-task", 1).summary, "章节摘要");
+    assert.equal(db.getL1WindowIndex("book-l1-task", 1, 10), null);
+    assert.equal(capturedBodies.every((body) => body.store === false), true);
+    assert.equal(capturedBodies.every((body) => !Object.hasOwn(body, "background")), true);
+    assert.equal(capturedBodies.every((body) => body.text?.format?.type === "json_schema"), true);
+    assert.equal(capturedBodies.every((body) => body.text?.format?.name === "l1_chapter_index"), true);
+
+    const skipped = workflows.startL1IndexTask({
+      book_id: "book-l1-task",
+      start_chapter: 1,
+      end_chapter: 2
+    });
+    await waitForTask(skipped);
+    assert.equal(skipped.progress.skipped, 2);
+    assert.equal(responseCalls, 2);
+  } finally {
+    global.fetch = previousFetch;
+  }
 });
 
 test("creates, edits, lists, and deletes prompt groups with categories", () => {
@@ -206,7 +494,7 @@ test("imports once, skips stored chapters, and analyzes from encrypted local sto
     if (String(url).includes("api.openai.com/v1/responses")) {
       openaiCalls += 1;
       const body = JSON.parse(request.body);
-      const isSummary = body.text.format.name === "final_result";
+      const isSummary = !body.text?.format;
       const outputValue = isSummary
         ? { title: "汇总", summary: "全书摘要", items: [], failed_chapters: [] }
         : { chapter_index: openaiCalls, chapter_title: `第${openaiCalls}章`, summary: "章节摘要", key_points: [], evidence_notes: [] };
@@ -293,7 +581,7 @@ test("analyzes selected non-contiguous chapters, preserves prompt snapshot, and 
       throw new Error(`Unexpected fetch URL: ${url}`);
     }
     const body = JSON.parse(request.body);
-    const isSummary = body.text.format.name === "final_result";
+    const isSummary = !body.text?.format;
     if (isSummary) {
       return {
         ok: true,
@@ -357,6 +645,387 @@ test("analyzes selected non-contiguous chapters, preserves prompt snapshot, and 
 
     assert.equal(db.deleteAnalysisRun(analysis.id).deleted, true);
     assert.equal(db.getAnalysisRun(analysis.id), undefined);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("analysis keeps default input without L1 and appends L1 context only when enabled", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-l1-analysis",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章正文"
+  });
+  const chapter = db.getChapterMetadata("book-l1-analysis", 1);
+  db.saveL1ChapterIndex({
+    bookId: "book-l1-analysis",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l1-v1-chapter-window-10",
+    value: {
+      summary: "L1 章节摘要",
+      keywords: ["L1关键词"],
+      entities: ["L1角色"],
+      key_events: ["L1事件"],
+      items_places_orgs: ["L1地点"],
+      open_questions: ["L1伏笔"],
+      confidence: 0.9
+    }
+  });
+  db.saveL1WindowIndex({
+    bookId: "book-l1-analysis",
+    windowStart: 1,
+    windowEnd: 10,
+    status: "completed",
+    sourceHmac: `1:${chapter.content_hmac}`,
+    model: "gpt-5.5",
+    promptHash: "l1-v1-chapter-window-10",
+    value: {
+      summary: "L1 窗口摘要",
+      timeline: ["L1时间线"],
+      entity_changes: [],
+      relationship_changes: [],
+      foreshadowing: ["L1伏笔线索"],
+      covered_chapters: [1],
+      missing_chapters: [],
+      confidence: 0.8
+    }
+  });
+
+  const previousFetch = global.fetch;
+  const chapterPrompts = [];
+  const summaryPrompts = [];
+
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] })
+      };
+    }
+
+    if (!String(url).includes("api.openai.com/v1/responses")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    const body = JSON.parse(request.body);
+    const text = body.input[0].content[0].text;
+    const isSummary = !body.text?.format;
+    if (isSummary) {
+      summaryPrompts.push(text);
+      return {
+        ok: true,
+        json: async () => ({
+          id: "resp_summary_l1",
+          output: [{ content: [{ type: "output_text", text: JSON.stringify({ title: "汇总", summary: "汇总摘要", items: [], failed_chapters: [] }) }] }]
+        })
+      };
+    }
+
+    chapterPrompts.push(text);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_chapter_l1",
+        output: [{
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              chapter_index: 1,
+              chapter_title: "第一章",
+              summary: "章节摘要",
+              key_points: [],
+              evidence_notes: []
+            })
+          }]
+        }]
+      })
+    };
+  };
+
+  try {
+    const withoutL1 = workflows.startAnalysisTask({
+      book_id: "book-l1-analysis",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(withoutL1);
+    assert.equal(chapterPrompts[0].includes("可选 L1 章节上下文 JSON"), false);
+    assert.equal(summaryPrompts[0].includes("可选 L1 窗口上下文 JSON"), false);
+
+    const withL1 = workflows.startAnalysisTask({
+      book_id: "book-l1-analysis",
+      start_chapter: 1,
+      end_chapter: 1,
+      use_l1_context: true
+    });
+    await waitForTask(withL1);
+    assert.equal(chapterPrompts[1].includes("可选 L1 章节上下文 JSON"), true);
+    assert.equal(chapterPrompts[1].includes("L1 章节摘要"), true);
+    assert.equal(summaryPrompts[1].includes("可选 L1 窗口上下文 JSON"), false);
+    assert.equal(summaryPrompts[1].includes("L1 窗口摘要"), false);
+    const result = await workflows.publicAnalysisRunWithResult(withL1.id);
+    assert.equal(result.prompt.use_l1_context, true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("stores plain text final analysis result when summary is not JSON", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-text-result",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章正文"
+  });
+
+  const previousFetch = global.fetch;
+
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] })
+      };
+    }
+
+    if (!String(url).includes("api.openai.com/v1/responses")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    const body = JSON.parse(request.body);
+    const isSummary = !body.text?.format;
+    const outputValue = isSummary
+      ? "这是纯文本最终汇总"
+      : JSON.stringify({
+        chapter_index: 1,
+        chapter_title: "第一章",
+        summary: "章节摘要",
+        key_points: [],
+        evidence_notes: []
+      });
+    return {
+      ok: true,
+      json: async () => ({
+        id: isSummary ? "resp_text_summary" : "resp_chapter",
+        output: [{ content: [{ type: "output_text", text: outputValue }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      name: "纯文本结果",
+      book_id: "book-text-result",
+      start_chapter: 1,
+      end_chapter: 1,
+      prompt: {
+        summary_prompt: "请直接输出一段中文结论，不要 JSON。"
+      }
+    });
+    await waitForTask(analysis);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.finalResult, "这是纯文本最终汇总");
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("exposes partial analysis results and resumes by skipping completed chapters", async () => {
+  for (const chapterIndex of [1, 2, 3]) {
+    await db.saveEncryptedChapter({
+      bookId: "book-resume",
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章正文`
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const requestedChapters = [];
+  let failChapterTwo = true;
+  let summaryCalls = 0;
+
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] })
+      };
+    }
+
+    if (!String(url).includes("api.openai.com/v1/responses")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    const body = JSON.parse(request.body);
+    const isSummary = !body.text?.format;
+    if (isSummary) {
+      summaryCalls += 1;
+      if (failChapterTwo) {
+        throw new Error("summary interrupted");
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          id: `resp_resume_summary_${summaryCalls}`,
+          output: [{ content: [{ type: "output_text", text: JSON.stringify({ title: "续跑汇总", summary: "完成", items: [], failed_chapters: [] }) }] }]
+        })
+      };
+    }
+
+    const text = body.input[0].content[0].text;
+    const chapterIndex = Number(text.match(/章节编号：(\d+)/)?.[1]);
+    requestedChapters.push(chapterIndex);
+    if (chapterIndex === 2 && failChapterTwo) {
+      return {
+        ok: true,
+        json: async () => ({
+          id: "resp_bad_json",
+          output: [{ content: [{ type: "output_text", text: "" }] }]
+        })
+      };
+    }
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_resume_${chapterIndex}`,
+        output: [{
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              chapter_index: chapterIndex,
+              chapter_title: `第${chapterIndex}章`,
+              summary: `章节${chapterIndex}摘要`,
+              key_points: [],
+              evidence_notes: []
+            })
+          }]
+        }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      name: "断点续跑",
+      book_id: "book-resume",
+      start_chapter: 1,
+      end_chapter: 3
+    });
+    await assert.rejects(() => waitForTask(analysis), /summary interrupted/);
+
+    assert.equal(analysis.status, "failed");
+    assert.deepEqual(requestedChapters, [1, 2, 3]);
+    let partial = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(partial.finalResult, null);
+    assert.equal(partial.chapterResults.length, 2);
+    assert.deepEqual(partial.failedChapterIndexes, [2]);
+    assert.equal(partial.canResume, true);
+
+    failChapterTwo = false;
+    const resumed = workflows.resumeAnalysisRunTask(analysis.id);
+    await waitForTask(resumed);
+
+    assert.equal(resumed.status, "completed");
+    assert.deepEqual(requestedChapters, [1, 2, 3, 2]);
+    assert.equal(resumed.progress.skipped, 2);
+    partial = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(partial.finalResult.summary, "完成");
+    assert.equal(partial.chapterResults.length, 3);
+    assert.equal(partial.canResume, false);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("resumes summary failure without rerunning completed chapters", async () => {
+  for (const chapterIndex of [1, 2]) {
+    await db.saveEncryptedChapter({
+      bookId: "book-summary-resume",
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章正文`
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const requestedChapters = [];
+  let failSummary = true;
+
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ data: [] })
+      };
+    }
+
+    if (!String(url).includes("api.openai.com/v1/responses")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    const body = JSON.parse(request.body);
+    const isSummary = !body.text?.format;
+    if (isSummary) {
+      if (failSummary) {
+        throw new Error("summary network fail");
+      }
+      return {
+        ok: true,
+        json: async () => ({
+          id: "resp_summary_resume_ok",
+          output: [{ content: [{ type: "output_text", text: JSON.stringify({ title: "汇总", summary: "续跑成功", items: [], failed_chapters: [] }) }] }]
+        })
+      };
+    }
+
+    const text = body.input[0].content[0].text;
+    const chapterIndex = Number(text.match(/章节编号：(\d+)/)?.[1]);
+    requestedChapters.push(chapterIndex);
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_summary_resume_${chapterIndex}`,
+        output: [{
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              chapter_index: chapterIndex,
+              chapter_title: `第${chapterIndex}章`,
+              summary: `章节${chapterIndex}摘要`,
+              key_points: [],
+              evidence_notes: []
+            })
+          }]
+        }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      name: "汇总失败续跑",
+      book_id: "book-summary-resume",
+      start_chapter: 1,
+      end_chapter: 2
+    });
+    await assert.rejects(() => waitForTask(analysis), /summary network fail/);
+    const partial = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(partial.chapterResults.length, 2);
+    assert.equal(partial.finalResult, null);
+
+    failSummary = false;
+    const resumed = workflows.resumeAnalysisRunTask(analysis.id);
+    await waitForTask(resumed);
+
+    assert.deepEqual(requestedChapters, [1, 2]);
+    assert.equal(resumed.progress.skipped, 2);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.finalResult.summary, "续跑成功");
   } finally {
     global.fetch = previousFetch;
   }

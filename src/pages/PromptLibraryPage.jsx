@@ -24,6 +24,10 @@ export function PromptLibraryPage({ books, promptGroups, onPromptGroupsChanged, 
   const [draft, setDraft] = useState(() => promptGroups[0] || emptyDraft);
   const [categoryFilter, setCategoryFilter] = useState("全部");
   const [busy, setBusy] = useState(false);
+  const dirty = useMemo(
+    () => !samePromptGroup(draft, promptGroups.find((group) => group.id === selectedId) || emptyDraft),
+    [draft, promptGroups, selectedId]
+  );
 
   const categories = useMemo(() => {
     const values = new Set(["全部", "通用"]);
@@ -39,11 +43,13 @@ export function PromptLibraryPage({ books, promptGroups, onPromptGroupsChanged, 
   ), [categoryFilter, promptGroups]);
 
   function selectGroup(group) {
+    if (dirty && !window.confirm("当前 Prompt 组有未保存修改，确定切换吗？")) return;
     setSelectedId(group.id);
     setDraft(group);
   }
 
   function startCreate() {
+    if (dirty && !window.confirm("当前 Prompt 组有未保存修改，确定新建吗？")) return;
     setSelectedId("");
     setDraft({
       ...emptyDraft,
@@ -137,6 +143,9 @@ export function PromptLibraryPage({ books, promptGroups, onPromptGroupsChanged, 
           action={<PromptMeta draft={draft} />}
         >
           <div className="prompt-editor">
+            <div className={dirty ? "draft-banner active" : "draft-banner"}>
+              {dirty ? "有未保存修改。保存后才会写入 Prompt 库。" : "当前 Prompt 组已保存。"}
+            </div>
             <div className="form-grid prompt-group-form-grid">
               <label>
                 <span>Prompt 组名称</span>
@@ -223,4 +232,18 @@ function PromptMeta({ draft }) {
       <span>{formatTime(draft.updated_at)}</span>
     </div>
   );
+}
+
+function samePromptGroup(left, right) {
+  return JSON.stringify({
+    name: left?.name || "",
+    category: left?.category || "",
+    chapter_prompt: left?.chapter_prompt || "",
+    summary_prompt: left?.summary_prompt || ""
+  }) === JSON.stringify({
+    name: right?.name || "",
+    category: right?.category || "",
+    chapter_prompt: right?.chapter_prompt || "",
+    summary_prompt: right?.summary_prompt || ""
+  });
 }

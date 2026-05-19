@@ -108,6 +108,50 @@ db.exec(`
     PRIMARY KEY (analysis_id, chapter_index),
     FOREIGN KEY (analysis_id) REFERENCES analysis_runs(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS l1_chapter_indexes (
+    book_id TEXT NOT NULL,
+    chapter_index INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    source_hmac TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    prompt_hash TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '[]',
+    entities TEXT NOT NULL DEFAULT '[]',
+    key_events TEXT NOT NULL DEFAULT '[]',
+    items_places_orgs TEXT NOT NULL DEFAULT '[]',
+    open_questions TEXT NOT NULL DEFAULT '[]',
+    confidence REAL NOT NULL DEFAULT 0,
+    error_summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (book_id, chapter_index),
+    FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS l1_window_indexes (
+    book_id TEXT NOT NULL,
+    window_start INTEGER NOT NULL,
+    window_end INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    source_hmac TEXT NOT NULL DEFAULT '',
+    model TEXT NOT NULL DEFAULT '',
+    prompt_hash TEXT NOT NULL DEFAULT '',
+    summary TEXT NOT NULL DEFAULT '',
+    timeline TEXT NOT NULL DEFAULT '[]',
+    entity_changes TEXT NOT NULL DEFAULT '[]',
+    relationship_changes TEXT NOT NULL DEFAULT '[]',
+    foreshadowing TEXT NOT NULL DEFAULT '[]',
+    covered_chapters TEXT NOT NULL DEFAULT '[]',
+    missing_chapters TEXT NOT NULL DEFAULT '[]',
+    confidence REAL NOT NULL DEFAULT 0,
+    error_summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (book_id, window_start, window_end),
+    FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
+  );
 `);
 
 migrateSchema();
@@ -460,6 +504,241 @@ export function deleteAnalysisRun(id) {
   return { deleted: result.changes > 0, id: String(id || "") };
 }
 
+export function saveL1ChapterIndex({ bookId, chapterIndex, status, sourceHmac, model, promptHash, value = {}, errorSummary = "" }) {
+  const id = normalizeBookId(bookId);
+  const index = normalizeChapterIndex(chapterIndex);
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO l1_chapter_indexes (
+      book_id, chapter_index, status, source_hmac, model, prompt_hash,
+      summary, keywords, entities, key_events, items_places_orgs, open_questions,
+      confidence, error_summary, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(book_id, chapter_index) DO UPDATE SET
+      status = excluded.status,
+      source_hmac = excluded.source_hmac,
+      model = excluded.model,
+      prompt_hash = excluded.prompt_hash,
+      summary = excluded.summary,
+      keywords = excluded.keywords,
+      entities = excluded.entities,
+      key_events = excluded.key_events,
+      items_places_orgs = excluded.items_places_orgs,
+      open_questions = excluded.open_questions,
+      confidence = excluded.confidence,
+      error_summary = excluded.error_summary,
+      updated_at = excluded.updated_at
+  `).run(
+    id,
+    index,
+    String(status || "pending"),
+    String(sourceHmac || ""),
+    String(model || ""),
+    String(promptHash || ""),
+    String(value.summary || ""),
+    stringifyJsonArray(value.keywords),
+    stringifyJsonArray(value.entities),
+    stringifyJsonArray(value.key_events),
+    stringifyJsonArray(value.items_places_orgs),
+    stringifyJsonArray(value.open_questions),
+    normalizeConfidence(value.confidence),
+    String(errorSummary || "").slice(0, 1000),
+    now,
+    now
+  );
+  return getL1ChapterIndex(id, index);
+}
+
+export function getL1ChapterIndex(bookId, chapterIndex) {
+  const row = db.prepare(`
+    SELECT *
+    FROM l1_chapter_indexes
+    WHERE book_id = ? AND chapter_index = ?
+  `).get(normalizeBookId(bookId), normalizeChapterIndex(chapterIndex));
+  return publicL1ChapterIndex(row);
+}
+
+export function listL1ChapterIndexes(bookId, startChapter, endChapter) {
+  const range = normalizeRange(startChapter, endChapter);
+  return db.prepare(`
+    SELECT *
+    FROM l1_chapter_indexes
+    WHERE book_id = ? AND chapter_index BETWEEN ? AND ?
+    ORDER BY chapter_index ASC
+  `).all(normalizeBookId(bookId), range.startChapter, range.endChapter).map(publicL1ChapterIndex);
+}
+
+export function saveL1WindowIndex({ bookId, windowStart, windowEnd, status, sourceHmac, model, promptHash, value = {}, errorSummary = "" }) {
+  const id = normalizeBookId(bookId);
+  const start = normalizeChapterIndex(windowStart);
+  const end = normalizeChapterIndex(windowEnd);
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO l1_window_indexes (
+      book_id, window_start, window_end, status, source_hmac, model, prompt_hash,
+      summary, timeline, entity_changes, relationship_changes, foreshadowing,
+      covered_chapters, missing_chapters, confidence, error_summary, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(book_id, window_start, window_end) DO UPDATE SET
+      status = excluded.status,
+      source_hmac = excluded.source_hmac,
+      model = excluded.model,
+      prompt_hash = excluded.prompt_hash,
+      summary = excluded.summary,
+      timeline = excluded.timeline,
+      entity_changes = excluded.entity_changes,
+      relationship_changes = excluded.relationship_changes,
+      foreshadowing = excluded.foreshadowing,
+      covered_chapters = excluded.covered_chapters,
+      missing_chapters = excluded.missing_chapters,
+      confidence = excluded.confidence,
+      error_summary = excluded.error_summary,
+      updated_at = excluded.updated_at
+  `).run(
+    id,
+    start,
+    end,
+    String(status || "pending"),
+    String(sourceHmac || ""),
+    String(model || ""),
+    String(promptHash || ""),
+    String(value.summary || ""),
+    stringifyJsonArray(value.timeline),
+    stringifyJsonArray(value.entity_changes),
+    stringifyJsonArray(value.relationship_changes),
+    stringifyJsonArray(value.foreshadowing),
+    stringifyJsonArray(value.covered_chapters),
+    stringifyJsonArray(value.missing_chapters),
+    normalizeConfidence(value.confidence),
+    String(errorSummary || "").slice(0, 1000),
+    now,
+    now
+  );
+  return getL1WindowIndex(id, start, end);
+}
+
+export function getL1WindowIndex(bookId, windowStart, windowEnd) {
+  const row = db.prepare(`
+    SELECT *
+    FROM l1_window_indexes
+    WHERE book_id = ? AND window_start = ? AND window_end = ?
+  `).get(normalizeBookId(bookId), normalizeChapterIndex(windowStart), normalizeChapterIndex(windowEnd));
+  return publicL1WindowIndex(row);
+}
+
+export function listL1WindowIndexes(bookId, startChapter, endChapter) {
+  const range = normalizeRange(startChapter, endChapter);
+  return db.prepare(`
+    SELECT *
+    FROM l1_window_indexes
+    WHERE book_id = ?
+      AND window_end >= ?
+      AND window_start <= ?
+    ORDER BY window_start ASC
+  `).all(normalizeBookId(bookId), range.startChapter, range.endChapter).map(publicL1WindowIndex);
+}
+
+export function getL1Coverage({ bookId, startChapter, endChapter, model = "", promptHash = "", windowSize = 10, includeWindows = true }) {
+  const id = normalizeBookId(bookId);
+  const range = normalizeRange(startChapter, endChapter);
+  const chapters = listChapterMetadata(id)
+    .filter((chapter) => chapter.chapter_index >= range.startChapter && chapter.chapter_index <= range.endChapter);
+  const indexes = new Map(listL1ChapterIndexes(id, range.startChapter, range.endChapter)
+    .map((entry) => [entry.chapter_index, entry]));
+
+  const chapterStats = {
+    total: chapters.length,
+    completed: 0,
+    failed: 0,
+    missing: 0,
+    outdated: 0
+  };
+
+  for (const chapter of chapters) {
+    const index = indexes.get(chapter.chapter_index);
+    if (!index) {
+      chapterStats.missing += 1;
+      continue;
+    }
+    const outdated = index.source_hmac !== chapter.content_hmac
+      || (model && index.model !== model)
+      || (promptHash && index.prompt_hash !== promptHash);
+    if (outdated) {
+      chapterStats.outdated += 1;
+    } else if (index.status === "completed") {
+      chapterStats.completed += 1;
+    } else if (index.status === "failed") {
+      chapterStats.failed += 1;
+    } else {
+      chapterStats.missing += 1;
+    }
+  }
+
+  const windowStats = {
+    total: 0,
+    completed: 0,
+    failed: 0,
+    missing: 0,
+    outdated: 0
+  };
+  if (includeWindows) {
+    const windows = listL1WindowIndexes(id, range.startChapter, range.endChapter);
+    const expectedWindows = buildAlignedWindowRanges(range.startChapter, range.endChapter, windowSize);
+    const windowsByKey = new Map(windows.map((window) => [`${window.window_start}-${window.window_end}`, window]));
+    windowStats.total = expectedWindows.length;
+    for (const window of expectedWindows) {
+      const index = windowsByKey.get(`${window.startChapter}-${window.endChapter}`);
+      if (!index) {
+        windowStats.missing += 1;
+        continue;
+      }
+      const expectedSourceHmac = l1WindowSourceHmac(id, window.startChapter, window.endChapter, model, promptHash);
+      const outdated = index.source_hmac !== expectedSourceHmac
+        || (model && index.model !== model)
+        || (promptHash && index.prompt_hash !== promptHash);
+      if (outdated) {
+        windowStats.outdated += 1;
+      } else if (index.status === "completed") {
+        windowStats.completed += 1;
+      } else if (index.status === "failed") {
+        windowStats.failed += 1;
+      } else {
+        windowStats.missing += 1;
+      }
+    }
+  }
+
+  return {
+    book_id: id,
+    start_chapter: range.startChapter,
+    end_chapter: range.endChapter,
+    chapters: chapterStats,
+    windows: windowStats
+  };
+}
+
+export function l1WindowSourceHmac(bookId, windowStart, windowEnd, model = "", promptHash = "") {
+  const id = normalizeBookId(bookId);
+  const range = normalizeRange(windowStart, windowEnd);
+  const metadata = new Map(
+    listChapterMetadata(id)
+      .filter((chapter) => chapter.chapter_index >= range.startChapter && chapter.chapter_index <= range.endChapter)
+      .map((chapter) => [chapter.chapter_index, chapter])
+  );
+  return listL1ChapterIndexes(id, range.startChapter, range.endChapter)
+    .filter((index) => {
+      const chapter = metadata.get(index.chapter_index);
+      if (!chapter || index.status !== "completed" || index.source_hmac !== chapter.content_hmac) return false;
+      if (model && index.model !== model) return false;
+      if (promptHash && index.prompt_hash !== promptHash) return false;
+      return true;
+    })
+    .map((index) => `${index.chapter_index}:${index.source_hmac}`)
+    .join("|");
+}
+
 export async function saveAnalysisChapter({ analysisId, chapterIndex, status, contentHmac, promptHash, result, errorSummary = "" }) {
   const encrypted = result === undefined ? null : await encryptText(JSON.stringify(result), analysisChapterAad(analysisId, chapterIndex));
   db.prepare(`
@@ -495,11 +774,35 @@ export async function saveAnalysisChapter({ analysisId, chapterIndex, status, co
 
 export function listAnalysisChapterMetadata(analysisId) {
   return db.prepare(`
-    SELECT analysis_id, chapter_index, status, content_hmac, prompt_hash, error_summary, updated_at
+    SELECT
+      analysis_id,
+      chapter_index,
+      status,
+      content_hmac,
+      prompt_hash,
+      error_summary,
+      updated_at,
+      CASE WHEN ciphertext IS NOT NULL AND ciphertext != '' THEN 1 ELSE 0 END AS has_result
     FROM analysis_chapters
     WHERE analysis_id = ?
     ORDER BY chapter_index ASC
   `).all(String(analysisId || ""));
+}
+
+export function getAnalysisChapterMetadata(analysisId, chapterIndex) {
+  return db.prepare(`
+    SELECT
+      analysis_id,
+      chapter_index,
+      status,
+      content_hmac,
+      prompt_hash,
+      error_summary,
+      updated_at,
+      CASE WHEN ciphertext IS NOT NULL AND ciphertext != '' THEN 1 ELSE 0 END AS has_result
+    FROM analysis_chapters
+    WHERE analysis_id = ? AND chapter_index = ?
+  `).get(String(analysisId || ""), normalizeChapterIndex(chapterIndex));
 }
 
 export async function decryptAnalysisChapterResult(analysisId, chapterIndex) {
@@ -510,6 +813,23 @@ export async function decryptAnalysisChapterResult(analysisId, chapterIndex) {
   `).get(String(analysisId || ""), normalizeChapterIndex(chapterIndex));
   if (!row?.ciphertext) return null;
   return JSON.parse(await decryptText(row, analysisChapterAad(analysisId, chapterIndex)));
+}
+
+export async function decryptCompletedAnalysisChapterResults(analysisId) {
+  const rows = db.prepare(`
+    SELECT chapter_index, ciphertext, iv, tag
+    FROM analysis_chapters
+    WHERE analysis_id = ? AND status = 'completed' AND ciphertext IS NOT NULL AND ciphertext != ''
+    ORDER BY chapter_index ASC
+  `).all(String(analysisId || ""));
+  const results = [];
+  for (const row of rows) {
+    results.push({
+      chapter_index: row.chapter_index,
+      result: JSON.parse(await decryptText(row, analysisChapterAad(analysisId, row.chapter_index)))
+    });
+  }
+  return results;
 }
 
 export async function saveFinalAnalysisResult(analysisId, result) {
@@ -666,6 +986,68 @@ function normalizeAnalysisName(name, bookId, startChapter, endChapter) {
   const value = String(name || "").trim();
   if (value) return value.slice(0, 120);
   return `${normalizeBookId(bookId)} ${normalizeChapterIndex(startChapter)}-${normalizeChapterIndex(endChapter)}`;
+}
+
+function publicL1ChapterIndex(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    keywords: parseJsonArray(row.keywords),
+    entities: parseJsonArray(row.entities),
+    key_events: parseJsonArray(row.key_events),
+    items_places_orgs: parseJsonArray(row.items_places_orgs),
+    open_questions: parseJsonArray(row.open_questions),
+    confidence: Number(row.confidence || 0)
+  };
+}
+
+function publicL1WindowIndex(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    timeline: parseJsonArray(row.timeline),
+    entity_changes: parseJsonArray(row.entity_changes),
+    relationship_changes: parseJsonArray(row.relationship_changes),
+    foreshadowing: parseJsonArray(row.foreshadowing),
+    covered_chapters: parseJsonArray(row.covered_chapters),
+    missing_chapters: parseJsonArray(row.missing_chapters),
+    confidence: Number(row.confidence || 0)
+  };
+}
+
+function stringifyJsonArray(value) {
+  return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
+function parseJsonArray(value) {
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeConfidence(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  return Math.max(0, Math.min(1, number));
+}
+
+export function buildAlignedWindowRanges(startChapter, endChapter, windowSize = 10) {
+  const range = normalizeRange(startChapter, endChapter);
+  const size = Math.max(1, Math.min(50, Number.parseInt(windowSize, 10) || 10));
+  const windows = [];
+  const firstStart = Math.floor((range.startChapter - 1) / size) * size + 1;
+  for (let start = firstStart; start <= range.endChapter; start += size) {
+    const end = start + size - 1;
+    if (end < range.startChapter) continue;
+    windows.push({
+      startChapter: start,
+      endChapter: end
+    });
+  }
+  return windows;
 }
 
 function chapterAad(bookId, chapterIndex) {

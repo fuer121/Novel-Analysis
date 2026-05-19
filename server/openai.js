@@ -46,6 +46,33 @@ export async function callOpenAIJson({ model, reasoningEffort, instructions, inp
   }
 }
 
+export async function callOpenAIText({ model, reasoningEffort, instructions, input }) {
+  requireOpenAIConfig();
+  const body = {
+    model: model || config.openai.model,
+    store: false,
+    reasoning: {
+      effort: reasoningEffort || "medium"
+    },
+    instructions,
+    input
+  };
+
+  const response = await postOpenAIJson("responses", body);
+
+  if (!response.ok) {
+    const error = new Error(sanitizeText(response.data?.error?.message || response.data?.message || `OpenAI 调用失败：HTTP ${response.status}`));
+    error.status = response.status;
+    error.details = sanitizeDetails(response.data);
+    throw error;
+  }
+
+  return {
+    value: extractResponseText(response.data),
+    responseId: response.data?.id || null
+  };
+}
+
 async function postOpenAIJson(path, body) {
   const endpoint = `${config.openai.base}/${path.replace(/^\/+/, "")}`;
   const headers = {
@@ -357,6 +384,50 @@ export function buildSummaryInput({ chapterResults, failedChapters, userPrompt }
   ];
 }
 
+export function buildL1ChapterInput({ chapterIndex, title, content }) {
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            "请为当前小说章节建立可复用 L1 基础索引。",
+            "要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；实体和事件尽量短句化，保留可用于后续分析的事实。",
+            "",
+            `章节编号：${chapterIndex}`,
+            `章节标题：${title || ""}`,
+            "",
+            "章节原文：",
+            content
+          ].join("\n")
+        }
+      ]
+    }
+  ];
+}
+
+export function buildL1WindowInput({ windowStart, windowEnd, chapterIndexes }) {
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            "请基于以下逐章 L1 索引，生成 10 章窗口级基础索引。",
+            "要求：不要补充原文之外的信息；聚合时间线、实体变化、关系变化和伏笔线索；不要输出 Markdown。",
+            "",
+            `窗口范围：${windowStart}-${windowEnd}`,
+            "逐章 L1 索引 JSON：",
+            JSON.stringify(chapterIndexes)
+          ].join("\n")
+        }
+      ]
+    }
+  ];
+}
+
 export function chapterResultSchema() {
   return {
     type: "object",
@@ -375,6 +446,96 @@ export function chapterResultSchema() {
       }
     },
     required: ["chapter_index", "chapter_title", "summary", "key_points", "evidence_notes"]
+  };
+}
+
+export function l1ChapterIndexSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string" },
+      keywords: {
+        type: "array",
+        items: { type: "string" }
+      },
+      entities: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string" },
+            type: { type: "string" },
+            aliases: {
+              type: "array",
+              items: { type: "string" }
+            },
+            note: { type: "string" }
+          },
+          required: ["name", "type", "aliases", "note"]
+        }
+      },
+      key_events: {
+        type: "array",
+        items: { type: "string" }
+      },
+      items_places_orgs: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          properties: {
+            name: { type: "string" },
+            type: { type: "string" },
+            note: { type: "string" }
+          },
+          required: ["name", "type", "note"]
+        }
+      },
+      open_questions: {
+        type: "array",
+        items: { type: "string" }
+      },
+      confidence: { type: "number" }
+    },
+    required: ["summary", "keywords", "entities", "key_events", "items_places_orgs", "open_questions", "confidence"]
+  };
+}
+
+export function l1WindowIndexSchema() {
+  return {
+    type: "object",
+    additionalProperties: false,
+    properties: {
+      summary: { type: "string" },
+      timeline: {
+        type: "array",
+        items: { type: "string" }
+      },
+      entity_changes: {
+        type: "array",
+        items: { type: "string" }
+      },
+      relationship_changes: {
+        type: "array",
+        items: { type: "string" }
+      },
+      foreshadowing: {
+        type: "array",
+        items: { type: "string" }
+      },
+      covered_chapters: {
+        type: "array",
+        items: { type: "integer" }
+      },
+      missing_chapters: {
+        type: "array",
+        items: { type: "integer" }
+      },
+      confidence: { type: "number" }
+    },
+    required: ["summary", "timeline", "entity_changes", "relationship_changes", "foreshadowing", "covered_chapters", "missing_chapters", "confidence"]
   };
 }
 

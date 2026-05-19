@@ -7,6 +7,7 @@
 3. 前端只显示章节元数据，不显示正文。
 4. GPT 分析任务按章节临时解密，调用 OpenAI Responses API。
 5. 逐章结果和最终结果再次加密写入 SQLite。
+6. L1 基础索引按当前内测方案明文写入 SQLite，但仍视为敏感小说派生内容。
 
 ## 不做的事
 
@@ -15,6 +16,7 @@
 - 不创建 Vector Stores。
 - 不使用 Assistants、Threads、Batch、background mode。
 - 不在 API 错误详情中回显 prompt body 或 Dify raw output。
+- 不在日志中打印 L1 索引内容或 L1 OpenAI 请求体。
 
 ## 密钥
 

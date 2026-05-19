@@ -42,6 +42,7 @@ export function followTask(url, setTask, onTerminal) {
   source.addEventListener("progress", handle);
   source.addEventListener("warning", handle);
   source.addEventListener("running", handle);
+  source.addEventListener("paused", handle);
   source.addEventListener("completed", handle);
   source.addEventListener("failed", handle);
   source.addEventListener("cancelled", handle);

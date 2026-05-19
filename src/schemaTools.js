@@ -84,21 +84,13 @@ export function outputSchemaForPrompt(prompt) {
 }
 
 export function resultColumnsFromPrompt(prompt, result) {
-  if (Array.isArray(prompt?.schema_fields) && prompt.schema_fields.length) {
-    return prompt.schema_fields.map((field) => ({
-      key: field.name,
-      label: field.label || field.name
-    }));
-  }
-
-  const schema = parseSchema(prompt?.output_schema);
-  const properties = schema?.properties?.items?.items?.properties;
-  if (properties && typeof properties === "object") {
-    return Object.keys(properties).map((key) => ({ key, label: key }));
-  }
-
   if (Array.isArray(result?.items) && result.items[0] && typeof result.items[0] === "object") {
-    return Object.keys(result.items[0]).map((key) => ({ key, label: key }));
+    const keys = new Set();
+    for (const row of result.items) {
+      if (!row || typeof row !== "object" || Array.isArray(row)) continue;
+      Object.keys(row).forEach((key) => keys.add(key));
+    }
+    return [...keys].map((key) => ({ key, label: key }));
   }
 
   return [];

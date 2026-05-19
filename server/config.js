@@ -12,6 +12,9 @@ export const config = {
   host: process.env.HOST || "0.0.0.0",
   port: Number(process.env.PORT || 5174),
   dataDir: path.resolve(rootDir, process.env.DATA_DIR || "data"),
+  staticDir: path.resolve(rootDir, process.env.STATIC_DIR || "dist"),
+  appEnv: process.env.APP_ENV || "production",
+  appLabel: process.env.APP_LABEL || "",
   dify: {
     base: normalizeBase(process.env.DIFY_API_BASE || ""),
     apiKey: process.env.DIFY_CHAPTER_WORKFLOW_API_KEY || "",
@@ -46,6 +49,10 @@ export function publicRuntimeConfig() {
     openaiRetentionMode: config.openai.retentionMode || "unset",
     retentionConfirmed: isRetentionModeConfirmed(),
     dataDir: config.dataDir,
+    staticDir: config.staticDir,
+    appEnv: config.appEnv,
+    appLabel: config.appLabel || defaultAppLabel(config.appEnv),
+    isPreview: config.appEnv === "preview",
     importBatchSize: config.dify.batchSize,
     chapterConcurrency: config.openai.chapterConcurrency
   };
@@ -95,4 +102,8 @@ function clampInteger(value, min, max, fallback) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function defaultAppLabel(appEnv) {
+  return appEnv === "preview" ? "本机预览" : "正式环境";
 }

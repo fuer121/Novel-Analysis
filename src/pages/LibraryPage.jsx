@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   BookOpen,
   Database,
   FileText,
+  Layers,
   Loader2,
   Play,
   RefreshCcw,
+  Search,
   Trash2
 } from "lucide-react";
 import { apiGet, apiPost } from "../api.js";
@@ -14,20 +16,57 @@ import { BookList, ChapterTable, IconButton, Panel, TaskBox } from "../ui.jsx";
 const initialImportForm = {
   book_id: "",
   book_name: "",
-  start_chapter: 1,
-  end_chapter: 100,
+  start_chapter: "1",
+  end_chapter: "100",
   force: false
 };
 
-export function LibraryPage({ books, config, importTask, importBusy, onStartImport, onBooksChanged, setError }) {
+export function LibraryPage({
+  books,
+  config,
+  importTask,
+  importBusy,
+  l1Task,
+  l1Busy,
+  onStartImport,
+  onStartL1Index,
+  onImportCancel,
+  onImportPause,
+  onImportResume,
+  onL1Cancel,
+  onL1Pause,
+  onL1Resume,
+  onBooksChanged,
+  setError
+}) {
   const initialBookId = importTask?.payload?.bookId || books[0]?.book_id || "";
   const [selectedBookId, setSelectedBookId] = useState(initialBookId);
   const [chapters, setChapters] = useState([]);
+  const [l1Coverage, setL1Coverage] = useState(null);
+  const [l1Chapters, setL1Chapters] = useState([]);
   const [importForm, setImportForm] = useState({
     ...initialImportForm,
-    book_id: initialBookId
+    book_id: initialBookId,
+    auto_l1_index: false
   });
+  const [l1Form, setL1Form] = useState({ start_chapter: "1", end_chapter: "100", force: false });
   const [chaptersBusy, setChaptersBusy] = useState(false);
+  const [chapterFilter, setChapterFilter] = useState({ query: "", l1: "all" });
+
+  const loadL1Data = useCallback(async (bookId, startChapter, endChapter) => {
+    if (!validChapterNumber(startChapter) || !validChapterNumber(endChapter)) return;
+    try {
+      const query = `start_chapter=${encodeURIComponent(startChapter)}&end_chapter=${encodeURIComponent(endChapter)}`;
+      const [coverageData, chaptersData] = await Promise.all([
+        apiGet(`/api/books/${encodeURIComponent(bookId)}/l1-indexes/coverage?${query}`),
+        apiGet(`/api/books/${encodeURIComponent(bookId)}/l1-indexes/chapters?${query}`)
+      ]);
+      setL1Coverage(coverageData.coverage);
+      setL1Chapters(chaptersData.chapters || []);
+    } catch (error) {
+      setError(error.message);
+    }
+  }, [setError]);
 
   async function loadChapters(bookId) {
     if (!bookId) {
@@ -39,6 +78,9 @@ export function LibraryPage({ books, config, importTask, importBusy, onStartImpo
     try {
       const data = await apiGet(`/api/books/${encodeURIComponent(bookId)}/chapters`);
       setChapters(data.chapters || []);
+      const first = data.chapters?.[0]?.chapter_index || 1;
+      const last = data.chapters?.[data.chapters.length - 1]?.chapter_index || 100;
+      setL1Form((form) => ({ ...form, start_chapter: String(first), end_chapter: String(last) }));
     } catch (error) {
       setError(error.message);
     } finally {
@@ -60,6 +102,12 @@ export function LibraryPage({ books, config, importTask, importBusy, onStartImpo
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [importTask?.id, importTask?.status, selectedBookId]);
 
+  useEffect(() => {
+    if (!selectedBookId) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadL1Data(selectedBookId, l1Form.start_chapter, l1Form.end_chapter);
+  }, [selectedBookId, l1Form.start_chapter, l1Form.end_chapter, l1Task?.id, l1Task?.status, loadL1Data]);
+
   const selectedBook = useMemo(
     () => books.find((book) => book.book_id === selectedBookId) || null,
     [books, selectedBookId]
@@ -68,11 +116,52 @@ export function LibraryPage({ books, config, importTask, importBusy, onStartImpo
     () => books.find((book) => book.book_id === importForm.book_id.trim()) || null,
     [books, importForm.book_id]
   );
+  const l1ByChapter = useMemo(
+    () => new Map(l1Chapters.map((chapter) => [chapter.chapter_index, chapter])),
+    [l1Chapters]
+  );
+  const l1DisplayRange = useMemo(
+    () => ({
+      start: validChapterNumber(l1Form.start_chapter) ? Number(l1Form.start_chapter) : 1,
+      end: validChapterNumber(l1Form.end_chapter) ? Number(l1Form.end_chapter) : 0
+    }),
+    [l1Form.start_chapter, l1Form.end_chapter]
+  );
+  const filteredChapters = useMemo(
+    () => filterChapters(chapters, l1ByChapter, l1DisplayRange, chapterFilter),
+    [chapters, l1ByChapter, l1DisplayRange, chapterFilter]
+  );
 
   async function startImport() {
-    const task = await onStartImport(importForm);
+    if (!validChapterNumber(importForm.start_chapter) || !validChapterNumber(importForm.end_chapter)) {
+      setError("起始章节和结束章节必须填写为大于 0 的整数。");
+      return;
+    }
+    const task = await onStartImport({
+      ...importForm,
+      start_chapter: Number(importForm.start_chapter),
+      end_chapter: Number(importForm.end_chapter),
+      auto_l1_index: Boolean(importForm.auto_l1_index)
+    });
     const taskBookId = task?.payload?.bookId || importForm.book_id;
     if (taskBookId) setSelectedBookId(taskBookId);
+  }
+
+  async function startL1Index() {
+    if (!selectedBookId) {
+      setError("请先选择一本书。");
+      return;
+    }
+    if (!validChapterNumber(l1Form.start_chapter) || !validChapterNumber(l1Form.end_chapter)) {
+      setError("L1 起始章节和结束章节必须填写为大于 0 的整数。");
+      return;
+    }
+    await onStartL1Index({
+      bookId: selectedBookId,
+      startChapter: Number(l1Form.start_chapter),
+      endChapter: Number(l1Form.end_chapter),
+      force: l1Form.force
+    });
   }
 
   async function deleteSelectedBook() {
@@ -134,19 +223,21 @@ export function LibraryPage({ books, config, importTask, importBusy, onStartImpo
             <label>
               <span>起始章节</span>
               <input
-                type="number"
-                min="1"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={importForm.start_chapter}
-                onChange={(event) => setImportForm({ ...importForm, start_chapter: Number(event.target.value) })}
+                onChange={(event) => setImportForm({ ...importForm, start_chapter: sanitizeChapterInput(event.target.value) })}
               />
             </label>
             <label>
               <span>结束章节</span>
               <input
-                type="number"
-                min="1"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
                 value={importForm.end_chapter}
-                onChange={(event) => setImportForm({ ...importForm, end_chapter: Number(event.target.value) })}
+                onChange={(event) => setImportForm({ ...importForm, end_chapter: sanitizeChapterInput(event.target.value) })}
               />
             </label>
             <label className="check-row">
@@ -157,12 +248,73 @@ export function LibraryPage({ books, config, importTask, importBusy, onStartImpo
               />
               <span>覆盖已保存章节</span>
             </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={importForm.auto_l1_index}
+                onChange={(event) => setImportForm({ ...importForm, auto_l1_index: event.target.checked })}
+              />
+              <span>导入完成后构建 L1 索引</span>
+            </label>
           </div>
           <button className="primary" type="button" onClick={startImport} disabled={importBusy || !config.difyConfigured}>
             {importBusy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
             {importBusy ? "导入中" : "导入章节"}
           </button>
-          <TaskBox task={importTask} />
+          <TaskBox
+            task={importTask}
+            onCancel={onImportCancel}
+            onPause={onImportPause}
+            onResume={onImportResume}
+          />
+        </Panel>
+
+        <Panel icon={Layers} title="基础索引">
+          <div className="form-grid compact">
+            <label>
+              <span>起始章节</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={l1Form.start_chapter}
+                onChange={(event) => setL1Form({ ...l1Form, start_chapter: sanitizeChapterInput(event.target.value) })}
+              />
+            </label>
+            <label>
+              <span>结束章节</span>
+              <input
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]*"
+                value={l1Form.end_chapter}
+                onChange={(event) => setL1Form({ ...l1Form, end_chapter: sanitizeChapterInput(event.target.value) })}
+              />
+            </label>
+            <label className="check-row">
+              <input
+                type="checkbox"
+                checked={l1Form.force}
+                onChange={(event) => setL1Form({ ...l1Form, force: event.target.checked })}
+              />
+              <span>强制重建已有索引</span>
+            </label>
+          </div>
+          <CoverageSummary
+            coverage={l1Coverage}
+            chapters={l1Chapters}
+            onFilter={(mode) => setChapterFilter((current) => ({ ...current, l1: mode }))}
+          />
+          <button className="primary" type="button" onClick={startL1Index} disabled={l1Busy || !selectedBookId || !config.openaiConfigured}>
+            {l1Busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+            {l1Busy ? "索引中" : "构建 L1 索引"}
+          </button>
+          <TaskBox
+            task={l1Task}
+            onCancel={onL1Cancel}
+            onPause={onL1Pause}
+            onResume={onL1Resume}
+          />
         </Panel>
 
         <Panel icon={Database} title="本地书库">
@@ -178,20 +330,134 @@ export function LibraryPage({ books, config, importTask, importBusy, onStartImpo
         <Panel
           icon={FileText}
           title="章节元数据"
-          action={<SummaryStats book={selectedBook} chapters={chapters} loading={chaptersBusy} />}
+          action={<SummaryStats book={selectedBook} chapters={chapters} filteredCount={filteredChapters.length} loading={chaptersBusy} />}
         >
-          <ChapterTable chapters={chapters} />
+          <ChapterTableToolbar
+            filter={chapterFilter}
+            onChange={setChapterFilter}
+            total={chapters.length}
+            filtered={filteredChapters.length}
+          />
+          <ChapterTable chapters={filteredChapters} l1ByChapter={l1ByChapter} l1Range={l1DisplayRange} />
+          <L1Preview chapters={l1Chapters} />
         </Panel>
       </section>
     </section>
   );
 }
 
-function SummaryStats({ book, chapters, loading }) {
+function validChapterNumber(value) {
+  const number = Number(value);
+  return Number.isInteger(number) && number > 0;
+}
+
+function sanitizeChapterInput(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits.replace(/^0+(?=\d)/, "").replace(/^0$/, "");
+}
+
+function filterChapters(chapters, l1ByChapter, l1Range, filter) {
+  const query = String(filter.query || "").trim().toLowerCase();
+  return chapters.filter((chapter) => {
+    const l1 = l1ByChapter.get(chapter.chapter_index);
+    const inL1Range = chapter.chapter_index >= l1Range.start && chapter.chapter_index <= l1Range.end;
+    if (filter.l1 === "completed" && l1?.status !== "completed") return false;
+    if (filter.l1 === "failed" && l1?.status !== "failed") return false;
+    if (filter.l1 === "missing" && (!inL1Range || l1)) return false;
+    if (filter.l1 === "unfinished" && (!inL1Range || l1?.status === "completed")) return false;
+    if (!query) return true;
+    return [
+      chapter.chapter_index,
+      chapter.title,
+      chapter.fetch_status,
+      chapter.content_hmac
+    ].some((value) => String(value || "").toLowerCase().includes(query));
+  });
+}
+
+function CoverageSummary({ coverage, chapters, onFilter }) {
+  if (!coverage) return <div className="index-summary">暂无 L1 覆盖信息</div>;
+  const total = Math.max(coverage.chapters.total || 0, 1);
+  const completed = coverage.chapters.completed || 0;
+  const failedChapters = chapters.filter((chapter) => chapter.status === "failed").map((chapter) => chapter.chapter_index);
+  const unfinished = (coverage.chapters.missing || 0) + (coverage.chapters.failed || 0) + (coverage.chapters.outdated || 0);
+  const finishedRatio = Math.round((completed / total) * 100);
+  return (
+    <div className="coverage-card">
+      <div className="coverage-head">
+        <strong>L1 覆盖 {finishedRatio}%</strong>
+        <span>{coverage.chapters.completed}/{coverage.chapters.total} 章完成</span>
+      </div>
+      <div className="coverage-bar" aria-label={`L1 覆盖 ${finishedRatio}%`}>
+        <span style={{ width: `${finishedRatio}%` }} />
+      </div>
+      <div className="index-summary">
+        <button type="button" onClick={() => onFilter?.("missing")}>缺失 {coverage.chapters.missing}</button>
+        <button type="button" onClick={() => onFilter?.("failed")}>失败 {coverage.chapters.failed}</button>
+        <button type="button" onClick={() => onFilter?.("unfinished")}>未完成 {unfinished}</button>
+        <button type="button" onClick={() => onFilter?.("all")}>查看全部</button>
+      </div>
+      <p className="coverage-note">
+        {failedChapters.length
+          ? `最近失败章节：${compactChapterList(failedChapters.slice(0, 16))}`
+          : coverage.chapters.missing
+            ? "缺失通常表示还没有构建，不代表章节导入失败。"
+            : "当前范围 L1 索引已覆盖。"}
+      </p>
+    </div>
+  );
+}
+
+function ChapterTableToolbar({ filter, onChange, total, filtered }) {
+  return (
+    <div className="table-toolbar">
+      <label className="search-field">
+        <Search size={15} />
+        <input
+          value={filter.query}
+          placeholder="搜索章节、标题、HMAC"
+          onChange={(event) => onChange((current) => ({ ...current, query: event.target.value }))}
+        />
+      </label>
+      <select value={filter.l1} onChange={(event) => onChange((current) => ({ ...current, l1: event.target.value }))}>
+        <option value="all">全部章节</option>
+        <option value="completed">L1 已完成</option>
+        <option value="unfinished">L1 未完成</option>
+        <option value="missing">L1 缺失</option>
+        <option value="failed">L1 失败</option>
+      </select>
+      <span>{filtered}/{total} 章</span>
+    </div>
+  );
+}
+
+function L1Preview({ chapters }) {
+  if (!chapters.length) return null;
+  return (
+    <div className="index-preview">
+      <h3>L1 索引预览</h3>
+      <div className="index-preview-grid">
+        {chapters.slice(0, 5).map((chapter) => (
+          <article key={`chapter-${chapter.chapter_index}`}>
+            <strong>章节 {chapter.chapter_index}</strong>
+            <p>{chapter.summary || chapter.error_summary || "暂无摘要"}</p>
+          </article>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function SummaryStats({ book, chapters, filteredCount, loading }) {
   return (
     <div className="stats">
       <span>{loading ? "读取中" : `${book?.chapter_count || chapters.length || 0} 章`}</span>
+      {filteredCount !== chapters.length ? <span>筛选 {filteredCount} 章</span> : null}
       <span>{book?.last_import_status || "idle"}</span>
     </div>
   );
+}
+
+function compactChapterList(indexes) {
+  return indexes.length ? indexes.join(", ") : "-";
 }
