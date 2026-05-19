@@ -34,13 +34,11 @@ import {
   buildChapterInput,
   buildCompressedSummaryInput,
   buildL1ChapterInput,
-  buildSummaryCompressionInput,
   buildSummaryInput,
   callOpenAIJson,
   callOpenAIText,
   chapterResultSchema,
   l1ChapterIndexSchema,
-  summaryCompressionSchema,
   testOpenAIConnection
 } from "./openai.js";
 import {
@@ -57,7 +55,7 @@ import {
 import { sanitizeText } from "./sanitize.js";
 
 const DIRECT_SUMMARY_MAX_CHARS = 80_000;
-const SUMMARY_COMPRESSION_BATCH_CHARS = 18_000;
+const SUMMARY_COMPACT_TARGET_CHARS = 28_000;
 const SUMMARY_STAGE_MAX_ATTEMPTS = 3;
 const SUMMARY_STAGE_RETRY_DELAY_MS = 1200;
 
@@ -634,50 +632,24 @@ async function reusableAnalysisChapter({ analysisId, chapter, promptHash }) {
 async function summarizeAnalysisResults({ task, model, reasoningEffort, chapterResults, failedChapters, userPrompt }) {
   const directInput = buildSummaryInput({ chapterResults, failedChapters, userPrompt });
   if (inputTextLength(directInput) <= DIRECT_SUMMARY_MAX_CHARS) {
-    return callOpenAIText({
+    return runSummaryStageWithRetry(task, "GPT 汇总分析结果", () => callOpenAIText({
       model,
       reasoningEffort,
       instructions: "你是严谨的小说多章节汇总引擎。按用户汇总 Prompt 输出最终结果；如果用户要求 JSON，则只输出合法 JSON，否则直接输出文本，不要添加无关解释。",
       input: directInput
-    });
+    }));
   }
 
-  const batches = chunkChapterResults(chapterResults, SUMMARY_COMPRESSION_BATCH_CHARS);
-  const compressedResults = [];
-  for (let index = 0; index < batches.length; index += 1) {
-    await waitIfPaused(task);
-    updateTask(task, {
-      progress: { ...task.progress, current: `压缩汇总素材 ${index + 1}/${batches.length}` },
-      message: `正在压缩汇总素材 ${index + 1}/${batches.length}`
-    });
-    const batchIndexes = new Set(batches[index].map((entry) => Number(entry.chapter_index)));
-    const batchFailedChapters = failedChapters.filter((chapterIndex) => batchIndexes.has(Number(chapterIndex)));
-    const response = await runSummaryStageWithRetry(task, `压缩汇总素材 ${index + 1}/${batches.length}`, () => callOpenAIJson({
-      model,
-      reasoningEffort,
-      instructions: "你是小说分析结果压缩器。请按 Schema 把当前批次逐章理解结果压缩成面向用户最终目标的结构化 JSON。",
-      input: buildSummaryCompressionInput({
-        chapterResults: batches[index],
-        failedChapters: batchFailedChapters,
-        batchIndex: index + 1,
-        totalBatches: batches.length,
-        userPrompt
-      }),
-      schema: summaryCompressionSchema(),
-      schemaName: "summary_compression"
-    }));
-    const expectedChapters = batches[index].map((entry) => Number(entry.chapter_index)).filter(Number.isFinite);
-    validateCompressedCoverage({
-      batchIndex: index + 1,
-      expectedChapters,
-      compressed: response.value
-    });
-    compressedResults.push({
-      batch_index: index + 1,
-      chapter_indexes: expectedChapters,
-      ...response.value
-    });
-  }
+  await waitIfPaused(task);
+  updateTask(task, {
+    progress: { ...task.progress, current: "本地整理汇总素材" },
+    message: "正在本地整理长输入汇总素材"
+  });
+  const compressedResults = compactChapterResultsForSummary({
+    chapterResults,
+    failedChapters,
+    userPrompt
+  });
 
   await waitIfPaused(task);
   updateTask(task, {
@@ -686,7 +658,7 @@ async function summarizeAnalysisResults({ task, model, reasoningEffort, chapterR
   });
   return runSummaryStageWithRetry(task, "GPT 汇总压缩结果", () => callOpenAIText({
     model,
-    reasoningEffort,
+    reasoningEffort: "low",
     instructions: "你是严谨的小说多章节汇总引擎。按用户汇总 Prompt 输出最终结果；如果用户要求 JSON，则只输出合法 JSON，否则直接输出文本，不要添加无关解释。",
     input: buildCompressedSummaryInput({
       compressedResults,
@@ -701,7 +673,9 @@ async function runSummaryStageWithRetry(task, stageLabel, operation) {
   for (let attempt = 1; attempt <= SUMMARY_STAGE_MAX_ATTEMPTS; attempt += 1) {
     await waitIfPaused(task);
     try {
-      return await operation();
+      const result = await operation();
+      assertNotCancelled(task);
+      return result;
     } catch (error) {
       lastError = error;
       if (!shouldRetrySummaryStage(error) || attempt >= SUMMARY_STAGE_MAX_ATTEMPTS) {
@@ -719,7 +693,6 @@ async function runSummaryStageWithRetry(task, stageLabel, operation) {
 
 function shouldRetrySummaryStage(error) {
   const message = String(error?.message || "").toLowerCase();
-  if (message.includes("汇总素材压缩覆盖")) return false;
   if (error?.status === 429 || error?.status >= 500) return true;
   return [
     "aborted",
@@ -737,44 +710,62 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function chunkChapterResults(chapterResults, maxChars) {
-  const batches = [];
-  let current = [];
-  let currentSize = 2;
-  for (const result of chapterResults) {
-    const size = JSON.stringify(result).length + 1;
-    if (current.length && currentSize + size > maxChars) {
-      batches.push(current);
-      current = [];
-      currentSize = 2;
-    }
-    current.push(result);
-    currentSize += size;
-  }
-  if (current.length) batches.push(current);
-  return batches;
-}
-
 function inputTextLength(input) {
   return input.reduce((sum, item) => (
     sum + (item.content || []).reduce((inner, content) => inner + String(content.text || "").length, 0)
   ), 0);
 }
 
-function validateCompressedCoverage({ batchIndex, expectedChapters, compressed }) {
-  const covered = new Set((compressed.covered_chapters || []).map(Number).filter(Number.isFinite));
-  const missing = expectedChapters.filter((chapterIndex) => !covered.has(chapterIndex));
-  if (missing.length) {
-    const error = new Error(`汇总素材压缩覆盖不完整：第 ${batchIndex} 批缺少章节 ${missing.join(", ")}`);
-    error.status = 502;
-    throw error;
+function compactChapterResultsForSummary({ chapterResults, failedChapters, userPrompt }) {
+  const count = Math.max(1, chapterResults.length);
+  const promptReserve = String(userPrompt || "").length + JSON.stringify(failedChapters || []).length + 1500;
+  const perChapterBudget = Math.max(160, Math.min(420, Math.floor((SUMMARY_COMPACT_TARGET_CHARS - promptReserve) / count)));
+  return chapterResults.map((result) => compactChapterResult(result, perChapterBudget));
+}
+
+function compactChapterResult(result, budget) {
+  const chapterIndex = Number(result?.chapter_index || 0);
+  const title = clipText(result?.chapter_title || result?.title || "", 80);
+  const summaryBudget = Math.max(80, Math.floor(budget * 0.48));
+  const keyPointBudget = Math.max(55, Math.floor(budget * 0.22));
+  const evidenceBudget = Math.max(40, Math.floor(budget * 0.12));
+  const fallback = summarizeUnknownResult(result, Math.max(100, Math.floor(budget * 0.7)));
+  return {
+    chapter_index: chapterIndex,
+    chapter_title: title,
+    summary: clipText(result?.summary || fallback, summaryBudget),
+    key_points: compactStringArray(result?.key_points, 2, keyPointBudget),
+    evidence_notes: compactStringArray(result?.evidence_notes, 1, evidenceBudget)
+  };
+}
+
+function compactStringArray(value, maxItems, maxChars) {
+  const items = Array.isArray(value) ? value : [];
+  return items
+    .map((item) => clipText(item, maxChars))
+    .filter(Boolean)
+    .slice(0, maxItems);
+}
+
+function summarizeUnknownResult(value, maxChars) {
+  if (!value || typeof value !== "object") return clipText(value, maxChars);
+  const fragments = [];
+  for (const [key, entry] of Object.entries(value)) {
+    if (["chapter_index", "chapter_title", "title"].includes(key)) continue;
+    if (typeof entry === "string") {
+      fragments.push(`${key}: ${entry}`);
+    } else if (Array.isArray(entry)) {
+      fragments.push(`${key}: ${entry.slice(0, 3).map((item) => typeof item === "string" ? item : JSON.stringify(item)).join("; ")}`);
+    }
+    if (fragments.join(" ").length >= maxChars) break;
   }
-  const coveredOutsideBatch = [...covered].filter((chapterIndex) => !expectedChapters.includes(chapterIndex));
-  if (coveredOutsideBatch.length) {
-    const error = new Error(`汇总素材压缩覆盖异常：第 ${batchIndex} 批包含非本批章节 ${coveredOutsideBatch.join(", ")}`);
-    error.status = 502;
-    throw error;
-  }
+  return clipText(fragments.join(" "), maxChars);
+}
+
+function clipText(value, maxChars) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxChars) return text;
+  return `${text.slice(0, Math.max(0, maxChars - 3))}...`;
 }
 
 function parseJsonOrText(value) {

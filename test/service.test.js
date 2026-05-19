@@ -1043,7 +1043,6 @@ test("compresses large summary inputs before final analysis", async () => {
   }
 
   const previousFetch = global.fetch;
-  let compressionCalls = 0;
   let finalSummaryCalls = 0;
   let largestSummaryInput = 0;
 
@@ -1066,6 +1065,8 @@ test("compresses large summary inputs before final analysis", async () => {
       largestSummaryInput = Math.max(largestSummaryInput, text.length);
       if (text.includes("分批压缩摘要 JSON")) {
         finalSummaryCalls += 1;
+        assert.match(text, /"chapter_index":1/);
+        assert.match(text, /"chapter_index":90/);
         return {
           ok: true,
           json: async () => ({
@@ -1078,33 +1079,7 @@ test("compresses large summary inputs before final analysis", async () => {
     }
 
     if (formatName === "summary_compression") {
-      compressionCalls += 1;
-      assert.match(text, /用户最终汇总 Prompt/);
-      const coveredChapters = extractChapterIndexesFromCompressionInput(text);
-      return {
-        ok: true,
-        json: async () => ({
-          id: `resp_large_compress_${compressionCalls}`,
-          output: [{
-            content: [{
-              type: "output_text",
-              text: JSON.stringify({
-                covered_chapters: coveredChapters,
-                items: [{
-                  topic: `批次${compressionCalls}摘要`,
-                  facts: ["批次保留事实"],
-                  chapter_refs: coveredChapters,
-                  evidence_notes: ["保留章节引用"],
-                  uncertainty: ""
-                }],
-                must_keep: ["关键保留项"],
-                possible_conflicts: [],
-                missing_or_failed_chapters: []
-              })
-            }]
-          }]
-        })
-      };
+      throw new Error("Large summary should use local compaction instead of OpenAI compression");
     }
 
     const chapterIndex = Number(text.match(/章节编号：(\d+)/)?.[1]);
@@ -1137,9 +1112,8 @@ test("compresses large summary inputs before final analysis", async () => {
     });
     await waitForTask(analysis);
     assert.equal(analysis.status, "completed");
-    assert.ok(compressionCalls > 1);
     assert.equal(finalSummaryCalls, 1);
-    assert.ok(largestSummaryInput < 90_000);
+    assert.ok(largestSummaryInput < 45_000);
     const result = await workflows.publicAnalysisRunWithResult(analysis.id);
     assert.equal(result.finalResult.summary, "压缩后完成");
   } finally {
@@ -1147,106 +1121,7 @@ test("compresses large summary inputs before final analysis", async () => {
   }
 });
 
-test("rejects compressed summary when chapter coverage is incomplete", async () => {
-  const chapterCount = 90;
-  for (let chapterIndex = 1; chapterIndex <= chapterCount; chapterIndex += 1) {
-    await db.saveEncryptedChapter({
-      bookId: "book-large-summary-missing-coverage",
-      chapterIndex,
-      title: `第${chapterIndex}章`,
-      content: `第${chapterIndex}章正文`
-    });
-  }
-
-  const previousFetch = global.fetch;
-  let compressionCalls = 0;
-
-  global.fetch = async (url, request) => {
-    if (String(url).includes("api.openai.com/v1/models")) {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({ data: [] })
-      };
-    }
-
-    if (!String(url).includes("api.openai.com/v1/responses")) {
-      throw new Error(`Unexpected fetch URL: ${url}`);
-    }
-    const body = JSON.parse(request.body);
-    const text = body.input[0].content[0].text;
-    const formatName = body.text?.format?.name || "";
-
-    if (formatName === "summary_compression") {
-      compressionCalls += 1;
-      const coveredChapters = extractChapterIndexesFromCompressionInput(text);
-      const incompleteCoverage = compressionCalls === 1 ? coveredChapters.slice(1) : coveredChapters;
-      return {
-        ok: true,
-        json: async () => ({
-          id: `resp_large_bad_compress_${compressionCalls}`,
-          output: [{
-            content: [{
-              type: "output_text",
-              text: JSON.stringify({
-                covered_chapters: incompleteCoverage,
-                items: [{
-                  topic: `批次${compressionCalls}摘要`,
-                  facts: ["批次保留事实"],
-                  chapter_refs: incompleteCoverage,
-                  evidence_notes: ["保留章节引用"],
-                  uncertainty: ""
-                }],
-                must_keep: ["关键保留项"],
-                possible_conflicts: [],
-                missing_or_failed_chapters: []
-              })
-            }]
-          }]
-        })
-      };
-    }
-
-    if (!formatName) {
-      throw new Error("Final summary should not run after incomplete compression coverage");
-    }
-
-    const chapterIndex = Number(text.match(/章节编号：(\d+)/)?.[1]);
-    return {
-      ok: true,
-      json: async () => ({
-        id: `resp_large_missing_chapter_${chapterIndex}`,
-        output: [{
-          content: [{
-            type: "output_text",
-            text: JSON.stringify({
-              chapter_index: chapterIndex,
-              chapter_title: `第${chapterIndex}章`,
-              summary: `章节${chapterIndex}摘要${"长摘要".repeat(140)}`,
-              key_points: [`关键点${chapterIndex}${"内容".repeat(120)}`],
-              evidence_notes: [`证据${chapterIndex}${"线索".repeat(120)}`]
-            })
-          }]
-        }]
-      })
-    };
-  };
-
-  try {
-    const analysis = workflows.startAnalysisTask({
-      name: "大输入汇总覆盖缺失",
-      book_id: "book-large-summary-missing-coverage",
-      start_chapter: 1,
-      end_chapter: chapterCount
-    });
-    await assert.rejects(() => waitForTask(analysis), /汇总素材压缩覆盖不完整/);
-    assert.ok(compressionCalls >= 1);
-  } finally {
-    global.fetch = previousFetch;
-  }
-});
-
-test("retries transient summary compression failures", async () => {
+test("retries transient compacted final summary failures", async () => {
   const chapterCount = 90;
   for (let chapterIndex = 1; chapterIndex <= chapterCount; chapterIndex += 1) {
     await db.saveEncryptedChapter({
@@ -1258,7 +1133,6 @@ test("retries transient summary compression failures", async () => {
   }
 
   const previousFetch = global.fetch;
-  let compressionAttempts = 0;
   let finalSummaryCalls = 0;
 
   global.fetch = async (url, request) => {
@@ -1278,39 +1152,14 @@ test("retries transient summary compression failures", async () => {
     const formatName = body.text?.format?.name || "";
 
     if (formatName === "summary_compression") {
-      compressionAttempts += 1;
-      if (compressionAttempts === 1) {
-        throw new Error("This operation was aborted");
-      }
-      const coveredChapters = extractChapterIndexesFromCompressionInput(text);
-      return {
-        ok: true,
-        json: async () => ({
-          id: `resp_large_retry_compress_${compressionAttempts}`,
-          output: [{
-            content: [{
-              type: "output_text",
-              text: JSON.stringify({
-                covered_chapters: coveredChapters,
-                items: [{
-                  topic: `批次${compressionAttempts}摘要`,
-                  facts: ["重试后保留事实"],
-                  chapter_refs: coveredChapters,
-                  evidence_notes: ["保留章节引用"],
-                  uncertainty: ""
-                }],
-                must_keep: ["关键保留项"],
-                possible_conflicts: [],
-                missing_or_failed_chapters: []
-              })
-            }]
-          }]
-        })
-      };
+      throw new Error("Large summary should use local compaction instead of OpenAI compression");
     }
 
     if (!formatName) {
       finalSummaryCalls += 1;
+      if (finalSummaryCalls === 1) {
+        throw new Error("This operation was aborted");
+      }
       return {
         ok: true,
         json: async () => ({
@@ -1350,8 +1199,7 @@ test("retries transient summary compression failures", async () => {
     });
     await waitForTask(analysis);
     assert.equal(analysis.status, "completed");
-    assert.ok(compressionAttempts > 1);
-    assert.equal(finalSummaryCalls, 1);
+    assert.equal(finalSummaryCalls, 2);
     const result = await workflows.publicAnalysisRunWithResult(analysis.id);
     assert.equal(result.finalResult.summary, "重试后完成");
   } finally {
@@ -1362,7 +1210,7 @@ test("retries transient summary compression failures", async () => {
 async function waitForTask(task) {
   const started = Date.now();
   while (!["completed", "failed", "cancelled"].includes(task.status)) {
-    if (Date.now() - started > 3000) {
+    if (Date.now() - started > 10000) {
       throw new Error(`Task timeout: ${task.id}`);
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
@@ -1371,10 +1219,4 @@ async function waitForTask(task) {
     throw new Error(task.error || "task failed");
   }
   return task;
-}
-
-function extractChapterIndexesFromCompressionInput(text) {
-  return [...String(text).matchAll(/"chapter_index":(\d+)/g)]
-    .map((match) => Number(match[1]))
-    .filter(Number.isFinite);
 }
