@@ -595,19 +595,22 @@ function L1Preview({ chapters }) {
 }
 
 function L2FactPreview({ facts }) {
-  if (!facts.length) return null;
+  const fact = facts[0];
   return (
     <div className="index-preview">
-      <h3>L2 事实预览</h3>
-      <div className="index-preview-grid">
-        {facts.slice(0, 8).map((fact) => (
-          <article key={fact.id}>
-            <strong>第 {fact.chapter_index} 章 · {categoryLabel(fact.category)} · {fact.entity || "未命名主体"}</strong>
-            <p>{fact.fact || "暂无事实正文"}</p>
-            <small>重要度 {formatScore(fact.importance)} · 置信度 {formatScore(fact.confidence)}</small>
-          </article>
-        ))}
-      </div>
+      <h3>L2 结果预览</h3>
+      {fact ? (
+        <article>
+          <strong>第 {fact.chapter_index} 章 · {categoryLabel(fact.category)} · {fact.entity || "未命名主体"}</strong>
+          <p>{fact.fact || "暂无事实正文"}</p>
+          <small>重要度 {formatScore(fact.importance)} · 置信度 {formatScore(fact.confidence)}</small>
+        </article>
+      ) : (
+        <article className="index-preview-empty">
+          <strong>暂无可预览事实</strong>
+          <p>构建 L2 后，这里会展示当前范围和分类下的首条类型化事实。</p>
+        </article>
+      )}
     </div>
   );
 }
