@@ -493,7 +493,7 @@ export function buildCompressedSummaryInput({ compressedResults, failedChapters,
   ];
 }
 
-export function buildL1ChapterInput({ chapterIndex, title, content }) {
+export function buildL1ChapterInput({ chapterIndex, title, content, indexPrompt }) {
   return [
     {
       role: "user",
@@ -501,8 +501,7 @@ export function buildL1ChapterInput({ chapterIndex, title, content }) {
         {
           type: "input_text",
           text: [
-            "请为当前小说章节建立可复用 L1 基础索引。",
-            "要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；实体和事件尽量短句化，保留可用于后续分析的事实。",
+            indexPrompt || defaultL1IndexPrompt(),
             "",
             `章节编号：${chapterIndex}`,
             `章节标题：${title || ""}`,
@@ -516,7 +515,7 @@ export function buildL1ChapterInput({ chapterIndex, title, content }) {
   ];
 }
 
-export function buildL2ChapterInput({ chapterIndex, title, content, l1Index }) {
+export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, indexPrompt }) {
   return [
     {
       role: "user",
@@ -524,11 +523,7 @@ export function buildL2ChapterInput({ chapterIndex, title, content, l1Index }) {
         {
           type: "input_text",
           text: [
-            "请为当前小说章节建立 L2 类型化事实索引。",
-            "目标：提取可复用、可检索、可追溯的事实单元，不要写长摘要，不要输出 Markdown。",
-            "分类只能使用：character、relationship、cultivation、force、item、location、event、foreshadowing、other。",
-            "每条事实必须短而明确，保留主体、相关主体、事实类型、重要度、置信度和少量证据摘记。",
-            "不要补充本章原文之外的信息；如果本章没有可复用事实，facts 输出空数组。",
+            indexPrompt || defaultL2IndexPrompt(),
             "",
             `章节编号：${chapterIndex}`,
             `章节标题：${title || ""}`,
@@ -543,6 +538,23 @@ export function buildL2ChapterInput({ chapterIndex, title, content, l1Index }) {
       ]
     }
   ];
+}
+
+export function defaultL1IndexPrompt() {
+  return [
+    "请为当前小说章节建立可复用 L1 基础索引。",
+    "要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；实体和事件尽量短句化，保留可用于后续分析的事实。"
+  ].join("\n");
+}
+
+export function defaultL2IndexPrompt() {
+  return [
+    "请为当前小说章节建立 L2 类型化事实索引。",
+    "目标：提取可复用、可检索、可追溯的事实单元，不要写长摘要，不要输出 Markdown。",
+    "分类只能使用：character、relationship、cultivation、force、item、location、event、foreshadowing、other。",
+    "每条事实必须短而明确，保留主体、相关主体、事实类型、重要度、置信度和少量证据摘记。",
+    "不要补充本章原文之外的信息；如果本章没有可复用事实，facts 输出空数组。"
+  ].join("\n");
 }
 
 export function buildIndexSummaryInput({ facts, reviewedChapters, missingChapters, userPrompt, sourceStats }) {

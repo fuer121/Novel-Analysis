@@ -3,6 +3,8 @@ import {
   BookOpen,
   Database,
   Layers,
+  Lock,
+  LockOpen,
   Loader2,
   Play,
   RefreshCcw,
@@ -34,6 +36,7 @@ const L2_CATEGORIES = [
 export function LibraryPage({
   books,
   config,
+  indexPrompts,
   importTask,
   importBusy,
   l1Task,
@@ -53,6 +56,7 @@ export function LibraryPage({
   onL2Pause,
   onL2Resume,
   onBooksChanged,
+  onIndexPromptsSave,
   setError
 }) {
   const initialBookId = importTask?.payload?.bookId || books[0]?.book_id || "";
@@ -61,6 +65,7 @@ export function LibraryPage({
   const [l1Chapters, setL1Chapters] = useState([]);
   const [l2Coverage, setL2Coverage] = useState(null);
   const [l2Facts, setL2Facts] = useState([]);
+  const [promptSaving, setPromptSaving] = useState({ l1: false, l2: false });
   const [importForm, setImportForm] = useState({
     ...initialImportForm,
     book_id: initialBookId,
@@ -180,6 +185,22 @@ export function LibraryPage({
       endChapter: Number(l1Form.end_chapter),
       force: l1Form.force
     });
+  }
+
+  async function saveIndexPrompt(type, prompt) {
+    setPromptSaving((state) => ({ ...state, [type]: true }));
+    setError("");
+    try {
+      const payload = type === "l1"
+        ? { l1_index_prompt: prompt }
+        : { l2_index_prompt: prompt };
+      await onIndexPromptsSave(payload);
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    } finally {
+      setPromptSaving((state) => ({ ...state, [type]: false }));
+    }
   }
 
   async function startL2Index(modeOverride) {
@@ -354,6 +375,14 @@ export function LibraryPage({
             coverage={l1Coverage}
             chapters={l1Chapters}
           />
+          <IndexPromptEditor
+            key={`l1-${indexPrompts.l1_index_prompt_hash}`}
+            title="L1 构建 Prompt"
+            value={indexPrompts.l1_index_prompt}
+            hash={indexPrompts.l1_index_prompt_hash}
+            saving={promptSaving.l1}
+            onSave={(prompt) => saveIndexPrompt("l1", prompt)}
+          />
           <button className="primary" type="button" onClick={startL1Index} disabled={l1Busy || !selectedBookId || !config.openaiConfigured}>
             {l1Busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
             {l1Busy ? "索引中" : "构建 L1 索引"}
@@ -416,6 +445,14 @@ export function LibraryPage({
             </label>
           </div>
           <L2CoverageSummary coverage={l2Coverage} />
+          <IndexPromptEditor
+            key={`l2-${indexPrompts.l2_index_prompt_hash}`}
+            title="L2 构建 Prompt"
+            value={indexPrompts.l2_index_prompt}
+            hash={indexPrompts.l2_index_prompt_hash}
+            saving={promptSaving.l2}
+            onSave={(prompt) => saveIndexPrompt("l2", prompt)}
+          />
           <div className="action-row wrap">
             <button className="primary" type="button" onClick={() => startL2Index()} disabled={l2Busy || !selectedBookId || !config.openaiConfigured}>
               {l2Busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
@@ -595,6 +632,57 @@ function L2FactPreview({ facts }) {
           <p>构建 L2 后，这里会展示当前范围和分类下的首条类型化事实。</p>
         </article>
       )}
+    </div>
+  );
+}
+
+function IndexPromptEditor({ title, value, hash, saving, onSave }) {
+  const [locked, setLocked] = useState(true);
+  const [draft, setDraft] = useState(value);
+  const shortHash = String(hash || "").slice(0, 10);
+
+  async function handleSave() {
+    try {
+      await onSave(draft);
+      setLocked(true);
+    } catch {
+      // The parent already shows the user-facing error.
+    }
+  }
+
+  return (
+    <div className="index-prompt-card">
+      <div className="index-prompt-head">
+        <div>
+          <h3>{title}</h3>
+          <small>Hash {shortHash || "-"}</small>
+        </div>
+        <button
+          className="secondary inline"
+          type="button"
+          onClick={() => {
+            if (!locked) setDraft(value);
+            setLocked((state) => !state);
+          }}
+        >
+          {locked ? <Lock size={15} /> : <LockOpen size={15} />}
+          {locked ? "解锁编辑" : "锁定"}
+        </button>
+      </div>
+      <textarea
+        value={draft}
+        readOnly={locked}
+        onChange={(event) => setDraft(event.target.value)}
+        aria-label={title}
+      />
+      {!locked ? (
+        <div className="action-row wrap">
+          <button className="primary inline" type="button" onClick={handleSave} disabled={saving}>
+            {saving ? <Loader2 className="spin" size={15} /> : null}
+            保存 Prompt
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

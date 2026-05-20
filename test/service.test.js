@@ -557,6 +557,104 @@ test("builds L2 indexes, skips fresh facts, and keeps requests ZDR-shaped", asyn
   }
 });
 
+test("custom index prompts are saved, used by L1/L2 tasks, and change freshness hash", async () => {
+  const customL1 = "自定义 L1 Prompt：只提炼人物与事件。";
+  const customL2 = "自定义 L2 Prompt：只提炼可检索事实。";
+  const saved = db.saveIndexPromptSettings({
+    l1_index_prompt: customL1,
+    l2_index_prompt: customL2
+  });
+  assert.equal(saved.l1_index_prompt, customL1);
+  assert.equal(saved.l2_index_prompt, customL2);
+  assert.notEqual(saved.l1_index_prompt_hash, "l1-v1-chapter-window-10");
+  assert.notEqual(saved.l2_index_prompt_hash, "l2-v1-typed-facts");
+
+  await db.saveEncryptedChapter({
+    bookId: "book-index-prompt",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "陈平安得到木剑。"
+  });
+
+  const previousFetch = global.fetch;
+  const capturedBodies = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    if (!String(url).includes("api.openai.com/v1/responses")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    const body = JSON.parse(request.body);
+    capturedBodies.push(body);
+    const formatName = body.text?.format?.name;
+    const outputValue = formatName === "l1_chapter_index"
+      ? {
+        summary: "章节摘要",
+        keywords: [],
+        entities: [],
+        key_events: [],
+        items_places_orgs: [],
+        open_questions: [],
+        confidence: 0.8
+      }
+      : {
+        facts: [{
+          category: "item",
+          entity: "木剑",
+          aliases: [],
+          tags: [],
+          related_entities: ["陈平安"],
+          fact_type: "item_gain",
+          fact: "陈平安得到木剑。",
+          evidence: ["木剑"],
+          importance: 0.8,
+          confidence: 0.9
+        }]
+      };
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_index_prompt_${capturedBodies.length}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify(outputValue) }] }]
+      })
+    };
+  };
+
+  try {
+    const l1Task = workflows.startL1IndexTask({
+      book_id: "book-index-prompt",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l1Task);
+    assert.equal(l1Task.status, "completed");
+    assert.equal(db.getL1ChapterIndex("book-index-prompt", 1).prompt_hash, saved.l1_index_prompt_hash);
+    assert.equal(JSON.stringify(capturedBodies[0].input).includes(customL1), true);
+
+    const l2Task = workflows.startL2IndexTask({
+      book_id: "book-index-prompt",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l2Task);
+    assert.equal(l2Task.status, "completed");
+    assert.equal(db.getL2ChapterStatus("book-index-prompt", 1).prompt_hash, saved.l2_index_prompt_hash);
+    assert.equal(JSON.stringify(capturedBodies[1].input).includes(customL2), true);
+
+    const skippedL2 = workflows.startL2IndexTask({
+      book_id: "book-index-prompt",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(skippedL2);
+    assert.equal(skippedL2.progress.skipped, 1);
+    assert.equal(capturedBodies.length, 2);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("creates, edits, lists, and deletes prompt groups with categories", () => {
   const created = db.createPromptGroup({
     name: "角色定位 Prompt",

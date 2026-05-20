@@ -1,6 +1,6 @@
 # 小说章节安全分析台：项目基线
 
-最后更新：2026-05-20 01:05，Asia/Shanghai
+最后更新：2026-05-20 02:10，Asia/Shanghai
 
 本文档是当前项目的唯一真实信息源。后续线程、后续迭代，只要涉及项目目标、架构、安全边界、运行配置、关键决策、路线图或运维方式变化，都必须同步更新本文档。
 
@@ -10,7 +10,7 @@
 - 本地路径：`/Users/staff/Desktop/Vibe coding/novel-chapter-gpt-service`
 - Git 远程仓库：`git@github.com:fuer121/Dify-Flow.git`
 - 默认分支：`main`
-- 当前线程已知的最近推送基线提交：`16a0fa2 Add resilient staged final summaries`
+- 当前线程已知的最近推送基线版本：`Add editable index prompts`，精确提交哈希以 `git log -1 --oneline` 为准
 - GitHub CLI：已安装在 `~/.local/bin/gh`，当前登录用户为 `fuer121`
 
 ## 2. 项目目标
@@ -74,7 +74,7 @@ ifconfig | rg -n "inet (10|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.168)\\."
 
 当前部署验证：
 
-- 当前正式服务运行提交：`16a0fa2 Add resilient staged final summaries`
+- 当前正式服务运行版本：`Add editable index prompts`，精确提交哈希以 `git log -1 --oneline` 为准
 - `http://127.0.0.1:5184/api/config` 正常。
 - `http://192.168.1.163:5184/api/config` 正常。
 - `http://127.0.0.1:5184/api/openai/test` 正常，返回 `200`。
@@ -162,10 +162,13 @@ SQLite 数据目录：`data/`
   - 只查看章节元数据，不查看整章正文
   - 删除本地书籍数据
   - 构建逐章 L1 索引
+  - 构建 L2 类型化事实索引
   - 支持导入任务和 L1 任务的暂停/继续/取消
   - 支持导入完成后自动启动 L1 构建
   - 支持 L1 覆盖率卡片、章节表搜索、L1 完成/未完成/缺失/失败筛选
   - 章节表显示每章 L1 状态；当章节不在当前 L1 查看范围内时显示为“未读取”，避免误判为缺失
+  - 基础索引和 L2 类型化事实模块分别展示自己的构建 Prompt
+  - 索引构建 Prompt 默认锁定，只读展示；必须手动解锁后才能编辑和保存
 
 - `/prompts`：Prompt 库
   - 新建、编辑、删除 Prompt 组
@@ -223,6 +226,8 @@ Prompt：
 
 - `GET /api/prompts`
 - `PUT /api/prompts`
+- `GET /api/index-prompts`
+- `PUT /api/index-prompts`
 - `GET /api/prompt-groups`
 - `POST /api/prompt-groups`
 - `GET /api/prompt-groups/:id`
@@ -253,6 +258,7 @@ Prompt：
 - 历史 L1 窗口数据保留，但新任务不能再生成窗口索引。
 - 已成功的逐章 L1 索引会继续复用。
 - L1 Prompt Hash 继续使用 `l1-v1-chapter-window-10`，避免已完成的逐章索引被误判为过期。
+- L1 构建 Prompt 可在章节库页面查看和编辑；默认 Prompt 继续沿用兼容 Hash `l1-v1-chapter-window-10`，只有保存自定义 Prompt 后才使用新的 SHA-256 Hash 判断新索引是否过期。
 - L1 的 `missing` 表示尚未构建，不等于模型失败。
 - L1 的 `failed` 表示已有失败记录。
 - 出现成本保护、quota、billing、rate-limit 等系统性上游错误时，L1 任务应提前停止，不能继续把后续章节批量打成失败。
@@ -278,6 +284,14 @@ Prompt：
 - 分批压缩不能保证语义零损失；它的定位是降低超时和网关不稳定风险，同时通过章节覆盖校验和结构化证据字段降低核心信息丢失概率。
 - 由于 `apitokenzz.xyz` 网关在较大压缩请求上仍可能 180 秒 abort，压缩批次上限已降为约 1.8 万字符。
 - 汇总压缩和最终汇总阶段对 abort、网络失败、5xx、429、返回空 JSON 等瞬时错误最多重试 3 次；章节覆盖异常不重试，直接失败。
+
+### 索引构建 Prompt
+
+- L1 基础索引和 L2 类型化事实索引各自维护独立构建 Prompt。
+- 前端只展示构建 Prompt 本身，不展示章节正文、OpenAI 请求体或索引构建时的完整 Prompt body。
+- Prompt 编辑器默认锁定，解锁后才允许编辑；保存后会立即影响后续新建索引任务和覆盖率过期判断。
+- 默认 L1 Prompt 保持历史兼容 Hash `l1-v1-chapter-window-10`，默认 L2 Prompt 保持历史兼容 Hash `l2-v1-typed-facts`，避免已构建索引在功能上线后被批量误判为过期。
+- 保存自定义 L1/L2 Prompt 后，Hash 变为基于 Prompt 内容计算的 SHA-256；后续构建任务会按新 Hash 跳过、重建或标记过期。
 
 ### UI/UX
 
@@ -536,6 +550,12 @@ npm run preview:local
 - 预览服务可以随时重启，不影响线上 `5184` 正在运行的任务。
 
 ## 15. 变更记录
+
+- 2026-05-20：
+  - 正式环境已重启到 `Add editable index prompts` 版本。
+  - 基础索引和 L2 类型化事实模块新增各自独立的构建 Prompt 展示与编辑。
+  - 构建 Prompt 默认只读锁定，手动解锁后才能编辑；保存成功后自动恢复锁定。
+  - 默认 L1/L2 Prompt 继续使用历史兼容 Hash，避免已构建索引被批量误判过期。
 
 - 2026-05-20：
   - 正式环境已重启到 `16a0fa2 Add resilient staged final summaries`。

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, BarChart3, BookOpen, ClipboardList, ShieldCheck } from "lucide-react";
-import { apiGet, apiPost, followTask } from "./api.js";
+import { apiGet, apiPost, apiPut, followTask } from "./api.js";
 import { AnalysisPage } from "./pages/AnalysisPage.jsx";
 import { LibraryPage } from "./pages/LibraryPage.jsx";
 import { PromptLibraryPage } from "./pages/PromptLibraryPage.jsx";
@@ -16,6 +16,7 @@ export default function App() {
   const [config, setConfig] = useState(null);
   const [books, setBooks] = useState([]);
   const [prompts, setPrompts] = useState(null);
+  const [indexPrompts, setIndexPrompts] = useState(null);
   const [promptGroups, setPromptGroups] = useState([]);
   const [busy, setBusy] = useState(true);
   const [error, setError] = useState("");
@@ -128,15 +129,17 @@ export default function App() {
     setBusy(true);
     setError("");
     try {
-      const [configData, booksData, promptsData, promptGroupsData] = await Promise.all([
+      const [configData, booksData, promptsData, indexPromptsData, promptGroupsData] = await Promise.all([
         apiGet("/api/config"),
         apiGet("/api/books"),
         apiGet("/api/prompts"),
+        apiGet("/api/index-prompts"),
         apiGet("/api/prompt-groups")
       ]);
       setConfig(configData.runtime);
       setBooks(booksData.books || []);
       setPrompts(promptsData.prompts);
+      setIndexPrompts(indexPromptsData.indexPrompts);
       setPromptGroups(promptGroupsData.promptGroups || []);
     } catch (loadError) {
       setError(loadError.message);
@@ -193,6 +196,12 @@ export default function App() {
     const data = await apiGet("/api/prompt-groups");
     setPromptGroups(data.promptGroups || []);
     return data.promptGroups || [];
+  }
+
+  async function saveIndexPrompts(payload) {
+    const data = await apiPut("/api/index-prompts", payload);
+    setIndexPrompts(data.indexPrompts);
+    return data.indexPrompts;
   }
 
   async function startImport(importForm) {
@@ -384,7 +393,7 @@ export default function App() {
     ? `${(analysisProgress.completed || 0) + (analysisProgress.failed || 0) + (analysisProgress.skipped || 0)}/${analysisProgress.total} · ${analysisProgress.current || "后台分析中"}`
     : analysisProgress.current || "后台分析中";
 
-  if (busy || !config || !prompts) {
+  if (busy || !config || !prompts || !indexPrompts) {
     return <LoadingScreen />;
   }
 
@@ -468,6 +477,7 @@ export default function App() {
         <LibraryPage
           books={books}
           config={config}
+          indexPrompts={indexPrompts}
           importTask={importTask}
           importBusy={importBusy}
           l1Task={l1Task}
@@ -487,6 +497,7 @@ export default function App() {
           onL2Pause={() => controlL2("pause")}
           onL2Resume={() => controlL2("resume")}
           onBooksChanged={reloadBooks}
+          onIndexPromptsSave={saveIndexPrompts}
           setError={setError}
         />
       ) : route === "prompts" ? (

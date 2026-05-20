@@ -11,6 +11,22 @@ import {
   schemaFromFields
 } from "./schema.js";
 
+export const DEFAULT_L1_INDEX_PROMPT = [
+  "请为当前小说章节建立可复用 L1 基础索引。",
+  "要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；实体和事件尽量短句化，保留可用于后续分析的事实。"
+].join("\n");
+
+export const DEFAULT_L2_INDEX_PROMPT = [
+  "请为当前小说章节建立 L2 类型化事实索引。",
+  "目标：提取可复用、可检索、可追溯的事实单元，不要写长摘要，不要输出 Markdown。",
+  "分类只能使用：character、relationship、cultivation、force、item、location、event、foreshadowing、other。",
+  "每条事实必须短而明确，保留主体、相关主体、事实类型、重要度、置信度和少量证据摘记。",
+  "不要补充本章原文之外的信息；如果本章没有可复用事实，facts 输出空数组。"
+].join("\n");
+
+const DEFAULT_L1_INDEX_PROMPT_HASH = "l1-v1-chapter-window-10";
+const DEFAULT_L2_INDEX_PROMPT_HASH = "l2-v1-typed-facts";
+
 const dbPath = path.join(config.dataDir, "novel-chapters.sqlite");
 const db = new DatabaseSync(dbPath);
 
@@ -53,6 +69,8 @@ db.exec(`
     output_schema TEXT NOT NULL,
     schema_mode TEXT NOT NULL DEFAULT 'fields',
     schema_fields TEXT NOT NULL DEFAULT '[]',
+    l1_index_prompt TEXT NOT NULL DEFAULT '',
+    l2_index_prompt TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
   );
 
@@ -366,13 +384,20 @@ export function getPromptSettings() {
 }
 
 export function savePromptSettings(settings) {
+  const current = getPromptSettings();
   const next = normalizePromptSettings(settings);
+  if (!Object.hasOwn(settings, "l1_index_prompt")) {
+    next.l1_index_prompt = current.l1_index_prompt;
+  }
+  if (!Object.hasOwn(settings, "l2_index_prompt")) {
+    next.l2_index_prompt = current.l2_index_prompt;
+  }
   db.prepare(`
     INSERT INTO prompt_settings (
       id, name, model, reasoning_effort, chapter_prompt, summary_prompt,
-      output_schema, schema_mode, schema_fields, updated_at
+      output_schema, schema_mode, schema_fields, l1_index_prompt, l2_index_prompt, updated_at
     )
-    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('default', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       name = excluded.name,
       model = excluded.model,
@@ -382,6 +407,8 @@ export function savePromptSettings(settings) {
       output_schema = excluded.output_schema,
       schema_mode = excluded.schema_mode,
       schema_fields = excluded.schema_fields,
+      l1_index_prompt = excluded.l1_index_prompt,
+      l2_index_prompt = excluded.l2_index_prompt,
       updated_at = excluded.updated_at
   `).run(
     next.name,
@@ -392,9 +419,31 @@ export function savePromptSettings(settings) {
     next.output_schema,
     next.schema_mode,
     JSON.stringify(next.schema_fields),
+    next.l1_index_prompt,
+    next.l2_index_prompt,
     nowIso()
   );
   return getPromptSettings();
+}
+
+export function getIndexPromptSettings() {
+  const settings = getPromptSettings();
+  return {
+    l1_index_prompt: settings.l1_index_prompt,
+    l2_index_prompt: settings.l2_index_prompt,
+    l1_index_prompt_hash: l1IndexPromptHash(settings),
+    l2_index_prompt_hash: l2IndexPromptHash(settings),
+    updated_at: settings.updated_at
+  };
+}
+
+export function saveIndexPromptSettings(settings = {}) {
+  const current = getPromptSettings();
+  const patch = { ...current };
+  if (Object.hasOwn(settings, "l1_index_prompt")) patch.l1_index_prompt = settings.l1_index_prompt;
+  if (Object.hasOwn(settings, "l2_index_prompt")) patch.l2_index_prompt = settings.l2_index_prompt;
+  savePromptSettings(patch);
+  return getIndexPromptSettings();
 }
 
 export function listPromptGroups(category) {
@@ -1196,6 +1245,18 @@ export function schemaHash(settings) {
   return sha256(settings.output_schema);
 }
 
+export function l1IndexPromptHash(settings = getPromptSettings()) {
+  return isDefaultL1IndexPrompt(settings.l1_index_prompt)
+    ? DEFAULT_L1_INDEX_PROMPT_HASH
+    : sha256(`l1-index-v2\n${settings.l1_index_prompt}`);
+}
+
+export function l2IndexPromptHash(settings = getPromptSettings()) {
+  return isDefaultL2IndexPrompt(settings.l2_index_prompt)
+    ? DEFAULT_L2_INDEX_PROMPT_HASH
+    : sha256(`l2-index-v2\n${settings.l2_index_prompt}`);
+}
+
 export function normalizePromptSettings(settings = {}) {
   const schemaMode = normalizeSchemaMode(settings.schema_mode);
   const schemaFields = normalizeSchemaFields(settings.schema_fields);
@@ -1210,7 +1271,9 @@ export function normalizePromptSettings(settings = {}) {
     summary_prompt: String(settings.summary_prompt || defaultSummaryPrompt()).trim(),
     output_schema: JSON.stringify(schema, null, 2),
     schema_mode: schemaMode,
-    schema_fields: schemaFields
+    schema_fields: schemaFields,
+    l1_index_prompt: normalizeIndexPrompt(settings.l1_index_prompt, DEFAULT_L1_INDEX_PROMPT),
+    l2_index_prompt: normalizeIndexPrompt(settings.l2_index_prompt, DEFAULT_L2_INDEX_PROMPT)
   };
 }
 
@@ -1218,10 +1281,25 @@ function normalizeReasoningEffort(value) {
   return ["none", "low", "medium", "high", "xhigh"].includes(value) ? value : "medium";
 }
 
+function normalizeIndexPrompt(value, fallback) {
+  const prompt = String(value || fallback || "").trim();
+  return prompt || fallback;
+}
+
+function isDefaultL1IndexPrompt(value) {
+  return normalizeIndexPrompt(value, DEFAULT_L1_INDEX_PROMPT) === DEFAULT_L1_INDEX_PROMPT;
+}
+
+function isDefaultL2IndexPrompt(value) {
+  return normalizeIndexPrompt(value, DEFAULT_L2_INDEX_PROMPT) === DEFAULT_L2_INDEX_PROMPT;
+}
+
 function migrateSchema() {
   ensureColumn("books", "book_name", "book_name TEXT NOT NULL DEFAULT ''");
   ensureColumn("prompt_settings", "schema_mode", "schema_mode TEXT NOT NULL DEFAULT 'fields'");
   ensureColumn("prompt_settings", "schema_fields", "schema_fields TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn("prompt_settings", "l1_index_prompt", "l1_index_prompt TEXT NOT NULL DEFAULT ''");
+  ensureColumn("prompt_settings", "l2_index_prompt", "l2_index_prompt TEXT NOT NULL DEFAULT ''");
   ensureColumn("analysis_runs", "name", "name TEXT NOT NULL DEFAULT ''");
   ensureColumn("analysis_runs", "chapter_selection", "chapter_selection TEXT NOT NULL DEFAULT ''");
   ensureColumn("analysis_runs", "source_stats", "source_stats TEXT NOT NULL DEFAULT ''");
@@ -1266,10 +1344,17 @@ function normalizePromptGroup(payload = {}) {
 
 function publicPromptSettings(row) {
   if (!row) return normalizePromptSettings({});
-  return {
+  const settings = {
     ...row,
     schema_mode: normalizeSchemaMode(row.schema_mode),
-    schema_fields: normalizeSchemaFields(row.schema_fields)
+    schema_fields: normalizeSchemaFields(row.schema_fields),
+    l1_index_prompt: normalizeIndexPrompt(row.l1_index_prompt, DEFAULT_L1_INDEX_PROMPT),
+    l2_index_prompt: normalizeIndexPrompt(row.l2_index_prompt, DEFAULT_L2_INDEX_PROMPT)
+  };
+  return {
+    ...settings,
+    l1_index_prompt_hash: l1IndexPromptHash(settings),
+    l2_index_prompt_hash: l2IndexPromptHash(settings)
   };
 }
 

@@ -9,7 +9,9 @@ import {
   deletePromptGroup,
   getPromptGroup,
   getPromptSettings,
+  getIndexPromptSettings,
   getL1Coverage,
+  l1IndexPromptHash,
   listL1ChapterIndexes,
   listL1WindowIndexes,
   listAnalysisRuns,
@@ -17,6 +19,7 @@ import {
   listChapterMetadata,
   listPromptGroups,
   updatePromptGroup,
+  saveIndexPromptSettings,
   savePromptSettings
 } from "./db.js";
 import { cancelTask, getTask, listTasks, pauseTask, publicTask, resumeTask, subscribeTask } from "./tasks.js";
@@ -193,7 +196,7 @@ app.get("/api/books/:bookId/l1-indexes/coverage", (request, response, next) => {
         startChapter: request.query.start_chapter || request.query.startChapter || 1,
         endChapter: request.query.end_chapter || request.query.endChapter || 1,
         model: settings.model,
-        promptHash: "l1-v1-chapter-window-10",
+        promptHash: l1IndexPromptHash(settings),
         windowSize: 10,
         includeWindows: false
       })
@@ -399,6 +402,18 @@ app.get("/api/prompts", (_request, response) => {
 app.put("/api/prompts", (request, response, next) => {
   try {
     response.json({ ok: true, prompts: savePromptSettings(request.body || {}) });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/index-prompts", (_request, response) => {
+  response.json({ ok: true, indexPrompts: getIndexPromptSettings() });
+});
+
+app.put("/api/index-prompts", (request, response, next) => {
+  try {
+    response.json({ ok: true, indexPrompts: saveIndexPromptSettings(request.body || {}) });
   } catch (error) {
     next(error);
   }

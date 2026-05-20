@@ -14,6 +14,8 @@ import {
   getL2ChapterStatus,
   getL2Coverage,
   getPromptSettings,
+  l1IndexPromptHash,
+  l2IndexPromptHash,
   listL2Facts,
   listAnalysisChapterMetadata,
   listChapterMetadata,
@@ -299,7 +301,7 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
   const promptSettings = getPromptSettings();
   const model = promptSettings.model;
   const reasoningEffort = promptSettings.reasoning_effort;
-  const indexPromptHash = l1PromptHash();
+  const indexPromptHash = l1IndexPromptHash(promptSettings);
   try {
     const chapters = listChapterMetadata(bookId)
       .filter((chapter) => chapter.chapter_index >= startChapter && chapter.chapter_index <= endChapter);
@@ -347,7 +349,8 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
           input: buildL1ChapterInput({
             chapterIndex: chapter.chapter_index,
             title: chapter.title,
-            content
+            content,
+            indexPrompt: promptSettings.l1_index_prompt
           }),
           schema: l1ChapterIndexSchema(),
           schemaName: "l1_chapter_index"
@@ -404,7 +407,7 @@ async function runL2IndexTask(task, { bookId, startChapter, endChapter, force, m
   const promptSettings = getPromptSettings();
   const model = promptSettings.model;
   const reasoningEffort = promptSettings.reasoning_effort;
-  const indexPromptHash = l2PromptHash();
+  const indexPromptHash = l2IndexPromptHash(promptSettings);
   try {
     const chapters = listChapterMetadata(bookId)
       .filter((chapter) => chapter.chapter_index >= startChapter && chapter.chapter_index <= endChapter);
@@ -475,7 +478,8 @@ async function runL2IndexTask(task, { bookId, startChapter, endChapter, force, m
             chapterIndex: chapter.chapter_index,
             title: chapter.title,
             content,
-            l1Index
+            l1Index,
+            indexPrompt: promptSettings.l2_index_prompt
           }),
           schema: l2ChapterFactsSchema(),
           schemaName: "l2_chapter_facts"
@@ -811,6 +815,7 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
   const selectedIndexes = chapters.map((chapter) => chapter.chapter_index);
   const categories = inferL2CategoriesFromPrompt(settings.summary_prompt);
   const entityQuery = inferEntityQueryFromPrompt(settings.summary_prompt);
+  const indexPromptHash = l2IndexPromptHash(settings);
   await waitIfPaused(task);
   updateTask(task, {
     progress: { ...task.progress, current: "L2 召回事实" },
@@ -858,7 +863,8 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
         chapterIndex: chapter.chapter_index,
         title: chapter.title,
         content,
-        l1Index: null
+        l1Index: null,
+        indexPrompt: settings.l2_index_prompt
       }),
       schema: l2ChapterFactsSchema(),
       schemaName: "l2_source_review"
@@ -870,7 +876,7 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
       status: "completed",
       sourceHmac: chapter.content_hmac,
       model,
-      promptHash: l2PromptHash(),
+      promptHash: indexPromptHash,
       schemaVersion: L2_SCHEMA_VERSION,
       facts: reviewFacts
     });
@@ -1559,7 +1565,7 @@ export function getL2IndexCoverageForBook({ bookId, startChapter, endChapter }) 
     startChapter,
     endChapter,
     model: settings.model,
-    promptHash: l2PromptHash(),
+    promptHash: l2IndexPromptHash(settings),
     schemaVersion: L2_SCHEMA_VERSION
   });
 }
@@ -1580,15 +1586,6 @@ function rangeIndexes(start, end) {
   const indexes = [];
   for (let index = start; index <= end; index += 1) indexes.push(index);
   return indexes;
-}
-
-function l1PromptHash() {
-  // Keep the legacy hash so already-built chapter L1 indexes remain reusable.
-  return "l1-v1-chapter-window-10";
-}
-
-function l2PromptHash() {
-  return "l2-v1-typed-facts";
 }
 
 function isFatalUpstreamError(message) {
