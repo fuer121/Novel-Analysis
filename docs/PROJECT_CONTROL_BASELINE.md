@@ -119,7 +119,7 @@ SQLite 数据目录：`data/`
 - `src/App.jsx`：应用壳、轻量路由、全局任务状态
 - `src/pages/AnalysisPage.jsx`：分析任务中心
 - `src/pages/LibraryPage.jsx`：书籍导入、章节元数据、L1 索引控制
-- `src/pages/PromptLibraryPage.jsx`：Prompt 组管理
+- `src/pages/PromptLibraryPage.jsx`：分析 Prompt 库
 - `src/ui.jsx`：通用 UI 组件
 - `src/schemaTools.js`：Schema 和结果展示辅助逻辑
 
@@ -170,12 +170,13 @@ SQLite 数据目录：`data/`
   - 基础索引和 L2 类型化事实模块分别展示自己的构建 Prompt
   - 索引构建 Prompt 默认锁定，只读展示；必须手动解锁后才能编辑和保存
 
-- `/prompts`：Prompt 库
-  - 新建、编辑、删除 Prompt 组
-  - 修改 Prompt 组名称
-  - 为 Prompt 组设置分类
-  - 每组包含逐章 Prompt 和汇总 Prompt
-  - 编辑 Prompt 组时提示未保存修改，切换或新建前会二次确认
+- `/prompts`：分析 Prompt 库
+  - 新建、编辑、删除分析 Prompt
+  - 修改分析 Prompt 名称
+  - 为分析 Prompt 设置分类
+  - 主要维护最终分析/汇总使用的分析 Prompt
+  - 不再把逐章 Prompt 作为主字段；历史逐章 Prompt 数据只做兼容保留
+  - 编辑分析 Prompt 时提示未保存修改，切换或新建前会二次确认
 
 ## 7. 当前公开接口
 
@@ -234,6 +235,8 @@ Prompt：
 - `PUT /api/prompt-groups/:id`
 - `DELETE /api/prompt-groups/:id`
 
+说明：`prompt-groups` 路径为历史兼容命名，当前产品语义是“分析 Prompt 库”。
+
 ## 8. 关键决策
 
 ### Dify
@@ -266,6 +269,10 @@ Prompt：
 ### 分析任务
 
 - 默认分析路径已改为 `analysis_mode=balanced`：先从 L2 类型化事实索引召回，再按预算复核少量高风险原文章节。
+- 分析页的 Prompt 配置以分析 Prompt 为主；选择 `/prompts` 中的条目时，只覆盖最终分析/汇总用的 `summary_prompt`，不覆盖逐章 Prompt。
+- 逐章 Prompt 保留为高级兼容项，默认收起，主要服务 `full_text` 或明确需要逐章精读的场景。
+- 分析模式、复核预算、输出格式仍属于创建分析任务模块，不进入分析 Prompt 库。
+- 主体关键词、分析维度和筛选目标由用户写进分析 Prompt，不做单独下拉字段。
 - `use_l1_context=false` 是默认值。
 - 当 `use_l1_context=true` 时，每章 Prompt 会附加对应章节的 L1 JSON。
 - L1 覆盖缺失只提示，不阻塞分析。
@@ -288,6 +295,7 @@ Prompt：
 ### 索引构建 Prompt
 
 - L1 基础索引和 L2 类型化事实索引各自维护独立构建 Prompt。
+- 索引构建 Prompt 只在 `/library` 对应模块中管理，不进入 `/prompts` 分析 Prompt 库。
 - 前端只展示构建 Prompt 本身，不展示章节正文、OpenAI 请求体或索引构建时的完整 Prompt body。
 - Prompt 编辑器默认锁定，解锁后才允许编辑；保存后会立即影响后续新建索引任务和覆盖率过期判断。
 - 默认 L1 Prompt 保持历史兼容 Hash `l1-v1-chapter-window-10`，默认 L2 Prompt 保持历史兼容 Hash `l2-v1-typed-facts`，避免已构建索引在功能上线后被批量误判为过期。
@@ -550,6 +558,12 @@ npm run preview:local
 - 预览服务可以随时重启，不影响线上 `5184` 正在运行的任务。
 
 ## 15. 变更记录
+
+- 2026-05-20：
+  - Prompt 库重定位为“分析 Prompt 库”，只把最终分析/汇总 Prompt 作为主字段。
+  - 创建分析任务选择分析 Prompt 时，只覆盖汇总 Prompt，不覆盖逐章 Prompt。
+  - 逐章 Prompt 降级为分析页高级兼容项，默认收起。
+  - 明确 Prompt 三层边界：`/library` 管索引构建 Prompt，`/prompts` 管分析 Prompt，`/` 管分析模式、复核预算、输出格式和高级逐章 Prompt。
 
 - 2026-05-20：
   - 正式环境已重启到 `Add editable index prompts` 版本。

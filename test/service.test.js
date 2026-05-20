@@ -681,6 +681,26 @@ test("creates, edits, lists, and deletes prompt groups with categories", () => {
   assert.equal(db.getPromptGroup(created.id), undefined);
 });
 
+test("analysis prompt groups can save summary prompt without chapter prompt", () => {
+  const created = db.createPromptGroup({
+    name: "势力关系分析",
+    category: "通用",
+    summary_prompt: "只分析宗门势力关系"
+  });
+
+  assert.equal(created.name, "势力关系分析");
+  assert.equal(created.summary_prompt, "只分析宗门势力关系");
+  assert.equal(created.chapter_prompt, "");
+
+  const updated = db.updatePromptGroup(created.id, {
+    summary_prompt: "改为分析人物关系"
+  });
+  assert.equal(updated.summary_prompt, "改为分析人物关系");
+  assert.equal(updated.chapter_prompt, "");
+
+  assert.equal(db.deletePromptGroup(created.id).deleted, true);
+});
+
 test("imports once, skips stored chapters, and analyzes from encrypted local store", async () => {
   const previousFetch = global.fetch;
   let difyCalls = 0;

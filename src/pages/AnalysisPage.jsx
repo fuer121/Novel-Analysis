@@ -4,12 +4,12 @@ import {
   ChevronRight,
   Copy,
   FileText,
+  Gauge,
   Layers,
   Loader2,
   Plus,
   Play,
   RefreshCcw,
-  Save,
   Settings2,
   Table2,
   Trash2
@@ -66,6 +66,7 @@ export function AnalysisPage({
   const [chaptersExpanded, setChaptersExpanded] = useState(false);
   const [selectedAnalysis, setSelectedAnalysis] = useState(null);
   const [busy, setBusy] = useState({ analysis: false, prompts: false, chapters: false, list: false });
+  const [advancedPromptExpanded, setAdvancedPromptExpanded] = useState(false);
 
   useEffect(() => {
     if (analysisTask?.result?.analysisId && selectedAnalysis?.id === analysisTask.result.analysisId) {
@@ -304,7 +305,6 @@ export function AnalysisPage({
     setPromptDraft((current) => ({
       ...current,
       name: group.name,
-      chapter_prompt: group.chapter_prompt,
       summary_prompt: group.summary_prompt
     }));
   }
@@ -477,7 +477,7 @@ export function AnalysisPage({
         </Panel>
 
         <div className="split">
-          <Panel icon={Settings2} title="Prompt 配置">
+          <Panel icon={Settings2} title="分析 Prompt">
             <PromptEditor
               prompt={promptDraft}
               promptGroups={promptGroups}
@@ -487,6 +487,8 @@ export function AnalysisPage({
               onSave={savePrompts}
               busy={busy.prompts}
               dirty={promptDirty}
+              advancedExpanded={advancedPromptExpanded}
+              onAdvancedExpandedChange={setAdvancedPromptExpanded}
             />
           </Panel>
 
@@ -623,7 +625,18 @@ function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDele
   );
 }
 
-function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGroupChange, onChange, onSave, busy, dirty }) {
+function PromptEditor({
+  prompt,
+  promptGroups,
+  selectedPromptGroupId,
+  onPromptGroupChange,
+  onChange,
+  onSave,
+  busy,
+  dirty,
+  advancedExpanded,
+  onAdvancedExpandedChange
+}) {
   function updatePrompt(patch) {
     onChange((current) => ({ ...current, ...patch }));
   }
@@ -631,12 +644,12 @@ function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGro
   return (
     <div className="prompt-editor">
       <div className={dirty ? "draft-banner active" : "draft-banner"}>
-        {dirty ? "当前 Prompt 已修改。开始分析会使用这份草稿；保存后才会更新默认 Prompt。" : "当前使用默认 Prompt 或已保存模板。"}
+        {dirty ? "当前 Prompt 已修改。开始分析会使用这份草稿；保存后才会更新默认 Prompt。" : "当前使用默认 Prompt 或已保存分析 Prompt。"}
       </div>
       <label>
-        <span>Prompt 组</span>
+        <span>选择分析 Prompt</span>
         <select value={selectedPromptGroupId} onChange={(event) => onPromptGroupChange(event.target.value)}>
-          <option value="">手动编辑当前 Prompt</option>
+          <option value="">手动编辑当前分析 Prompt</option>
           {promptGroups.map((group) => (
             <option key={group.id} value={group.id}>{group.category} · {group.name}</option>
           ))}
@@ -645,7 +658,7 @@ function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGro
 
       <div className="form-grid compact">
         <label>
-          <span>模板名</span>
+          <span>名称</span>
           <input value={prompt.name} onChange={(event) => updatePrompt({ name: event.target.value })} />
         </label>
         <label>
@@ -663,16 +676,32 @@ function PromptEditor({ prompt, promptGroups, selectedPromptGroupId, onPromptGro
       </div>
 
       <label>
-        <span>逐章 Prompt</span>
-        <textarea value={prompt.chapter_prompt} onChange={(event) => updatePrompt({ chapter_prompt: event.target.value })} />
-      </label>
-      <label>
-        <span>汇总 Prompt</span>
+        <span>分析 Prompt</span>
         <textarea value={prompt.summary_prompt} onChange={(event) => updatePrompt({ summary_prompt: event.target.value })} />
       </label>
 
+      <div className="selector-card prompt-advanced-card">
+        <button
+          type="button"
+          className="selector-summary"
+          onClick={() => onAdvancedExpandedChange((value) => !value)}
+        >
+          <span className="selector-summary-title">
+            {advancedExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+            高级逐章 Prompt
+          </span>
+          <span>主要用于全文精读</span>
+        </button>
+        {advancedExpanded ? (
+          <label className="prompt-advanced-field">
+            <span>逐章 Prompt</span>
+            <textarea value={prompt.chapter_prompt} onChange={(event) => updatePrompt({ chapter_prompt: event.target.value })} />
+          </label>
+        ) : null}
+      </div>
+
       <button className="secondary" type="button" onClick={onSave} disabled={busy}>
-        {busy ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
+        {busy ? <Loader2 className="spin" size={16} /> : <Gauge size={16} />}
         保存为默认 Prompt
       </button>
     </div>

@@ -1270,6 +1270,15 @@ code {
   margin-top: 12px;
 }
 
+.prompt-advanced-card {
+  margin-top: 0;
+}
+
+.prompt-advanced-field {
+  display: grid;
+  gap: 6px;
+}
+
 .selector-summary {
   min-height: 42px;
   display: flex;

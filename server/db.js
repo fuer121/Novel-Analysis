@@ -1334,11 +1334,12 @@ function seedDefaultPromptGroups() {
 }
 
 function normalizePromptGroup(payload = {}) {
+  const summaryPrompt = String(payload.summary_prompt || "").trim();
   return {
-    name: String(payload.name || "未命名 Prompt 组").trim().slice(0, 120) || "未命名 Prompt 组",
+    name: String(payload.name || "未命名分析 Prompt").trim().slice(0, 120) || "未命名分析 Prompt",
     category: normalizePromptCategory(payload.category),
-    chapter_prompt: String(payload.chapter_prompt || defaultChapterPrompt()).trim(),
-    summary_prompt: String(payload.summary_prompt || defaultSummaryPrompt()).trim()
+    chapter_prompt: String(payload.chapter_prompt || "").trim(),
+    summary_prompt: summaryPrompt || defaultSummaryPrompt()
   };
 }
 
