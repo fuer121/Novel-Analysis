@@ -753,8 +753,28 @@ function parseOutputSchemaOrNull(value) {
 }
 
 function shouldUseJsonFinalSummary(userPrompt) {
-  const prompt = String(userPrompt || "").toLowerCase();
-  return !prompt.includes("不要 json") && !prompt.includes("纯文本") && !prompt.includes("plain text");
+  const prompt = String(userPrompt || "");
+  const lower = prompt.toLowerCase();
+  if (
+    /不要\s*(输出)?\s*json/i.test(prompt)
+    || /不(?:要|用|需要)\s*(输出)?\s*json/i.test(prompt)
+    || /禁止\s*(输出)?\s*json/i.test(prompt)
+    || /纯文本/.test(prompt)
+    || /(?<!不)(?<!不要)(?<!禁止)(?:输出|使用|采用|按照|按|以)[^。；\n]*markdown/i.test(prompt)
+    || /(?<!不)(?<!不要)(?<!禁止)markdown[^。；\n]*(?:格式|输出|呈现)/i.test(prompt)
+    || /(?<!不)(?<!不要)(?<!禁止)表格/.test(prompt)
+    || /按(?:照)?[^。；\n]*(格式|模板)[^。；\n]*(输出|呈现)/.test(prompt)
+    || lower.includes("plain text")
+  ) {
+    return false;
+  }
+  return /json\s*schema/i.test(prompt)
+    || /schema\s*json/i.test(prompt)
+    || /给定\s*(?:的)?\s*(?:json\s*)?schema/i.test(prompt)
+    || /匹配[^。；\n]*(?:json\s*)?schema/i.test(prompt)
+    || /符合[^。；\n]*(?:json\s*)?schema/i.test(prompt)
+    || /按[^。；\n]*(?:json\s*)?schema/i.test(prompt)
+    || /最终输出必须匹配给定\s*json\s*schema/i.test(prompt);
 }
 
 function inputTextLength(input) {
@@ -844,8 +864,24 @@ function assertFinalSummaryUseful(finalResult, sourceChapterCount) {
   const items = Array.isArray(finalResult.items) ? finalResult.items : [];
   const hasUsefulSummary = Boolean(summary) && !isPlaceholderText(summary);
   const hasUsefulTitle = Boolean(title) && !isPlaceholderText(title);
-  if (items.length || hasUsefulSummary || hasUsefulTitle) return;
+  if (items.length || hasUsefulSummary || hasUsefulTitle || hasAnyUsefulCustomValue(finalResult)) return;
   throw finalSummaryQualityError();
+}
+
+function hasAnyUsefulCustomValue(value) {
+  for (const [key, entry] of Object.entries(value)) {
+    if (["title", "summary", "items", "failed_chapters"].includes(key)) continue;
+    if (isUsefulFinalValue(entry)) return true;
+  }
+  return false;
+}
+
+function isUsefulFinalValue(value) {
+  if (typeof value === "string") return Boolean(value.trim()) && !isPlaceholderText(value);
+  if (typeof value === "number" || typeof value === "boolean") return true;
+  if (Array.isArray(value)) return value.some((item) => isUsefulFinalValue(item));
+  if (value && typeof value === "object") return Object.values(value).some((entry) => isUsefulFinalValue(entry));
+  return false;
 }
 
 function isPlaceholderText(value) {
