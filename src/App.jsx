@@ -412,8 +412,8 @@ export default function App() {
         <div className="brand">
           <div className="brand-mark"><ShieldCheck size={22} /></div>
           <div>
-            <h1>小说章节安全分析台</h1>
-            <p>本地加密章节库 · 任务级 Prompt · GPT 结构化分析</p>
+            <h1>小说分析台</h1>
+            <p>本地库 · 索引 · 分析</p>
           </div>
         </div>
         <RuntimeGrid config={config} />
@@ -427,7 +427,7 @@ export default function App() {
             onClick={() => navigate("analysis")}
           >
             <BarChart3 size={16} />
-            分析任务中心
+            分析
           </button>
           <button
             type="button"
@@ -435,7 +435,7 @@ export default function App() {
             onClick={() => navigate("library")}
           >
             <BookOpen size={16} />
-            书籍章节库
+            书库
           </button>
           <button
             type="button"
@@ -511,22 +511,12 @@ export default function App() {
         <PromptLibraryPage
           books={books}
           config={config}
-          l1Task={l1Task}
-          l1Busy={l1Busy}
-          l2Task={l2Task}
-          l2Busy={l2Busy}
           onCreateBook={createBook}
           onBooksChanged={reloadBooks}
           onLoadBookIndexPrompts={loadBookIndexPrompts}
           onSaveBookIndexPrompts={saveBookIndexPrompts}
           onStartL1Index={startL1Index}
           onStartL2Index={startL2Index}
-          onL1Cancel={() => controlL1("cancel")}
-          onL1Pause={() => controlL1("pause")}
-          onL1Resume={() => controlL1("resume")}
-          onL2Cancel={() => controlL2("cancel")}
-          onL2Pause={() => controlL2("pause")}
-          onL2Resume={() => controlL2("resume")}
           onLoadPromptGroups={loadPromptGroupsForBook}
           onPromptGroupsChanged={reloadPromptGroups}
           setError={setError}
@@ -537,7 +527,6 @@ export default function App() {
           config={config}
           prompts={prompts}
           onLoadPromptGroups={loadPromptGroupsForBook}
-          l1Task={l1Task}
           analysisTask={analysisTask}
           analysisBusy={analysisBusy}
           onStartAnalysis={startAnalysis}

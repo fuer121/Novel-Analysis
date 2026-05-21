@@ -524,8 +524,15 @@ app.delete("/api/prompt-groups/:id", (request, response, next) => {
   }
 });
 
-app.use(express.static(staticDir));
+app.use(express.static(staticDir, {
+  setHeaders(response, filePath) {
+    if (filePath.endsWith(".html") || filePath.endsWith(".js") || filePath.endsWith(".css")) {
+      response.setHeader("Cache-Control", "no-store");
+    }
+  }
+}));
 app.get(/.*/, (_request, response) => {
+  response.setHeader("Cache-Control", "no-store");
   response.sendFile(path.resolve(staticDir, "index.html"));
 });
 
