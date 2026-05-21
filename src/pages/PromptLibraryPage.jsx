@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from "react";
 import {
   BookPlus,
   ClipboardList,
+  Copy,
   Database,
   Folder,
+  Lightbulb,
   Loader2,
   Lock,
   LockOpen,
@@ -13,7 +15,7 @@ import {
   Trash2
 } from "lucide-react";
 import { apiDelete, apiPost, apiPut, formatTime } from "../api.js";
-import { IconButton, Panel, TaskBox } from "../ui.jsx";
+import { IconButton, Panel } from "../ui.jsx";
 
 const emptyDraft = {
   id: "",
@@ -25,28 +27,37 @@ const emptyDraft = {
 
 const emptyBookForm = { book_id: "", book_name: "" };
 
+const l1WritingTips = [
+  "L1 只做章节路标，不写深度设定集。",
+  "所有内容贴近本章原文，禁止补全和脑补。",
+  "优先记录可被后续检索的线索。",
+  "控制长度，结构清晰，不堆流水账。",
+  "给关键信息标置信度和缺失提示。"
+];
+
+const l2WritingTips = [
+  "L2 只抽可复用事实，不写章节摘要。",
+  "主体、别名、相关主体要稳定，方便后续召回。",
+  "事实颗粒要小而完整，避免把多件事揉成一条。",
+  "每条事实保留证据摘记、重要度和置信度。",
+  "分类服务分析目标，当前重点是人物、关系、修行、剑与本命物。"
+];
+
 export function PromptLibraryPage({
   books,
-  l1Task,
-  l2Task,
   onCreateBook,
   onBooksChanged,
   onLoadBookIndexPrompts,
   onSaveBookIndexPrompts,
   onStartL1Index,
   onStartL2Index,
-  onL1Cancel,
-  onL1Pause,
-  onL1Resume,
-  onL2Cancel,
-  onL2Pause,
-  onL2Resume,
   onLoadPromptGroups,
   onPromptGroupsChanged,
   setError
 }) {
   const [selectedBookId, setSelectedBookId] = useState(() => bookIdFromUrl() || books[0]?.book_id || "");
   const [bookForm, setBookForm] = useState(emptyBookForm);
+  const [showBookForm, setShowBookForm] = useState(false);
   const [creatingBook, setCreatingBook] = useState(false);
   const [bookPromptGroups, setBookPromptGroups] = useState([]);
   const [selectedId, setSelectedId] = useState("");
@@ -111,6 +122,7 @@ export function PromptLibraryPage({
     try {
       const book = await onCreateBook(bookForm);
       setBookForm(emptyBookForm);
+      setShowBookForm(false);
       setSelectedBookId(book.book_id);
     } catch (error) {
       setError(error.message);
@@ -226,7 +238,7 @@ export function PromptLibraryPage({
     <section className="prompt-workbench">
       <Panel
         icon={Folder}
-        title="书籍 Prompt 工作台"
+        title="Prompt 管理"
         action={<IconButton icon={RefreshCcw} label="刷新" onClick={refreshAll} />}
       >
         <div className="book-tabs-row">
@@ -242,33 +254,51 @@ export function PromptLibraryPage({
             </button>
           ))}
         </div>
-        <div className="form-grid new-book-grid">
-          <label>
-            <span>小说 ID</span>
-            <input value={bookForm.book_id} onChange={(event) => setBookForm({ ...bookForm, book_id: event.target.value })} />
-          </label>
-          <label>
-            <span>书籍名称</span>
-            <input value={bookForm.book_name} onChange={(event) => setBookForm({ ...bookForm, book_name: event.target.value })} />
-          </label>
-          <button className="secondary" type="button" onClick={createBook} disabled={creatingBook}>
-            {creatingBook ? <Loader2 className="spin" size={16} /> : <BookPlus size={16} />}
+        {showBookForm ? (
+          <div className="form-grid new-book-grid">
+            <label>
+              <span>小说 ID</span>
+              <input value={bookForm.book_id} onChange={(event) => setBookForm({ ...bookForm, book_id: event.target.value })} />
+            </label>
+            <label>
+              <span>书籍名称</span>
+              <input value={bookForm.book_name} onChange={(event) => setBookForm({ ...bookForm, book_name: event.target.value })} />
+            </label>
+            <div className="new-book-actions">
+              <button className="secondary" type="button" onClick={createBook} disabled={creatingBook}>
+                {creatingBook ? <Loader2 className="spin" size={16} /> : <BookPlus size={16} />}
+                保存
+              </button>
+              <button
+                className="ghost"
+                type="button"
+                onClick={() => {
+                  setBookForm(emptyBookForm);
+                  setShowBookForm(false);
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button className="secondary new-book-trigger" type="button" onClick={() => setShowBookForm(true)}>
+            <BookPlus size={16} />
             新建书籍
           </button>
-        </div>
+        )}
       </Panel>
 
       <div className="prompt-workbench-grid">
         <section className="prompt-index-column">
-          <Panel icon={Database} title="书籍索引 Prompt" action={<PromptBookMeta book={selectedBook} />}>
+          <Panel icon={Database} title="索引 Prompt" action={<PromptBookMeta book={selectedBook} />}>
             {!selectedBookId || !indexPrompts ? (
-              <div className="empty-state">请选择一本书</div>
+              <div className="empty-state">选择书籍</div>
             ) : (
               <div className="index-prompt-stack">
                 <IndexPromptEditor
                   key={`l1-${selectedBookId}-${indexPrompts.l1_index_prompt_hash}-${indexPrompts.updated_at}`}
-                  title="L1 基础索引 Prompt"
-                  description="用于生成逐章摘要、关键词、实体、关键事件和伏笔线索。"
+                  title="L1 Prompt"
                   value={indexPrompts.l1_index_prompt}
                   hash={indexPrompts.l1_index_prompt_hash}
                   updatedAt={indexPrompts.updated_at}
@@ -278,8 +308,7 @@ export function PromptLibraryPage({
                 />
                 <IndexPromptEditor
                   key={`l2-${selectedBookId}-${indexPrompts.l2_index_prompt_hash}-${indexPrompts.updated_at}`}
-                  title="L2 类型化事实 Prompt"
-                  description="用于生成可复用事实层，供分析任务按主体和分类召回。"
+                  title="L2 Prompt"
                   value={indexPrompts.l2_index_prompt}
                   hash={indexPrompts.l2_index_prompt_hash}
                   updatedAt={indexPrompts.updated_at}
@@ -295,15 +324,13 @@ export function PromptLibraryPage({
                     onStart={startRebuild}
                   />
                 ) : null}
-                <TaskBox task={l1Task} onCancel={onL1Cancel} onPause={onL1Pause} onResume={onL1Resume} />
-                <TaskBox task={l2Task} onCancel={onL2Cancel} onPause={onL2Pause} onResume={onL2Resume} />
               </div>
             )}
           </Panel>
         </section>
 
         <section className="prompt-analysis-column">
-          <Panel icon={ClipboardList} title="书籍分析 Prompt" action={<IconButton icon={Plus} label="新建" onClick={startCreatePrompt} />}>
+          <Panel icon={ClipboardList} title="分析 Prompt" action={<IconButton icon={Plus} label="新建" onClick={startCreatePrompt} />}>
             <div className="prompt-analysis-grid">
               <div className="prompt-group-list scoped">
                 {bookPromptGroups.length ? bookPromptGroups.map((group) => (
@@ -316,12 +343,12 @@ export function PromptLibraryPage({
                     <strong>{group.name}</strong>
                     <span>{formatTime(group.updated_at)}</span>
                   </button>
-                )) : <div className="empty-state">当前书籍暂无分析 Prompt</div>}
+                )) : <div className="empty-state">无分析 Prompt</div>}
               </div>
 
               <div className="prompt-editor">
                 <div className={dirty ? "draft-banner active" : "draft-banner"}>
-                  {dirty ? "有未保存修改。保存后才会写入当前书籍的分析 Prompt。" : "当前分析 Prompt 已保存。"}
+                  {dirty ? "未保存" : "已保存"}
                 </div>
                 <label>
                   <span>名称</span>
@@ -343,7 +370,7 @@ export function PromptLibraryPage({
                 <div className="form-actions">
                   <button className="secondary" type="button" onClick={saveGroup} disabled={busy || !selectedBookId}>
                     {busy ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
-                    保存分析 Prompt
+                    保存
                   </button>
                   <button className="danger inline" type="button" onClick={deleteGroup} disabled={busy || !draft.id}>
                     <Trash2 size={16} />
@@ -373,6 +400,11 @@ function IndexPromptEditor({ title, description, value, hash, updatedAt, coverag
   const [locked, setLocked] = useState(true);
   const [draft, setDraft] = useState(value);
   const shortHash = String(hash || "").slice(0, 10);
+  const tipConfig = title.startsWith("L1")
+    ? { title: "L1 撰写建议", tips: l1WritingTips }
+    : title.startsWith("L2")
+      ? { title: "L2 撰写建议", tips: l2WritingTips }
+      : null;
 
   async function handleSave() {
     try {
@@ -387,7 +419,10 @@ function IndexPromptEditor({ title, description, value, hash, updatedAt, coverag
     <div className="index-prompt-card">
       <div className="index-prompt-head">
         <div>
-          <h3>{title}</h3>
+          <div className="index-prompt-title-row">
+            <h3>{title}</h3>
+            {tipConfig ? <PromptTipPopover tips={tipConfig.tips} title={tipConfig.title} /> : null}
+          </div>
           <small>Hash {shortHash || "-"} · 更新 {formatTime(updatedAt)}</small>
         </div>
         <button
@@ -399,10 +434,10 @@ function IndexPromptEditor({ title, description, value, hash, updatedAt, coverag
           }}
         >
           {locked ? <Lock size={15} /> : <LockOpen size={15} />}
-          {locked ? "解锁编辑" : "锁定"}
+          {locked ? "解锁" : "锁定"}
         </button>
       </div>
-      <p className="index-prompt-description">{description}</p>
+      {description ? <p className="index-prompt-description">{description}</p> : null}
       <IndexCoverageLine coverage={coverage} />
       <textarea
         value={draft}
@@ -414,7 +449,7 @@ function IndexPromptEditor({ title, description, value, hash, updatedAt, coverag
         <div className="action-row wrap">
           <button className="primary inline" type="button" onClick={handleSave} disabled={saving}>
             {saving ? <Loader2 className="spin" size={15} /> : null}
-            保存 Prompt
+            保存
           </button>
         </div>
       ) : null}
@@ -422,9 +457,50 @@ function IndexPromptEditor({ title, description, value, hash, updatedAt, coverag
   );
 }
 
+function PromptTipPopover({ title, tips }) {
+  const [pinned, setPinned] = useState(false);
+  const text = tips.map((tip, index) => `${index + 1}. ${tip}`).join("\n");
+
+  function copyTips() {
+    void navigator.clipboard?.writeText(text);
+  }
+
+  return (
+    <div className={pinned ? "prompt-tip-popover pinned" : "prompt-tip-popover"}>
+      <button
+        className="prompt-tip-trigger"
+        type="button"
+        aria-expanded={pinned}
+        aria-label={title}
+        onClick={() => setPinned((state) => !state)}
+      >
+        <Lightbulb size={14} />
+        建议
+      </button>
+      <div className="prompt-tip-panel" role="tooltip">
+        <div className="prompt-tip-head">
+          <strong>{title}</strong>
+          <div className="prompt-tip-actions">
+            <button type="button" onClick={copyTips}>
+              <Copy size={13} />
+              复制
+            </button>
+            <button type="button" onClick={() => setPinned(false)}>
+              收起
+            </button>
+          </div>
+        </div>
+        <ol>
+          {tips.map((tip) => <li key={tip}>{tip}</li>)}
+        </ol>
+      </div>
+    </div>
+  );
+}
+
 function IndexCoverageLine({ coverage }) {
   const chapters = coverage?.chapters;
-  if (!chapters) return <div className="muted-line">覆盖率读取中</div>;
+  if (!chapters) return <div className="muted-line">读取中</div>;
   const ratio = chapters.total ? Math.round((chapters.completed / chapters.total) * 100) : 0;
   const stale = Number(chapters.outdated || 0);
   return (
@@ -451,7 +527,7 @@ function RebuildConfirm({ type, book, onCancel, onStart }) {
   return (
     <div className="rebuild-confirm">
       <strong>{label} Prompt 已保存</strong>
-      <p>如需让已有索引按新 Prompt 生效，请选择章节范围后启动重建。</p>
+      <p>选择范围后可立即重建。</p>
       <div className="form-grid compact">
         <label>
           <span>起始章节</span>

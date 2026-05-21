@@ -5,8 +5,7 @@ import {
   KeyRound,
   Monitor,
   Pause,
-  Play,
-  ShieldCheck
+  Play
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { downloadJson, formatTime } from "./api.js";
@@ -22,26 +21,26 @@ export function RuntimeGrid({ config }) {
           value={`${config.appLabel || "本机预览"} · 数据副本`}
         />
       ) : null}
-      <RuntimeItem icon={Database} label="Dify" ok={config.difyConfigured} value={config.difyBase || "未配置"} />
+      <RuntimeItem
+        icon={Database}
+        label="Dify"
+        ok={config.difyConfigured}
+        value={config.difyConfigured ? "已配置" : "未配置"}
+        title={config.difyBase || "未配置"}
+      />
       <RuntimeItem
         icon={KeyRound}
         label="OpenAI"
         ok={config.openaiConfigured && config.retentionConfirmed}
         value={`${config.openaiModel} · ${config.openaiRetentionMode}`}
       />
-      <RuntimeItem
-        icon={ShieldCheck}
-        label="Retention"
-        ok={config.retentionConfirmed}
-        value={config.retentionConfirmed ? "ZDR/MAM 已确认" : "未确认"}
-      />
     </div>
   );
 }
 
-export function RuntimeItem({ icon: Icon, label, value, ok }) {
+export function RuntimeItem({ icon: Icon, label, value, ok, title }) {
   return (
-    <div className="runtime-item">
+    <div className="runtime-item" title={title || value}>
       <Icon size={15} />
       <span>{label}</span>
       <strong className={ok ? "ok" : "bad"}>{value}</strong>
@@ -83,7 +82,7 @@ export function TaskBox({ task, onCancel, onPause, onResume }) {
     return () => window.clearInterval(timer);
   }, [live, task?.id]);
 
-  if (!task) return <div className="task-empty">暂无任务</div>;
+  if (!task) return <div className="task-empty">无任务</div>;
   const total = task.progress?.total || 1;
   const completed = task.progress?.completed || 0;
   const processed = completed + (task.progress?.failed || 0) + (task.progress?.skipped || 0);
@@ -101,13 +100,13 @@ export function TaskBox({ task, onCancel, onPause, onResume }) {
         <span style={{ width: `${percent}%` }} />
       </div>
       <div className="task-meta">
-        <span>完成 {completed}/{total}</span>
+        <span>{completed}/{total}</span>
         <span>失败 {task.progress?.failed || 0}</span>
         <span>跳过 {task.progress?.skipped || 0}</span>
       </div>
       <div className="task-time">
-        <span>已进行 {timing.elapsed}</span>
-        <span>预计剩余 {timing.remaining}</span>
+        <span>已用 {timing.elapsed}</span>
+        <span>剩余 {timing.remaining}</span>
       </div>
       {canControl && (onCancel || onPause || onResume) ? (
         <div className="task-controls">
@@ -117,7 +116,7 @@ export function TaskBox({ task, onCancel, onPause, onResume }) {
             <IconButton icon={Pause} label="暂停" onClick={onPause} disabled={!onPause} />
           )}
           <button className="danger inline" type="button" onClick={onCancel} disabled={!onCancel}>
-            取消任务
+            取消
           </button>
         </div>
       ) : null}
@@ -189,7 +188,7 @@ function formatDuration(ms) {
 }
 
 export function BookList({ books, selectedBookId, onSelect }) {
-  if (!books.length) return <div className="empty-state">暂无书籍</div>;
+  if (!books.length) return <div className="empty-state">无书籍</div>;
   return (
     <div className="book-list">
       {books.map((book) => (
@@ -208,7 +207,7 @@ export function BookList({ books, selectedBookId, onSelect }) {
 }
 
 export function ChapterTable({ chapters, selectable = false, selectedIndexes = [], onToggle, l1ByChapter, l1Range }) {
-  if (!chapters.length) return <div className="empty-state tall">没有章节元数据</div>;
+  if (!chapters.length) return <div className="empty-state tall">无章节</div>;
   const selected = new Set(selectedIndexes);
   const showL1 = Boolean(l1ByChapter);
   return (

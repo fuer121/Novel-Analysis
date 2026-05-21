@@ -1,19 +1,16 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ChevronDown,
-  ChevronRight,
   Copy,
   FileText,
   Layers,
   Loader2,
-  Plus,
   Play,
   RefreshCcw,
   Table2,
   Trash2
 } from "lucide-react";
 import { apiDelete, apiGet, formatTime } from "../api.js";
-import { ChapterTable, IconButton, Panel, ResultActions, StatusPill, TaskBox } from "../ui.jsx";
+import { IconButton, Panel, ResultActions, StatusPill, TaskBox } from "../ui.jsx";
 import {
   normalizePrompt,
   outputSchemaForPrompt,
@@ -21,12 +18,10 @@ import {
 } from "../schemaTools.js";
 
 const initialAnalysisForm = {
-  name: "",
   book_id: "",
   start_chapter: "1",
   end_chapter: "20",
-  analysis_mode: "balanced",
-  source_review_budget: ""
+  analysis_mode: "balanced"
 };
 
 export function AnalysisPage({
@@ -34,7 +29,6 @@ export function AnalysisPage({
   config,
   prompts,
   onLoadPromptGroups,
-  l1Task,
   analysisTask,
   analysisBusy,
   onStartAnalysis,
@@ -56,12 +50,9 @@ export function AnalysisPage({
   const [bookPromptGroups, setBookPromptGroups] = useState([]);
   const [selectedPromptGroupId, setSelectedPromptGroupId] = useState("");
   const [selectedIndexes, setSelectedIndexes] = useState([]);
-  const [useL1Context, setUseL1Context] = useState(false);
-  const [l1Coverage, setL1Coverage] = useState(null);
   const [l2Coverage, setL2Coverage] = useState(null);
   const selectionOverrideRef = useRef(null);
   const [selectionOverrideToken, setSelectionOverrideToken] = useState(0);
-  const [chaptersExpanded, setChaptersExpanded] = useState(false);
   const [selectedAnalysis, setSelectedAnalysis] = useState(null);
   const [busy, setBusy] = useState({ analysis: false, chapters: false, list: false });
 
@@ -117,17 +108,13 @@ export function AnalysisPage({
     },
     [chapters, analysisForm.start_chapter, analysisForm.end_chapter]
   );
-  const selectedRangeSummary = useMemo(
-    () => summarizeSelection(selectedIndexes, chaptersInRange.length, l1Coverage),
-    [selectedIndexes, chaptersInRange.length, l1Coverage]
-  );
   useEffect(() => {
     if (!analysisForm.book_id || !validChapterNumber(analysisForm.start_chapter) || !validChapterNumber(analysisForm.end_chapter)) {
       return;
     }
-    void loadL1Coverage();
+    void loadL2Coverage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisForm.book_id, analysisForm.start_chapter, analysisForm.end_chapter, l1Task?.id, l1Task?.status]);
+  }, [analysisForm.book_id, analysisForm.start_chapter, analysisForm.end_chapter]);
 
   async function loadAnalyses() {
     setBusy((state) => ({ ...state, list: true }));
@@ -183,17 +170,13 @@ export function AnalysisPage({
     }
   }
 
-  async function loadL1Coverage() {
+  async function loadL2Coverage() {
     if (!analysisForm.book_id || !validChapterNumber(analysisForm.start_chapter) || !validChapterNumber(analysisForm.end_chapter)) {
       return;
     }
     try {
       const query = `start_chapter=${encodeURIComponent(analysisForm.start_chapter)}&end_chapter=${encodeURIComponent(analysisForm.end_chapter)}`;
-      const [l1Data, l2Data] = await Promise.all([
-        apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l1-indexes/coverage?${query}`),
-        apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l2-indexes/coverage?${query}`)
-      ]);
-      setL1Coverage(l1Data.coverage);
+      const l2Data = await apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l2-indexes/coverage?${query}`);
       setL2Coverage(l2Data.coverage);
     } catch (error) {
       setError(error.message);
@@ -219,12 +202,12 @@ export function AnalysisPage({
     setSelectedAnalysis(null);
     const task = await onStartAnalysis({
       ...analysisForm,
+      name: analysisTaskName(promptDraft, selectedBook, analysisForm),
       start_chapter: Number(analysisForm.start_chapter),
       end_chapter: Number(analysisForm.end_chapter),
       chapter_indexes: chapterIndexes,
-      use_l1_context: useL1Context,
+      use_l1_context: false,
       analysis_mode: analysisForm.analysis_mode,
-      source_review_budget: analysisForm.source_review_budget === "" ? undefined : Number(analysisForm.source_review_budget),
       prompt: {
         ...promptDraft,
         output_schema: outputSchemaForPrompt(promptDraft)
@@ -292,14 +275,10 @@ export function AnalysisPage({
     const analysisPrompt = normalizePrompt(analysis.prompt || prompts);
     setAnalysisForm({
       ...initialAnalysisForm,
-      name: `${analysis.name || "分析任务"} 复制`,
       book_id: analysis.book_id,
       start_chapter: String(analysis.start_chapter),
       end_chapter: String(analysis.end_chapter),
-      analysis_mode: analysisPrompt.analysis_mode || analysis.source_stats?.analysis_mode || initialAnalysisForm.analysis_mode,
-      source_review_budget: analysisPrompt.source_review_budget === undefined || analysisPrompt.source_review_budget === null
-        ? ""
-        : String(analysisPrompt.source_review_budget)
+      analysis_mode: analysisPrompt.analysis_mode || analysis.source_stats?.analysis_mode || initialAnalysisForm.analysis_mode
     });
     selectionOverrideRef.current = analysis.chapter_indexes || [];
     setSelectionOverrideToken((value) => value + 1);
@@ -320,61 +299,19 @@ export function AnalysisPage({
   function updateAnalysisForm(patch) {
     setAnalysisForm((form) => ({ ...form, ...patch }));
     if (patch.book_id !== undefined || patch.start_chapter !== undefined || patch.end_chapter !== undefined) {
-      setL1Coverage(null);
       setL2Coverage(null);
     }
   }
 
-  function toggleChapter(index) {
-    setSelectedIndexes((current) => (
-      current.includes(index)
-        ? current.filter((entry) => entry !== index)
-        : [...current, index].sort((left, right) => left - right)
-    ));
-  }
-
-  function selectAllInRange() {
-    setSelectedIndexes(chaptersInRange.map((chapter) => chapter.chapter_index));
-  }
-
-  function clearSelection() {
-    setSelectedIndexes([]);
-  }
-
   return (
     <section className="analysis-layout">
-      <aside className="task-rail">
-        <Panel
-          icon={Layers}
-          title="分析任务"
-          action={<IconButton icon={RefreshCcw} label="刷新" onClick={loadAnalyses} disabled={busy.list} />}
-        >
-          <AnalysisHistory
-            analyses={analyses}
-            books={books}
-            selectedId={selectedAnalysis?.id}
-            onSelect={loadAnalysisResult}
-            onCopy={copyAnalysis}
-            onDelete={deleteAnalysis}
-          />
-        </Panel>
-      </aside>
-
-      <section className="workspace">
+      <section className="analysis-compose">
         <Panel
           icon={Play}
-          title="创建分析任务"
+          title="新建任务"
           action={<TaskStats book={selectedBook} selectedCount={selectedIndexes.length} totalInRange={chaptersInRange.length} />}
         >
           <div className="form-grid analysis-form-grid">
-            <label>
-              <span>任务名</span>
-              <input
-                value={analysisForm.name}
-                placeholder="例如：身份形象合并"
-                onChange={(event) => updateAnalysisForm({ name: event.target.value })}
-              />
-            </label>
             <label>
               <span>书籍</span>
               <select
@@ -386,6 +323,18 @@ export function AnalysisPage({
                   <option key={book.book_id} value={book.book_id}>
                     {book.book_name ? `${book.book_name}（${book.book_id}）` : book.book_id}
                   </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>分析 Prompt</span>
+              <select value={selectedPromptGroupId} onChange={(event) => applyPromptGroup(event.target.value)}>
+                <option value="">选择 Prompt</option>
+                {selectedPromptGroupId === "__snapshot__" ? (
+                  <option value="__snapshot__">历史任务 Prompt 快照</option>
+                ) : null}
+                {bookPromptGroups.map((group) => (
+                  <option key={group.id} value={group.id}>{group.name}</option>
                 ))}
               </select>
             </label>
@@ -421,111 +370,52 @@ export function AnalysisPage({
                 <option value="full_text">全文精读</option>
               </select>
             </label>
-            <label>
-              <span>复核预算</span>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                placeholder="默认"
-                value={analysisForm.source_review_budget}
-                onChange={(event) => updateAnalysisForm({ source_review_budget: sanitizeChapterInput(event.target.value) })}
-                disabled={analysisForm.analysis_mode === "fast_index" || analysisForm.analysis_mode === "full_text"}
-              />
-            </label>
-            <label>
-              <span>分析 Prompt</span>
-              <select value={selectedPromptGroupId} onChange={(event) => applyPromptGroup(event.target.value)}>
-                <option value="">选择当前书籍分析 Prompt</option>
-                {selectedPromptGroupId === "__snapshot__" ? (
-                  <option value="__snapshot__">历史任务 Prompt 快照</option>
-                ) : null}
-                {bookPromptGroups.map((group) => (
-                  <option key={group.id} value={group.id}>{group.name}</option>
-                ))}
-              </select>
-            </label>
-          </div>
-          <div className="draft-banner compact-banner">
-            {selectedPromptGroupId === "__snapshot__"
-              ? `当前任务将使用历史任务快照：${promptDraft.name || "未命名分析 Prompt"}。如需修改，请到 Prompt 库维护后重新选择。`
-              : selectedPromptGroupId
-              ? `当前任务将使用：${promptDraft.name || "未命名分析 Prompt"}。Prompt 内容请在 Prompt 库维护。`
-              : "当前书籍还没有分析 Prompt。请先到 Prompt 管理中创建。"}
           </div>
 
-          <div className="selector-card">
-            <button
-              type="button"
-              className="selector-summary"
-              onClick={() => setChaptersExpanded((value) => !value)}
-            >
-              <span className="selector-summary-title">
-                {chaptersExpanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                章节选择
-              </span>
-              <span>{selectedRangeSummary}</span>
-            </button>
-
-            {chaptersExpanded ? (
-              <>
-                <div className="selector-toolbar">
-                  <div>
-                    <strong>{selectedIndexes.length}</strong>
-                    <span> / {chaptersInRange.length} 章已选择</span>
-                  </div>
-                  <div className="action-row">
-                    <IconButton icon={Plus} label="全选范围" onClick={selectAllInRange} disabled={!chaptersInRange.length} />
-                    <IconButton icon={Trash2} label="清空" onClick={clearSelection} disabled={!selectedIndexes.length} />
-                  </div>
-                </div>
-
-                <ChapterTable
-                  chapters={chaptersInRange}
-                  selectable
-                  selectedIndexes={selectedIndexes}
-                  onToggle={toggleChapter}
-                />
-              </>
-            ) : null}
-          </div>
-          <label className="check-row l1-context-row">
-            <input
-              type="checkbox"
-              checked={useL1Context}
-              onChange={(event) => setUseL1Context(event.target.checked)}
-            />
-            <span>附加 L1 上下文</span>
-            <small>{formatCoverage(l1Coverage)}</small>
-          </label>
           <div className="index-route-note">
-            {analysisRouteNote(analysisForm.analysis_mode, l2Coverage, selectedIndexes.length, analysisForm.source_review_budget)}
+            {analysisRouteNote(analysisForm.analysis_mode, l2Coverage, selectedIndexes.length)}
           </div>
         </Panel>
 
-        <div className="run-section">
-          <Panel icon={Play} title="运行">
-            <button
-              className="primary"
-              type="button"
-              onClick={startAnalysis}
-              disabled={analysisBusy || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId}
-            >
-              {analysisBusy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-              {analysisBusy ? "分析中" : "开始分析"}
-            </button>
-            <TaskBox
-              task={analysisTask}
-              onCancel={() => controlAnalysis("cancel")}
-              onPause={() => controlAnalysis("pause")}
-              onResume={() => controlAnalysis("resume")}
-            />
-          </Panel>
-        </div>
+        <Panel icon={Play} title="运行" className="analysis-run-panel">
+          <button
+            className="primary"
+            type="button"
+            onClick={startAnalysis}
+            disabled={analysisBusy || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId}
+          >
+            {analysisBusy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
+            {analysisBusy ? "分析中" : "开始分析"}
+          </button>
+          <TaskBox
+            task={analysisTask}
+            onCancel={() => controlAnalysis("cancel")}
+            onPause={() => controlAnalysis("pause")}
+            onResume={() => controlAnalysis("resume")}
+          />
+        </Panel>
+      </section>
+
+      <section className="analysis-review-row">
+        <Panel
+          icon={Layers}
+          title="分析任务"
+          className="analysis-history-panel"
+          action={<IconButton icon={RefreshCcw} label="刷新" onClick={loadAnalyses} disabled={busy.list} />}
+        >
+          <AnalysisHistory
+            analyses={analyses}
+            books={books}
+            selectedId={selectedAnalysis?.id}
+            onSelect={loadAnalysisResult}
+            onCopy={copyAnalysis}
+            onDelete={deleteAnalysis}
+          />
+        </Panel>
 
         <Panel
           icon={Table2}
-          title="最终结果"
+          title="结果"
           action={<ResultActions analysis={selectedAnalysis} />}
         >
           <ResultView
@@ -558,25 +448,25 @@ function validChapterNumber(value) {
   return Number.isInteger(number) && number > 0;
 }
 
+function analysisTaskName(prompt, book, form) {
+  if (prompt?.name) return prompt.name;
+  const bookName = book?.book_name || book?.book_id || "分析任务";
+  return `${bookName} ${form.start_chapter}-${form.end_chapter}`;
+}
+
 function sanitizeChapterInput(value) {
   const digits = String(value || "").replace(/\D/g, "");
   return digits.replace(/^0+(?=\d)/, "").replace(/^0$/, "");
 }
 
-function formatCoverage(coverage) {
-  if (!coverage) return "L1 覆盖率读取中";
-  return `章节 ${coverage.chapters.completed}/${coverage.chapters.total}`;
-}
-
-function analysisRouteNote(mode, coverage, selectedCount, budget) {
-  if (mode === "full_text") return "全文精读会逐章读取原文，适合小范围高保真分析。";
-  if (mode === "fast_index") return `快速探索只使用 L2 索引；当前覆盖 ${coverageText(coverage)}。`;
-  const defaultBudget = mode === "precision"
+function analysisRouteNote(mode, coverage, selectedCount) {
+  if (mode === "full_text") return "全文精读 · 最完整 · 逐章读取原文";
+  if (mode === "fast_index") return `快速探索 · 只用索引 · ${coverageText(coverage)}`;
+  const reviewBudget = mode === "precision"
     ? Math.min(30, Math.max(5, Math.ceil(selectedCount * 0.03)))
     : Math.min(10, Math.max(3, Math.ceil(selectedCount * 0.01)));
-  const reviewBudget = budget === "" ? defaultBudget : Number(budget || 0);
-  const label = mode === "precision" ? "精准复核" : "平衡推荐";
-  return `${label}会先召回 L2 事实，最多复核 ${reviewBudget} 章原文；当前 L2 覆盖 ${coverageText(coverage)}。`;
+  const label = mode === "precision" ? "精准复核 · 更稳" : "平衡推荐 · 速度较快";
+  return `${label} · 最多复核 ${reviewBudget} 章 · ${coverageText(coverage)}`;
 }
 
 function coverageText(coverage) {
@@ -584,18 +474,8 @@ function coverageText(coverage) {
   return `${coverage.chapters.completed}/${coverage.chapters.total} 章，${coverage.chapters.facts || 0} 条事实`;
 }
 
-function summarizeSelection(selectedIndexes, totalInRange, coverage) {
-  const selected = selectedIndexes.length;
-  const selectedText = `${selected}/${totalInRange} 章已选`;
-  if (!coverage?.chapters) return selectedText;
-  const missing = coverage.chapters.missing || 0;
-  const failed = coverage.chapters.failed || 0;
-  const suffix = missing || failed ? `L1 缺失 ${missing} · 失败 ${failed}` : "L1 已覆盖";
-  return `${selectedText} · ${suffix}`;
-}
-
 function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDelete }) {
-  if (!analyses.length) return <div className="history-empty">暂无分析任务</div>;
+  if (!analyses.length) return <div className="history-empty">无任务</div>;
   const bookNames = new Map(books.map((book) => [book.book_id, book.book_name || book.book_id]));
   return (
     <div className="analysis-list expanded">
@@ -608,11 +488,13 @@ function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDele
           </button>
           <div className="analysis-actions">
             <StatusPill status={analysis.status} />
-            <button type="button" className="icon-only" onClick={() => onCopy(analysis.id)} title="复制配置">
+            <button type="button" className="action-chip" onClick={() => onCopy(analysis.id)} title="复制配置" aria-label="复制配置">
               <Copy size={15} />
+              <span>复制</span>
             </button>
-            <button type="button" className="icon-only danger-icon" onClick={() => onDelete(analysis.id)} title="删除任务">
+            <button type="button" className="action-chip danger-icon" onClick={() => onDelete(analysis.id)} title="删除任务" aria-label="删除任务">
               <Trash2 size={15} />
+              <span>删除</span>
             </button>
           </div>
         </div>
@@ -622,7 +504,7 @@ function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDele
 }
 
 function ResultView({ analysis, analysisBusy, onResume }) {
-  if (!analysis) return <div className="empty-state tall">选择一个分析任务查看结果</div>;
+  if (!analysis) return <div className="empty-state tall">从左侧选择已完成任务，或创建新的分析任务</div>;
   if (!analysis.finalResult) {
     return <PartialResultView analysis={analysis} analysisBusy={analysisBusy} onResume={onResume} />;
   }
@@ -710,7 +592,7 @@ function PartialResultView({ analysis, analysisBusy, onResume }) {
     <div className="partial-result-stack">
       <div className="partial-result-header">
         <div>
-          <h3>任务尚未生成最终结果</h3>
+          <h3>未生成最终结果</h3>
           <p>
             已完成 {completed.length} 章
             {failed.length ? ` · 失败 ${failed.length} 章` : ""}
@@ -749,7 +631,7 @@ function PartialResultView({ analysis, analysisBusy, onResume }) {
           ))}
         </div>
       ) : (
-        <div className="empty-state tall">还没有可展示的逐章分析结果</div>
+        <div className="empty-state tall">无逐章结果</div>
       )}
     </div>
   );
