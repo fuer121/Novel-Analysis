@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertTriangle, BarChart3, BookOpen, ClipboardList, ShieldCheck, Stethoscope } from "lucide-react";
-import { apiGet, apiPost, apiPut, followTask } from "./api.js";
+import { apiDelete, apiGet, apiPost, apiPut, followTask } from "./api.js";
 import { AnalysisPage } from "./pages/AnalysisPage.jsx";
 import { DiagnosticsPage } from "./pages/DiagnosticsPage.jsx";
 import { LibraryPage } from "./pages/LibraryPage.jsx";
@@ -210,6 +210,25 @@ export default function App() {
     return data;
   }
 
+  async function loadBookIndexGroups(bookId) {
+    const data = await apiGet(`/api/books/${encodeURIComponent(bookId)}/index-groups`);
+    return data.indexGroups || [];
+  }
+
+  async function createBookIndexGroup(bookId, payload) {
+    const data = await apiPost(`/api/books/${encodeURIComponent(bookId)}/index-groups`, payload);
+    return data.indexGroup;
+  }
+
+  async function updateBookIndexGroup(bookId, groupKey, payload) {
+    const data = await apiPut(`/api/books/${encodeURIComponent(bookId)}/index-groups/${encodeURIComponent(groupKey)}`, payload);
+    return data.indexGroup;
+  }
+
+  async function deleteBookIndexGroup(bookId, groupKey) {
+    return apiDelete(`/api/books/${encodeURIComponent(bookId)}/index-groups/${encodeURIComponent(groupKey)}`);
+  }
+
   async function saveBookIndexPrompts(bookId, payload) {
     const data = await apiPut(`/api/books/${encodeURIComponent(bookId)}/index-prompts`, payload);
     return data.indexPrompts;
@@ -261,7 +280,7 @@ export default function App() {
     }
   }
 
-  async function startL2Index({ bookId, startChapter, endChapter, force = false, mode = "all" }) {
+  async function startL2Index({ bookId, indexGroupKey = "base", startChapter, endChapter, force = false, mode = "all" }) {
     if (l2Busy) return l2Task;
     setL2Busy(true);
     setError("");
@@ -272,6 +291,7 @@ export default function App() {
       const data = await apiPost(`/api/books/${encodeURIComponent(bookId)}/l2-indexes`, {
         start_chapter: startChapter,
         end_chapter: endChapter,
+        index_group_key: indexGroupKey,
         force,
         mode
       });
@@ -528,6 +548,7 @@ export default function App() {
             onStartImport={startImport}
             onStartL1Index={startL1Index}
             onStartL2Index={startL2Index}
+            onLoadBookIndexGroups={loadBookIndexGroups}
             onImportCancel={() => controlImport("cancel")}
             onImportPause={() => controlImport("pause")}
             onImportResume={() => controlImport("resume")}
@@ -548,6 +569,10 @@ export default function App() {
             onBooksChanged={reloadBooks}
             onLoadBookIndexPrompts={loadBookIndexPrompts}
             onSaveBookIndexPrompts={saveBookIndexPrompts}
+            onLoadBookIndexGroups={loadBookIndexGroups}
+            onCreateBookIndexGroup={createBookIndexGroup}
+            onUpdateBookIndexGroup={updateBookIndexGroup}
+            onDeleteBookIndexGroup={deleteBookIndexGroup}
             onStartL1Index={startL1Index}
             onStartL2Index={startL2Index}
             onLoadPromptGroups={loadPromptGroupsForBook}
@@ -565,6 +590,7 @@ export default function App() {
             config={config}
             prompts={prompts}
             onLoadPromptGroups={loadPromptGroupsForBook}
+            onLoadBookIndexGroups={loadBookIndexGroups}
             analysisTask={analysisTask}
             analysisBusy={analysisBusy}
             onStartAnalysis={startAnalysis}

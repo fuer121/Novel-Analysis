@@ -395,7 +395,10 @@ test("prompt guide generation exposes templates and keeps OpenAI request ZDR-sha
   db.ensureBook("guide-book", "引导测试书");
   const templates = promptGuides.getPromptGuideTemplates();
   assert.equal(templates.l1.scope, "书籍级索引 Prompt");
-  assert.equal(templates.l2.steps.length >= 3, true);
+  assert.equal(templates.l1.steps.map((step) => step.title).join(","), "范围,取舍");
+  assert.equal(templates.l2.steps.map((step) => step.title).join(","), "范围,规则");
+  assert.equal(templates.indexgroup.scope, "书籍级 L2 专项索引组");
+  assert.equal(templates.indexgroup.steps.map((step) => step.title).join(","), "用途,边界");
   assert.equal(templates.analysis.scope, "书籍级分析 Prompt");
   assert.equal(templates.analysis.steps.map((step) => step.title).join(","), "用途,输出");
   assert.equal(templates.analysisOptimization.label, "分析 Prompt 优化");
@@ -448,6 +451,51 @@ test("prompt guide generation exposes templates and keeps OpenAI request ZDR-sha
     assert.equal(Object.hasOwn(capturedBody, "background"), false);
     assert.equal(capturedBody.text.format.name, "prompt_guide_result");
     assert.equal(JSON.stringify(capturedBody.input).includes("引导测试书"), true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("index group guide is available and generates specialized L2 prompt", async () => {
+  db.ensureBook("guide-index-group-book", "索引组引导书");
+  const previousFetch = global.fetch;
+  let capturedBody;
+  global.fetch = async (url, request) => {
+    if (!String(url).includes("api.openai.com/v1/responses")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    capturedBody = JSON.parse(request.body);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_index_group_guide",
+        output: [{
+          content: [{
+            type: "output_text",
+            text: JSON.stringify({
+              title_suggestion: "修炼法宝",
+              prompt_suggestion: "请只提取修炼体系、境界变化、法宝武器和本命物相关 L2 事实。",
+              rationale: "触发词包括修炼、境界、功法、法宝、武器、本命物。",
+              usage_notes: ["如果还要人物关系，建议另建索引组。"],
+              quality_checklist: ["边界清晰。"]
+            })
+          }]
+        }]
+      })
+    };
+  };
+
+  try {
+    const result = await promptGuides.generatePromptGuideSuggestion({
+      type: "indexgroup",
+      book_id: "guide-index-group-book",
+      answers: [{ id: "group_goal", answer: "修炼体系和法宝武器" }]
+    });
+    assert.equal(result.type, "indexgroup");
+    assert.equal(result.template.scope, "书籍级 L2 专项索引组");
+    assert.equal(result.suggestion.title_suggestion, "修炼法宝");
+    assert.equal(result.suggestion.prompt_suggestion.includes("L2 事实"), true);
+    assert.equal(JSON.stringify(capturedBody.input).includes("索引组创建引导"), true);
   } finally {
     global.fetch = previousFetch;
   }
@@ -750,12 +798,23 @@ test("builds chapter-only L1 indexes, skips fresh indexes, and keeps OpenAI requ
     const body = JSON.parse(request.body);
     capturedBodies.push(body);
     const outputValue = {
-      summary: "章节摘要",
-      keywords: ["关键词"],
-      entities: ["角色"],
-      key_events: ["事件"],
-      items_places_orgs: ["地点"],
-      open_questions: ["伏笔"],
+      route_schema_version: "l1-route-v1",
+      route_summary: "章节信号",
+      route_entities: [{ name: "角色", type: "character", aliases: ["别名"], role: "主体", note: "章节主体" }],
+      route_keywords: ["关键词"],
+      signals: [{ category: "character", strength: 0.8, entities: ["角色"], keywords: ["关键词"], reason: "角色信号" }],
+      category_scores: {
+        character: 0.8,
+        relationship: 0,
+        cultivation: 0,
+        force: 0,
+        item: 0,
+        location: 0,
+        event: 0,
+        foreshadowing: 0,
+        other: 0
+      },
+      has_major_signal: true,
       confidence: 0.9
     };
     return {
@@ -776,7 +835,15 @@ test("builds chapter-only L1 indexes, skips fresh indexes, and keeps OpenAI requ
     await waitForTask(task);
     assert.equal(task.status, "completed");
     assert.equal(responseCalls, 2);
-    assert.equal(db.getL1ChapterIndex("book-l1-task", 1).summary, "章节摘要");
+    const savedIndex = db.getL1ChapterIndex("book-l1-task", 1);
+    assert.equal(savedIndex.route_schema_version, "l1-route-v1");
+    assert.equal(savedIndex.route_summary, "章节信号");
+    assert.equal(savedIndex.route_entities[0].name, "角色");
+    assert.equal(savedIndex.route_keywords[0], "关键词");
+    assert.equal(savedIndex.signals[0].category, "character");
+    assert.equal(savedIndex.category_scores.character, 0.8);
+    assert.equal(savedIndex.has_major_signal, true);
+    assert.equal(savedIndex.summary, "章节信号");
     assert.equal(db.getL1WindowIndex("book-l1-task", 1, 10), null);
     assert.equal(capturedBodies.every((body) => body.store === false), true);
     assert.equal(capturedBodies.every((body) => !Object.hasOwn(body, "background")), true);
@@ -848,6 +915,92 @@ test("stores L2 facts with encrypted fact content and reports coverage", async (
   assert.equal(coverage.chapters.facts, 1);
   const dbBytes = await fs.readFile(db.getDbPath());
   assert.equal(dbBytes.includes(Buffer.from("陈平安得到木剑。")), false);
+});
+
+test("L2 index groups isolate statuses, facts, and prompt bindings", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-l2-groups",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "云筝得到灵剑并加入宗门。"
+  });
+  const group = db.createBookIndexGroup("book-l2-groups", {
+    group_key: "items-forces",
+    name: "法宝势力",
+    description: "只提取法宝与宗门势力事实",
+    trigger_keywords: ["灵剑", "宗门"],
+    category_scope: ["item", "force"],
+    l2_index_prompt: "只提取法宝、武器、宗门势力事实。"
+  });
+  assert.equal(group.group_key, "items-forces");
+  assert.equal(db.listBookIndexGroups("book-l2-groups").some((entry) => entry.group_key === "base"), true);
+  assert.equal(db.listBookIndexGroups("book-l2-groups").some((entry) => entry.group_key === "items-forces"), true);
+
+  const chapter = db.getChapterMetadata("book-l2-groups", 1);
+  await db.saveL2ChapterFacts({
+    bookId: "book-l2-groups",
+    indexGroupKey: "base",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "base-hash",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "character",
+      entity: "云筝",
+      fact_type: "appearance",
+      fact: "云筝出场。",
+      evidence: ["云筝"],
+      importance: 0.7,
+      confidence: 0.9
+    }]
+  });
+  await db.saveL2ChapterFacts({
+    bookId: "book-l2-groups",
+    indexGroupKey: "items-forces",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: group.l2_index_prompt_hash,
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "item",
+      entity: "灵剑",
+      fact_type: "item",
+      fact: "云筝得到灵剑。",
+      evidence: ["灵剑"],
+      importance: 0.8,
+      confidence: 0.9
+    }]
+  });
+
+  const baseFacts = await db.listL2Facts({ bookId: "book-l2-groups", indexGroupKeys: ["base"], startChapter: 1, endChapter: 1 });
+  const specializedFacts = await db.listL2Facts({ bookId: "book-l2-groups", indexGroupKeys: ["items-forces"], startChapter: 1, endChapter: 1 });
+  assert.equal(baseFacts.length, 1);
+  assert.equal(baseFacts[0].index_group_key, "base");
+  assert.equal(specializedFacts.length, 1);
+  assert.equal(specializedFacts[0].entity, "灵剑");
+  assert.equal(db.getL2Coverage({ bookId: "book-l2-groups", indexGroupKey: "base", startChapter: 1, endChapter: 1 }).chapters.facts, 1);
+  assert.equal(db.getL2Coverage({ bookId: "book-l2-groups", indexGroupKey: "items-forces", startChapter: 1, endChapter: 1 }).chapters.facts, 1);
+
+  const promptGroup = db.createPromptGroup({
+    book_id: "book-l2-groups",
+    name: "法宝分析",
+    summary_prompt: "分析灵剑和宗门",
+    index_group_keys: ["items-forces"]
+  });
+  assert.deepEqual(promptGroup.index_group_keys, ["items-forces"]);
+  const autoPromptGroup = db.createPromptGroup({
+    book_id: "book-l2-groups",
+    name: "自动分析",
+    summary_prompt: "分析任意目标"
+  });
+  assert.deepEqual(autoPromptGroup.index_group_keys, []);
+
+  assert.equal(db.disableBookIndexGroup("book-l2-groups", "items-forces").disabled, true);
+  assert.equal(db.listBookIndexGroups("book-l2-groups").some((entry) => entry.group_key === "items-forces"), false);
 });
 
 test("builds L2 indexes, skips fresh facts, and keeps requests ZDR-shaped", async () => {
@@ -1039,7 +1192,7 @@ test("book index prompts are saved, used by L1/L2 tasks, and change freshness ha
   });
   assert.equal(saved.l1_index_prompt, customL1);
   assert.equal(saved.l2_index_prompt, customL2);
-  assert.notEqual(saved.l1_index_prompt_hash, "l1-v1-chapter-window-10");
+  assert.notEqual(saved.l1_index_prompt_hash, "l1-route-v1");
   assert.notEqual(saved.l2_index_prompt_hash, "l2-v1-typed-facts");
 
   const previousFetch = global.fetch;
@@ -1056,12 +1209,23 @@ test("book index prompts are saved, used by L1/L2 tasks, and change freshness ha
     const formatName = body.text?.format?.name;
     const outputValue = formatName === "l1_chapter_index"
       ? {
-        summary: "章节摘要",
-        keywords: [],
-        entities: [],
-        key_events: [],
-        items_places_orgs: [],
-        open_questions: [],
+        route_schema_version: "l1-route-v1",
+        route_summary: "木剑信号",
+        route_entities: [{ name: "陈平安", type: "character", aliases: [], role: "持有者", note: "得到木剑" }],
+        route_keywords: ["陈平安", "木剑"],
+        signals: [{ category: "item", strength: 0.8, entities: ["陈平安", "木剑"], keywords: ["木剑"], reason: "物品获得信号" }],
+        category_scores: {
+          character: 0.5,
+          relationship: 0,
+          cultivation: 0,
+          force: 0,
+          item: 0.8,
+          location: 0,
+          event: 0.4,
+          foreshadowing: 0,
+          other: 0
+        },
+        has_major_signal: true,
         confidence: 0.8
       }
       : {
@@ -1107,6 +1271,9 @@ test("book index prompts are saved, used by L1/L2 tasks, and change freshness ha
     assert.equal(l2Task.status, "completed");
     assert.equal(db.getL2ChapterStatus("book-index-prompt", 1).prompt_hash, saved.l2_index_prompt_hash);
     assert.equal(JSON.stringify(capturedBodies[1].input).includes(customL2), true);
+    const l2InputText = capturedBodies[1].input[0].content[0].text;
+    assert.equal(l2InputText.includes("route_entities"), true);
+    assert.equal(l2InputText.includes("key_events"), false);
 
     const skippedL2 = workflows.startL2IndexTask({
       book_id: "book-index-prompt",
@@ -1151,7 +1318,7 @@ test("creates, edits, lists, and deletes prompt groups with categories", () => {
   assert.equal(updated.summary_prompt, "重新汇总角色身份");
 
   assert.equal(db.deletePromptGroup(created.id).deleted, true);
-  assert.equal(db.getPromptGroup(created.id), undefined);
+  assert.equal(db.getPromptGroup(created.id), null);
 });
 
 test("analysis prompt groups can save summary prompt without chapter prompt", () => {
@@ -1693,6 +1860,15 @@ test("balanced index analysis reviews only budgeted high-risk chapters", async (
     assert.equal(result.finalResult.source_stats, undefined);
     assert.equal(result.source_stats.source_review_chapters, 1);
     assert.equal(result.source_stats.source_review_budget, 1);
+    const storedFacts = await db.listL2Facts({
+      bookId: "book-balanced-index",
+      startChapter: 2,
+      endChapter: 2,
+      entities: ["陈平安"],
+      includeContent: true
+    });
+    assert.equal(storedFacts.some((fact) => fact.fact === "第2章事实"), true);
+    assert.equal(storedFacts.some((fact) => fact.fact === "复核事实"), false);
   } finally {
     global.fetch = previousFetch;
   }
@@ -1875,6 +2051,109 @@ test("balanced index analysis routes through L1 matches before loading L2 facts"
     assert.equal(summaryInput.includes("第4章事实"), true);
     assert.equal(summaryInput.includes("第1章事实"), false);
     assert.equal(summaryInput.includes("第3章事实"), false);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("balanced index analysis routes through structured L1 route signals", async () => {
+  for (const chapterIndex of [1, 2, 3]) {
+    await db.saveEncryptedChapter({
+      bookId: "book-l1-structured-route",
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文`
+    });
+    const chapter = db.getChapterMetadata("book-l1-structured-route", chapterIndex);
+    db.saveL1ChapterIndex({
+      bookId: "book-l1-structured-route",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l1-route-v1",
+      value: {
+        route_schema_version: "l1-route-v1",
+        route_summary: chapterIndex === 3 ? "云筝外貌变化信号" : "普通剧情信号",
+        route_entities: chapterIndex === 3
+          ? [{ name: "云筝", type: "character", aliases: ["女主"], role: "核心角色", note: "外貌变化" }]
+          : [{ name: "路人", type: "character", aliases: [], role: "", note: "" }],
+        route_keywords: chapterIndex === 3 ? ["云筝", "外貌", "形象"] : ["普通剧情"],
+        signals: chapterIndex === 3
+          ? [{ category: "character", strength: 0.9, entities: ["云筝"], keywords: ["外貌"], reason: "角色外貌信号" }]
+          : [{ category: "event", strength: 0.2, entities: [], keywords: ["普通剧情"], reason: "低强度事件" }],
+        category_scores: {
+          character: chapterIndex === 3 ? 0.9 : 0.1,
+          relationship: 0,
+          cultivation: 0,
+          force: 0,
+          item: 0,
+          location: 0,
+          event: chapterIndex === 3 ? 0.2 : 0.3,
+          foreshadowing: 0,
+          other: 0
+        },
+        has_major_signal: chapterIndex === 3,
+        confidence: 0.9
+      }
+    });
+    await db.saveL2ChapterFacts({
+      bookId: "book-l1-structured-route",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "character",
+        entity: chapterIndex === 3 ? "云筝" : "路人",
+        tags: chapterIndex === 3 ? ["外貌"] : ["普通剧情"],
+        related_entities: [],
+        fact_type: "appearance",
+        fact: `第${chapterIndex}章结构化路由事实`,
+        evidence: [`证据${chapterIndex}`],
+        importance: 0.9,
+        confidence: 0.9
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  let summaryInput = "";
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    summaryInput = body.input[0].content[0].text;
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_structured_l1_route",
+        output: [{ content: [{ type: "output_text", text: JSON.stringify({ title: "结构化路由汇总", summary: "完成", items: [], failed_chapters: [] }) }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "balanced",
+      source_review_budget: 0,
+      book_id: "book-l1-structured-route",
+      start_chapter: 1,
+      end_chapter: 3,
+      prompt: {
+        summary_prompt: "请分析云筝外貌资料。"
+      }
+    });
+    await waitForTask(analysis);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.deepEqual(result.source_stats.l1_matched_chapters, [3]);
+    assert.equal(result.source_stats.l1_route_enabled, true);
+    assert.equal(summaryInput.includes("第3章结构化路由事实"), true);
+    assert.equal(summaryInput.includes("第1章结构化路由事实"), false);
+    assert.equal(summaryInput.includes("第2章结构化路由事实"), false);
   } finally {
     global.fetch = previousFetch;
   }

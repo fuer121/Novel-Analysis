@@ -31,6 +31,7 @@ export function AnalysisPage({
   config,
   prompts,
   onLoadPromptGroups,
+  onLoadBookIndexGroups,
   analysisTask,
   analysisBusy,
   onStartAnalysis,
@@ -50,6 +51,7 @@ export function AnalysisPage({
   const [promptDraft, setPromptDraft] = useState(() => normalizePrompt(prompts));
   const defaultPrompt = useMemo(() => normalizePrompt(prompts), [prompts]);
   const [bookPromptGroups, setBookPromptGroups] = useState([]);
+  const [indexGroups, setIndexGroups] = useState([]);
   const [selectedPromptGroupId, setSelectedPromptGroupId] = useState("");
   const [selectedIndexes, setSelectedIndexes] = useState([]);
   const [l2Coverage, setL2Coverage] = useState(null);
@@ -116,7 +118,7 @@ export function AnalysisPage({
     }
     void loadL2Coverage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisForm.book_id, analysisForm.start_chapter, analysisForm.end_chapter]);
+  }, [analysisForm.book_id, analysisForm.start_chapter, analysisForm.end_chapter, selectedPromptGroupId, bookPromptGroups]);
 
   async function loadAnalyses() {
     setBusy((state) => ({ ...state, list: true }));
@@ -153,6 +155,7 @@ export function AnalysisPage({
   async function loadBookPromptGroups(bookId) {
     if (!bookId) {
       setBookPromptGroups([]);
+      setIndexGroups([]);
       setSelectedPromptGroupId("");
       setPromptDraft(defaultPrompt);
       return;
@@ -160,12 +163,14 @@ export function AnalysisPage({
     setError("");
     try {
       const groups = await onLoadPromptGroups(bookId);
+      const indexGroupRows = await onLoadBookIndexGroups(bookId);
       setBookPromptGroups(groups);
+      setIndexGroups(indexGroupRows);
       if (selectionOverrideRef.current) return;
       const first = groups[0] || null;
       setSelectedPromptGroupId(first?.id || "");
       setPromptDraft(first
-        ? { ...defaultPrompt, name: first.name, summary_prompt: first.summary_prompt }
+        ? { ...defaultPrompt, name: first.name, summary_prompt: first.summary_prompt, index_group_keys: first.index_group_keys || [] }
         : defaultPrompt);
     } catch (error) {
       setError(error.message);
@@ -177,7 +182,9 @@ export function AnalysisPage({
       return;
     }
     try {
-      const query = `start_chapter=${encodeURIComponent(analysisForm.start_chapter)}&end_chapter=${encodeURIComponent(analysisForm.end_chapter)}`;
+      const selectedGroup = bookPromptGroups.find((group) => group.id === selectedPromptGroupId);
+      const groupKey = selectedGroup?.index_group_keys?.[0] || "base";
+      const query = `start_chapter=${encodeURIComponent(analysisForm.start_chapter)}&end_chapter=${encodeURIComponent(analysisForm.end_chapter)}&index_group_key=${encodeURIComponent(groupKey)}`;
       const l2Data = await apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l2-indexes/coverage?${query}`);
       setL2Coverage(l2Data.coverage);
     } catch (error) {
@@ -213,7 +220,8 @@ export function AnalysisPage({
       prompt: {
         ...promptDraft,
         output_schema: outputSchemaForPrompt(promptDraft)
-      }
+      },
+      prompt_group_id: selectedPromptGroupId
     }, {
       onTerminal: async (task) => {
         await loadAnalyses();
@@ -293,7 +301,7 @@ export function AnalysisPage({
     const group = bookPromptGroups.find((entry) => entry.id === groupId);
     setPromptDraft((current) => (
       group
-        ? { ...current, name: group.name, summary_prompt: group.summary_prompt }
+        ? { ...current, name: group.name, summary_prompt: group.summary_prompt, index_group_keys: group.index_group_keys || [] }
         : current
     ));
   }
@@ -396,7 +404,7 @@ export function AnalysisPage({
 
           <div className="command-footer">
             <div className="index-route-note">
-              {analysisRouteNote(analysisForm.analysis_mode, l2Coverage, selectedIndexes.length)}
+              {analysisRouteNote(analysisForm.analysis_mode, l2Coverage, selectedIndexes.length, selectedPromptGroup(bookPromptGroups, selectedPromptGroupId), indexGroups)}
             </div>
             <button
               className="primary inline command-primary"
@@ -483,19 +491,31 @@ function sanitizeChapterInput(value) {
   return digits.replace(/^0+(?=\d)/, "").replace(/^0$/, "");
 }
 
-function analysisRouteNote(mode, coverage, selectedCount) {
-  if (mode === "full_text") return "全文精读 · 最完整 · 逐章读取原文";
-  if (mode === "fast_index") return `快速探索 · 只用索引 · ${coverageText(coverage)}`;
+function analysisRouteNote(mode, coverage, selectedCount, promptGroup, indexGroups) {
+  const groupText = indexGroupText(promptGroup, indexGroups);
+  if (mode === "full_text") return `全文精读 · 最完整 · 逐章读取原文 · ${groupText}`;
+  if (mode === "fast_index") return `快速探索 · 只用索引 · ${groupText} · ${coverageText(coverage)}`;
   const reviewBudget = mode === "precision"
     ? Math.min(30, Math.max(5, Math.ceil(selectedCount * 0.03)))
     : Math.min(10, Math.max(3, Math.ceil(selectedCount * 0.01)));
   const label = mode === "precision" ? "精准复核 · 更稳" : "平衡推荐 · 速度较快";
-  return `${label} · 最多复核 ${reviewBudget} 章 · ${coverageText(coverage)}`;
+  return `${label} · 最多复核 ${reviewBudget} 章 · ${groupText} · ${coverageText(coverage)}`;
 }
 
 function coverageText(coverage) {
   if (!coverage?.chapters) return "读取中";
   return `${coverage.chapters.completed}/${coverage.chapters.total} 章，${coverage.chapters.facts || 0} 条事实`;
+}
+
+function selectedPromptGroup(groups, groupId) {
+  return groups.find((group) => group.id === groupId) || null;
+}
+
+function indexGroupText(promptGroup, indexGroups) {
+  const keys = promptGroup?.index_group_keys || [];
+  if (!keys.length) return "索引组自动推断";
+  const names = keys.map((key) => indexGroups.find((group) => group.group_key === key)?.name || key);
+  return `索引组 ${names.join("、")}`;
 }
 
 function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDelete }) {
@@ -651,6 +671,7 @@ function SourceStats({ stats }) {
       <span>涉及章节 {Number(stats.recalled_chapters || 0)} 章</span>
       {stats.l1_route_enabled ? <span>L1 命中 {stats.l1_matched_chapters?.length || 0} 章</span> : null}
       <span>原文复核 {Number(stats.source_review_chapters || 0)}/{Number(stats.source_review_budget || 0)} 章</span>
+      {stats.index_groups?.length ? <span>索引组 {stats.index_groups.map((group) => group.name || group.group_key).join(" / ")}</span> : null}
       {stats.entity_queries?.length ? <span>主体 {stats.entity_queries.slice(0, 4).join(" / ")}</span> : null}
       {stats.recall_fallback_used ? <span>已启用兜底召回</span> : null}
       {stats.l2_missing_chapters?.length ? <span>L2 覆盖缺口 {stats.l2_missing_chapters.length} 章</span> : null}

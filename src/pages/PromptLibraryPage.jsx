@@ -24,17 +24,27 @@ const emptyDraft = {
   book_id: "",
   name: "",
   category: "书籍分析",
-  summary_prompt: ""
+  summary_prompt: "",
+  index_group_keys: []
+};
+
+const emptyIndexGroupDraft = {
+  group_key: "",
+  name: "",
+  description: "",
+  category_scope: [],
+  trigger_keywords: "",
+  l2_index_prompt: ""
 };
 
 const emptyBookForm = { book_id: "", book_name: "" };
 
 const l1WritingTips = [
-  "L1 只做章节路标，不写深度设定集。",
+  "L1 只做章节路由和信号索引，不写深度设定集。",
   "所有内容贴近本章原文，禁止补全和脑补。",
-  "优先记录可被后续检索的线索。",
+  "优先记录主体、别名、关键词和分类信号。",
   "控制长度，结构清晰，不堆流水账。",
-  "给关键信息标置信度和缺失提示。"
+  "服务所有 L2 索引组，信号要稳定可复用。"
 ];
 
 const l2WritingTips = [
@@ -51,6 +61,10 @@ export function PromptLibraryPage({
   onBooksChanged,
   onLoadBookIndexPrompts,
   onSaveBookIndexPrompts,
+  onLoadBookIndexGroups,
+  onCreateBookIndexGroup,
+  onUpdateBookIndexGroup,
+  onDeleteBookIndexGroup,
   onStartL1Index,
   onStartL2Index,
   onLoadPromptGroups,
@@ -66,6 +80,10 @@ export function PromptLibraryPage({
   const [draft, setDraft] = useState(emptyDraft);
   const [busy, setBusy] = useState(false);
   const [indexData, setIndexData] = useState(null);
+  const [indexGroups, setIndexGroups] = useState([]);
+  const [selectedIndexGroupKey, setSelectedIndexGroupKey] = useState("base");
+  const [indexGroupDraft, setIndexGroupDraft] = useState(emptyIndexGroupDraft);
+  const [indexGroupBusy, setIndexGroupBusy] = useState(false);
   const [indexSaving, setIndexSaving] = useState({ l1: false, l2: false });
   const [rebuildPrompt, setRebuildPrompt] = useState(null);
   const [guideTemplates, setGuideTemplates] = useState(null);
@@ -97,12 +115,18 @@ export function PromptLibraryPage({
   async function loadBookPromptState(bookId) {
     setError("");
     try {
-      const [indexResponse, groups, templatesResponse] = await Promise.all([
+      const [indexResponse, groups, indexGroupRows, templatesResponse] = await Promise.all([
         onLoadBookIndexPrompts(bookId),
         onLoadPromptGroups(bookId),
+        onLoadBookIndexGroups(bookId),
         guideTemplates ? Promise.resolve({ templates: guideTemplates }) : apiGet("/api/prompt-guides/templates")
       ]);
       setIndexData(indexResponse);
+      setIndexGroups(indexGroupRows);
+      setSelectedIndexGroupKey((current) => (
+        indexGroupRows.some((group) => group.group_key === current) ? current : "base"
+      ));
+      setIndexGroupDraft(emptyIndexGroupDraft);
       setGuideTemplates(templatesResponse.templates || {});
       setBookPromptGroups(groups);
       const first = groups[0] || null;
@@ -165,7 +189,8 @@ export function PromptLibraryPage({
         book_id: selectedBookId,
         name: draft.name,
         category: selectedBook?.book_name || selectedBookId,
-        summary_prompt: draft.summary_prompt
+        summary_prompt: draft.summary_prompt,
+        index_group_keys: draft.index_group_keys || []
       };
       const data = draft.id
         ? await apiPut(`/api/prompt-groups/${encodeURIComponent(draft.id)}`, payload)
@@ -213,6 +238,7 @@ export function PromptLibraryPage({
       const saved = await onSaveBookIndexPrompts(selectedBookId, payload);
       const refreshed = await onLoadBookIndexPrompts(selectedBookId);
       setIndexData(refreshed);
+      if (type === "l2") setIndexGroups(await onLoadBookIndexGroups(selectedBookId));
       setRebuildPrompt({ type, indexPrompts: saved });
     } catch (error) {
       setError(error.message);
@@ -222,14 +248,85 @@ export function PromptLibraryPage({
     }
   }
 
+  async function saveSpecializedL2Prompt(prompt) {
+    if (!selectedBookId || !selectedIndexGroupKey || selectedIndexGroupKey === "base") return;
+    setIndexSaving((state) => ({ ...state, l2: true }));
+    setError("");
+    try {
+      const group = indexGroups.find((entry) => entry.group_key === selectedIndexGroupKey);
+      await onUpdateBookIndexGroup(selectedBookId, selectedIndexGroupKey, {
+        ...(group || {}),
+        l2_index_prompt: prompt
+      });
+      const groups = await onLoadBookIndexGroups(selectedBookId);
+      setIndexGroups(groups);
+      setRebuildPrompt({ type: "l2" });
+    } catch (error) {
+      setError(error.message);
+      throw error;
+    } finally {
+      setIndexSaving((state) => ({ ...state, l2: false }));
+    }
+  }
+
   async function startRebuild({ type, startChapter, endChapter, force }) {
     if (!selectedBookId) return;
     if (type === "l1") {
       await onStartL1Index({ bookId: selectedBookId, startChapter, endChapter, force });
     } else {
-      await onStartL2Index({ bookId: selectedBookId, startChapter, endChapter, force, mode: "all" });
+      await onStartL2Index({ bookId: selectedBookId, indexGroupKey: selectedIndexGroupKey, startChapter, endChapter, force, mode: "all" });
     }
     setRebuildPrompt(null);
+  }
+
+  async function saveIndexGroup() {
+    if (!selectedBookId) return;
+    if (!selectedIndexGroupKey && !indexGroupDraft.group_key.trim()) {
+      setError("索引组 Key 不能为空。");
+      return;
+    }
+    setIndexGroupBusy(true);
+    setError("");
+    try {
+      const payload = {
+        group_key: indexGroupDraft.group_key,
+        name: indexGroupDraft.name,
+        description: indexGroupDraft.description,
+        category_scope: indexGroupDraft.category_scope,
+        trigger_keywords: splitKeywords(indexGroupDraft.trigger_keywords),
+        l2_index_prompt: indexGroupDraft.l2_index_prompt
+      };
+      const saved = selectedIndexGroupKey && selectedIndexGroupKey !== "base"
+        ? await onUpdateBookIndexGroup(selectedBookId, selectedIndexGroupKey, payload)
+        : await onCreateBookIndexGroup(selectedBookId, payload);
+      const groups = await onLoadBookIndexGroups(selectedBookId);
+      setIndexGroups(groups);
+      setSelectedIndexGroupKey(saved.group_key);
+      setIndexGroupDraft(emptyIndexGroupDraft);
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setIndexGroupBusy(false);
+    }
+  }
+
+  async function deleteIndexGroup() {
+    if (!selectedBookId || selectedIndexGroupKey === "base") return;
+    const group = indexGroups.find((entry) => entry.group_key === selectedIndexGroupKey);
+    if (!window.confirm(`删除索引组《${group?.name || selectedIndexGroupKey}》？`)) return;
+    setIndexGroupBusy(true);
+    setError("");
+    try {
+      await onDeleteBookIndexGroup(selectedBookId, selectedIndexGroupKey);
+      const groups = await onLoadBookIndexGroups(selectedBookId);
+      setIndexGroups(groups);
+      setSelectedIndexGroupKey("base");
+      setIndexGroupDraft(emptyIndexGroupDraft);
+    } catch (error) {
+      setError(error.message);
+    } finally {
+      setIndexGroupBusy(false);
+    }
   }
 
   function updateDraft(patch) {
@@ -277,6 +374,18 @@ export function PromptLibraryPage({
       } : current);
       return;
     }
+    if (type.toLowerCase() === "indexgroup") {
+      setSelectedIndexGroupKey("");
+      setIndexGroupDraft((current) => ({
+        ...current,
+        group_key: current.group_key || slugifyIndexGroupKey(suggestion.title_suggestion),
+        name: current.name || suggestion.title_suggestion || "专项索引组",
+        description: suggestion.rationale || current.description || "",
+        trigger_keywords: current.trigger_keywords || extractTriggerKeywords(suggestion),
+        l2_index_prompt: prompt
+      }));
+      return;
+    }
     updateDraft({
       name: draft.name || suggestion.title_suggestion || "",
       summary_prompt: prompt
@@ -286,6 +395,16 @@ export function PromptLibraryPage({
   const indexPrompts = indexData?.indexPrompts || null;
   const l1Coverage = indexData?.coverage?.l1 || null;
   const l2Coverage = indexData?.coverage?.l2 || null;
+  const selectedIndexGroup = indexGroups.find((group) => group.group_key === selectedIndexGroupKey) || indexGroups[0] || null;
+  const activeL2Prompt = selectedIndexGroup?.group_key && selectedIndexGroup.group_key !== "base"
+    ? selectedIndexGroup.l2_index_prompt
+    : indexPrompts?.l2_index_prompt;
+  const activeL2Hash = selectedIndexGroup?.group_key && selectedIndexGroup.group_key !== "base"
+    ? selectedIndexGroup.l2_index_prompt_hash
+    : indexPrompts?.l2_index_prompt_hash;
+  const activeL2UpdatedAt = selectedIndexGroup?.group_key && selectedIndexGroup.group_key !== "base"
+    ? selectedIndexGroup.updated_at
+    : indexPrompts?.updated_at;
 
   return (
     <section className="prompt-workbench">
@@ -371,16 +490,40 @@ export function PromptLibraryPage({
                   onOpenGuide={(currentPrompt) => openGuide("l1", currentPrompt)}
                 />
                 <IndexPromptEditor
-                  key={`l2-${selectedBookId}-${indexPrompts.l2_index_prompt_hash}-${indexPrompts.updated_at}`}
+                  key={`l2-${selectedBookId}-${selectedIndexGroupKey}-${activeL2Hash}-${activeL2UpdatedAt}`}
                   type="l2"
-                  title="L2 Prompt"
-                  value={indexPrompts.l2_index_prompt}
-                  hash={indexPrompts.l2_index_prompt_hash}
-                  updatedAt={indexPrompts.updated_at}
+                  title={selectedIndexGroupKey === "base" ? "L2 Prompt" : `L2 Prompt · ${selectedIndexGroup?.name || selectedIndexGroupKey}`}
+                  value={activeL2Prompt}
+                  hash={activeL2Hash}
+                  updatedAt={activeL2UpdatedAt}
                   coverage={l2Coverage}
                   saving={indexSaving.l2}
-                  onSave={(prompt) => saveIndexPrompt("l2", prompt)}
+                  onSave={(prompt) => selectedIndexGroupKey === "base"
+                    ? saveIndexPrompt("l2", prompt)
+                    : saveSpecializedL2Prompt(prompt)}
                   onOpenGuide={(currentPrompt) => openGuide("l2", currentPrompt)}
+                />
+                <IndexGroupManager
+                  groups={indexGroups}
+                  selectedKey={selectedIndexGroupKey}
+                  draft={indexGroupDraft}
+                  busy={indexGroupBusy}
+                  onSelect={(groupKey) => {
+                    const group = indexGroups.find((entry) => entry.group_key === groupKey);
+                    setSelectedIndexGroupKey(groupKey);
+                    setIndexGroupDraft(groupKey === "base" || !group ? emptyIndexGroupDraft : groupToDraft(group));
+                  }}
+                  onNew={() => {
+                    setSelectedIndexGroupKey("");
+                    setIndexGroupDraft({
+                      ...emptyIndexGroupDraft,
+                      l2_index_prompt: indexPrompts.l2_index_prompt
+                    });
+                  }}
+                  onOpenGuide={() => openGuide("indexgroup", indexPrompts.l2_index_prompt)}
+                  onDraftChange={(patch) => setIndexGroupDraft((current) => ({ ...current, ...patch }))}
+                  onSave={saveIndexGroup}
+                  onDelete={deleteIndexGroup}
                 />
                 {rebuildPrompt ? (
                   <RebuildConfirm
@@ -453,6 +596,11 @@ export function PromptLibraryPage({
                     onChange={(event) => updateDraft({ summary_prompt: event.target.value })}
                   />
                 </label>
+                <IndexGroupBinding
+                  groups={indexGroups}
+                  value={draft.index_group_keys || []}
+                  onChange={(indexGroupKeys) => updateDraft({ index_group_keys: indexGroupKeys })}
+                />
                 <div className="form-actions">
                   <button className="secondary" type="button" onClick={saveGroup} disabled={busy || !selectedBookId}>
                     {busy ? <Loader2 className="spin" size={16} /> : <Save size={16} />}
@@ -564,6 +712,117 @@ function IndexPromptEditor({ type, title, description, value, hash, updatedAt, c
   );
 }
 
+function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, onOpenGuide, onDraftChange, onSave, onDelete }) {
+  const isBase = selectedKey === "base";
+  const isCreating = !selectedKey;
+  return (
+    <div className="index-group-manager">
+      <div className="index-group-head">
+        <div>
+          <strong>索引组</strong>
+          <span>base 保持通用 L2，专项组按分析诉求拆分事实压力。</span>
+        </div>
+        <button className="secondary inline" type="button" onClick={onNew}>
+          <Plus size={14} />
+          新建专项组
+        </button>
+        <button className="ghost inline" type="button" onClick={onOpenGuide}>
+          <Sparkles size={14} />
+          创建引导
+        </button>
+      </div>
+      <div className="index-group-tabs">
+        {groups.map((group) => (
+          <button
+            key={group.group_key}
+            type="button"
+            className={group.group_key === selectedKey ? "active" : ""}
+            onClick={() => onSelect(group.group_key)}
+          >
+            <strong>{group.name || group.group_key}</strong>
+            <span>{group.group_key}</span>
+          </button>
+        ))}
+      </div>
+      {isCreating || (!isBase && selectedKey) ? (
+        <div className="index-group-editor">
+          <div className="form-grid compact">
+            {isCreating ? (
+              <label>
+                <span>组 Key</span>
+                <input value={draft.group_key} placeholder="cultivation-items" onChange={(event) => onDraftChange({ group_key: event.target.value })} />
+              </label>
+            ) : null}
+            <label>
+              <span>名称</span>
+              <input value={draft.name} placeholder="修炼法宝" onChange={(event) => onDraftChange({ name: event.target.value })} />
+            </label>
+            <label>
+              <span>触发词</span>
+              <input value={draft.trigger_keywords} placeholder="境界、法宝、武器、本命物" onChange={(event) => onDraftChange({ trigger_keywords: event.target.value })} />
+            </label>
+          </div>
+          <label className="block-label">
+            <span>用途说明</span>
+            <textarea value={draft.description} placeholder="说明这个索引组负责哪些内容。" onChange={(event) => onDraftChange({ description: event.target.value })} />
+          </label>
+          <label className="block-label">
+            <span>L2 Prompt</span>
+            <textarea value={draft.l2_index_prompt} placeholder="写清楚这个专项组只提取哪些类型化事实。" onChange={(event) => onDraftChange({ l2_index_prompt: event.target.value })} />
+          </label>
+          <div className="action-row wrap">
+            <button className="secondary inline" type="button" onClick={onSave} disabled={busy}>
+              {busy ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
+              保存索引组
+            </button>
+            {!isCreating ? (
+              <button className="danger inline" type="button" onClick={onDelete} disabled={busy}>
+                <Trash2 size={15} />
+                删除
+              </button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function IndexGroupBinding({ groups, value, onChange }) {
+  const selected = new Set(value || []);
+  function toggle(groupKey) {
+    const next = new Set(selected);
+    if (next.has(groupKey)) next.delete(groupKey);
+    else next.add(groupKey);
+    onChange([...next]);
+  }
+  return (
+    <div className="index-group-binding">
+      <span>使用索引组</span>
+      <div className="index-group-checks">
+        <button
+          type="button"
+          className={!value?.length ? "active" : ""}
+          onClick={() => onChange([])}
+        >
+          自动推断
+        </button>
+        {groups.map((group) => (
+          <button
+            key={group.group_key}
+            type="button"
+            className={selected.has(group.group_key) ? "active" : ""}
+            onClick={() => toggle(group.group_key)}
+          >
+            {group.name || group.group_key}
+          </button>
+        ))}
+      </div>
+      <small>{value?.length ? "分析时只召回已绑定索引组。" : "根据 Prompt 触发词自动选择，未命中则使用 base。"}</small>
+    </div>
+  );
+}
+
 function PromptGuideDrawer({ request, templates, onClose, onApply, setError }) {
   const mode = request.mode || "create";
   const isOptimize = mode === "optimize";
@@ -578,7 +837,7 @@ function PromptGuideDrawer({ request, templates, onClose, onApply, setError }) {
   const currentStep = steps[activeStep] || null;
   const answeredCount = steps.filter((step) => String(answers[step.id] || "").trim()).length;
   const canGenerate = answeredCount > 0 && !generating;
-  const guideKind = request.type === "analysis" ? "analysis" : "index";
+  const guideKind = request.type === "analysis" ? "analysis" : request.type === "indexgroup" ? "indexGroup" : "index";
 
   function updateAnswer(stepId, value) {
     setAnswers((current) => ({ ...current, [stepId]: value }));
@@ -651,13 +910,15 @@ function PromptGuideDrawer({ request, templates, onClose, onApply, setError }) {
         </div>
 
         <div className={`guide-scope-card ${guideKind}`}>
-          <strong>{guideKind === "index" ? "书籍级索引 Prompt" : "书籍级分析 Prompt"}</strong>
+          <strong>{guideKind === "index" ? "书籍级索引 Prompt" : guideKind === "indexGroup" ? "书籍级专项索引组" : "书籍级分析 Prompt"}</strong>
           <span>
             {guideKind === "index"
               ? "绑定当前书籍，构建后不轻易调整；修改会影响索引过期判断。"
-              : isOptimize
-                ? "基于当前分析 Prompt 进行打磨；生成后可套用到草稿，仍需手动保存。"
-                : "绑定当前书籍，可为不同分析任务创建多条；创建任务时选择使用。"}
+              : guideKind === "indexGroup"
+                ? "只负责一类稳定分析诉求；生成后会套用到新建专项组草稿。"
+                : isOptimize
+                  ? "基于当前分析 Prompt 进行打磨；生成后可套用到草稿，仍需手动保存。"
+                  : "绑定当前书籍，可为不同分析任务创建多条；创建任务时选择使用。"}
           </span>
         </div>
 
@@ -762,6 +1023,40 @@ function defaultGuideAnswers(steps) {
   return Object.fromEntries((steps || []).map((step) => [step.id, step.placeholder || ""]));
 }
 
+function slugifyIndexGroupKey(value) {
+  const text = String(value || "").trim().toLowerCase();
+  const ascii = text
+    .replace(/修炼|境界|功法/g, "cultivation")
+    .replace(/法宝|武器|本命物|物品/g, "items")
+    .replace(/人物|角色/g, "characters")
+    .replace(/关系/g, "relationships")
+    .replace(/宗门|势力|组织/g, "forces")
+    .replace(/地点|地图/g, "locations")
+    .replace(/事件|剧情/g, "events")
+    .replace(/伏笔|线索/g, "foreshadowing")
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  return ascii || "custom-index";
+}
+
+function extractTriggerKeywords(suggestion) {
+  const text = [
+    suggestion?.rationale,
+    ...(suggestion?.usage_notes || []),
+    suggestion?.prompt_suggestion
+  ].join("\n");
+  const match = text.match(/触发词(?:包括|为|：|:)?([^\n。；;]+)/);
+  if (!match) return "";
+  return match[1]
+    .replace(/[包括为：:]/g, "")
+    .split(/[、,，/和与及\s]+/)
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .slice(0, 12)
+    .join("、");
+}
+
 function PromptTipPopover({ title, tips }) {
   const [pinned, setPinned] = useState(false);
   const text = tips.map((tip, index) => `${index + 1}. ${tip}`).join("\n");
@@ -820,7 +1115,7 @@ function RebuildConfirm({ type, book, onCancel, onStart }) {
   const first = book?.first_chapter || 1;
   const last = book?.last_chapter || first;
   const [form, setForm] = useState({ start_chapter: String(first), end_chapter: String(last), force: true });
-  const label = type === "l1" ? "L1 基础索引" : "L2 类型化事实";
+  const label = type === "l1" ? "L1 章节路由" : "L2 类型化事实";
 
   function submit() {
     const startChapter = Number(form.start_chapter);
@@ -860,7 +1155,8 @@ function normalizeGroupDraft(group, bookId) {
     ...emptyDraft,
     ...group,
     book_id: group?.book_id || bookId || "",
-    summary_prompt: group?.summary_prompt || ""
+    summary_prompt: group?.summary_prompt || "",
+    index_group_keys: Array.isArray(group?.index_group_keys) ? group.index_group_keys : []
   };
 }
 
@@ -868,12 +1164,32 @@ function samePromptGroup(left, right) {
   return JSON.stringify({
     book_id: left?.book_id || "",
     name: left?.name || "",
-    summary_prompt: left?.summary_prompt || ""
+    summary_prompt: left?.summary_prompt || "",
+    index_group_keys: left?.index_group_keys || []
   }) === JSON.stringify({
     book_id: right?.book_id || "",
     name: right?.name || "",
-    summary_prompt: right?.summary_prompt || ""
+    summary_prompt: right?.summary_prompt || "",
+    index_group_keys: right?.index_group_keys || []
   });
+}
+
+function groupToDraft(group) {
+  return {
+    group_key: group.group_key || "",
+    name: group.name || "",
+    description: group.description || "",
+    category_scope: group.category_scope || [],
+    trigger_keywords: (group.trigger_keywords || []).join("、"),
+    l2_index_prompt: group.l2_index_prompt || ""
+  };
+}
+
+function splitKeywords(value) {
+  return String(value || "")
+    .split(/[,\s，、；;]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function bookIdFromUrl() {

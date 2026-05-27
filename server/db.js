@@ -13,8 +13,9 @@ import {
 } from "./schema.js";
 
 export const DEFAULT_L1_INDEX_PROMPT = [
-  "请为当前小说章节建立可复用 L1 基础索引。",
-  "要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；实体和事件尽量短句化，保留可用于后续分析的事实。"
+  "请为当前小说章节建立轻量 L1 章节路由/信号索引。",
+  "定位：L1 只判断本章有哪些可召回信号，服务后续按章节命中后读取 L2 专项事实；不要写长摘要，不要沉淀事实卡，不要替代 L2。",
+  "要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；主体、别名、关键词和分类信号要稳定、短句化、便于检索。"
 ].join("\n");
 
 export const DEFAULT_L2_INDEX_PROMPT = [
@@ -25,8 +26,9 @@ export const DEFAULT_L2_INDEX_PROMPT = [
   "不要补充本章原文之外的信息；如果本章没有可复用事实，facts 输出空数组。"
 ].join("\n");
 
-const DEFAULT_L1_INDEX_PROMPT_HASH = "l1-v1-chapter-window-10";
+const DEFAULT_L1_INDEX_PROMPT_HASH = "l1-route-v1";
 const DEFAULT_L2_INDEX_PROMPT_HASH = "l2-v1-typed-facts";
+export const BASE_INDEX_GROUP_KEY = "base";
 
 const dbPath = path.join(config.dataDir, "novel-chapters.sqlite");
 const db = new DatabaseSync(dbPath);
@@ -82,6 +84,7 @@ db.exec(`
     category TEXT NOT NULL DEFAULT '未分类',
     chapter_prompt TEXT NOT NULL,
     summary_prompt TEXT NOT NULL,
+    index_group_keys TEXT NOT NULL DEFAULT '[]',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   );
@@ -92,6 +95,21 @@ db.exec(`
     l2_index_prompt TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
+    FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS book_index_groups (
+    book_id TEXT NOT NULL,
+    group_key TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    description TEXT NOT NULL DEFAULT '',
+    category_scope TEXT NOT NULL DEFAULT '[]',
+    trigger_keywords TEXT NOT NULL DEFAULT '[]',
+    l2_index_prompt TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (book_id, group_key),
     FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
   );
 
@@ -176,6 +194,13 @@ db.exec(`
     key_events TEXT NOT NULL DEFAULT '[]',
     items_places_orgs TEXT NOT NULL DEFAULT '[]',
     open_questions TEXT NOT NULL DEFAULT '[]',
+    route_schema_version TEXT NOT NULL DEFAULT '',
+    route_summary TEXT NOT NULL DEFAULT '',
+    route_entities TEXT NOT NULL DEFAULT '[]',
+    route_keywords TEXT NOT NULL DEFAULT '[]',
+    signals TEXT NOT NULL DEFAULT '[]',
+    category_scores TEXT NOT NULL DEFAULT '{}',
+    has_major_signal INTEGER NOT NULL DEFAULT 0,
     confidence REAL NOT NULL DEFAULT 0,
     error_summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -209,6 +234,7 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS l2_chapter_statuses (
     book_id TEXT NOT NULL,
+    index_group_key TEXT NOT NULL DEFAULT 'base',
     chapter_index INTEGER NOT NULL,
     status TEXT NOT NULL,
     source_hmac TEXT NOT NULL DEFAULT '',
@@ -219,13 +245,14 @@ db.exec(`
     error_summary TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
-    PRIMARY KEY (book_id, chapter_index),
+    PRIMARY KEY (book_id, index_group_key, chapter_index),
     FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
   );
 
   CREATE TABLE IF NOT EXISTS l2_facts (
     id TEXT PRIMARY KEY,
     book_id TEXT NOT NULL,
+    index_group_key TEXT NOT NULL DEFAULT 'base',
     chapter_index INTEGER NOT NULL,
     status TEXT NOT NULL,
     source_hmac TEXT NOT NULL DEFAULT '',
@@ -251,9 +278,9 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_l2_facts_lookup
-    ON l2_facts(book_id, category, entity, chapter_index);
+    ON l2_facts(book_id, index_group_key, category, entity, chapter_index);
   CREATE INDEX IF NOT EXISTS idx_l2_facts_chapter
-    ON l2_facts(book_id, chapter_index);
+    ON l2_facts(book_id, index_group_key, chapter_index);
 `);
 
 migrateSchema();
@@ -283,6 +310,7 @@ export function ensureBook(bookId, bookName = "") {
     db.prepare("UPDATE books SET book_name = ?, updated_at = ? WHERE book_id = ?")
       .run(existing.book_name || name, now, id);
     ensureBookIndexPrompts(id);
+    ensureBaseIndexGroup(id);
     return getBook(id);
   }
 
@@ -291,6 +319,7 @@ export function ensureBook(bookId, bookName = "") {
     VALUES (?, ?, ?, ?)
   `).run(id, name, now, now);
   ensureBookIndexPrompts(id);
+  ensureBaseIndexGroup(id);
   return getBook(id);
 }
 
@@ -328,6 +357,7 @@ export function getDatabaseDiagnostics() {
     updated_at: book.updated_at,
     l1: countStatusesForBook("l1_chapter_indexes", book.book_id),
     l2: countStatusesForBook("l2_chapter_statuses", book.book_id),
+    index_groups: countRows("book_index_groups", "book_id = ?", [book.book_id]),
     l2_facts: countRows("l2_facts", "book_id = ?", [book.book_id]),
     analyses: countStatusesForBook("analysis_runs", book.book_id),
     prompt_groups: countRows("prompt_groups", "book_id = ?", [book.book_id])
@@ -344,6 +374,7 @@ export function getDatabaseDiagnostics() {
       l1_indexes: countRows("l1_chapter_indexes"),
       l1_windows: countRows("l1_window_indexes"),
       l2_chapter_statuses: countRows("l2_chapter_statuses"),
+      index_groups: countRows("book_index_groups"),
       l2_facts: countRows("l2_facts"),
       analyses: countRows("analysis_runs"),
       prompt_groups: countRows("prompt_groups"),
@@ -567,7 +598,162 @@ export function updateBookIndexPrompts(bookId, payload = {}) {
     SET l1_index_prompt = ?, l2_index_prompt = ?, updated_at = ?
     WHERE book_id = ?
   `).run(next.l1_index_prompt, next.l2_index_prompt, nowIso(), normalizeBookId(bookId));
+  ensureBaseIndexGroup(bookId);
   return getBookIndexPrompts(bookId);
+}
+
+export function ensureBaseIndexGroup(bookId) {
+  const id = normalizeBookId(bookId);
+  const prompts = getBookIndexPrompts(id);
+  const now = nowIso();
+  const current = db.prepare("SELECT * FROM book_index_groups WHERE book_id = ? AND group_key = ?").get(id, BASE_INDEX_GROUP_KEY);
+  if (!current) {
+    db.prepare(`
+      INSERT INTO book_index_groups (
+        book_id, group_key, name, description, category_scope, trigger_keywords,
+        l2_index_prompt, enabled, created_at, updated_at
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run(
+      id,
+      BASE_INDEX_GROUP_KEY,
+      "基础索引",
+      "兼容默认 L2 类型化事实索引。",
+      JSON.stringify([]),
+      JSON.stringify([]),
+      prompts.l2_index_prompt,
+      now,
+      now
+    );
+  } else if (current.l2_index_prompt !== prompts.l2_index_prompt) {
+    db.prepare(`
+      UPDATE book_index_groups
+      SET name = ?, description = ?, l2_index_prompt = ?, enabled = 1, updated_at = ?
+      WHERE book_id = ? AND group_key = ?
+    `).run("基础索引", "兼容默认 L2 类型化事实索引。", prompts.l2_index_prompt, now, id, BASE_INDEX_GROUP_KEY);
+  }
+  return getBookIndexGroup(id, BASE_INDEX_GROUP_KEY);
+}
+
+export function listBookIndexGroups(bookId, { includeDisabled = false } = {}) {
+  const id = normalizeBookId(bookId);
+  ensureBaseIndexGroup(id);
+  const rows = db.prepare(`
+    SELECT *
+    FROM book_index_groups
+    WHERE book_id = ? ${includeDisabled ? "" : "AND enabled = 1"}
+    ORDER BY CASE WHEN group_key = ? THEN 0 ELSE 1 END, updated_at DESC
+  `).all(id, BASE_INDEX_GROUP_KEY);
+  return rows.map(publicBookIndexGroup);
+}
+
+export function getBookIndexGroup(bookId, groupKey = BASE_INDEX_GROUP_KEY) {
+  const id = normalizeBookId(bookId);
+  const key = normalizeIndexGroupKey(groupKey);
+  if (key === BASE_INDEX_GROUP_KEY) {
+    const row = db.prepare("SELECT * FROM book_index_groups WHERE book_id = ? AND group_key = ?").get(id, BASE_INDEX_GROUP_KEY);
+    if (row) return publicBookIndexGroup(row);
+  }
+  const row = db.prepare("SELECT * FROM book_index_groups WHERE book_id = ? AND group_key = ?").get(id, key);
+  return publicBookIndexGroup(row);
+}
+
+export function createBookIndexGroup(bookId, payload = {}) {
+  const id = normalizeBookId(bookId);
+  ensureBook(id);
+  const group = normalizeBookIndexGroupPayload(payload);
+  if (group.group_key === BASE_INDEX_GROUP_KEY) {
+    const error = new Error("base 索引组不能手动创建。");
+    error.status = 409;
+    throw error;
+  }
+  const now = nowIso();
+  db.prepare(`
+    INSERT INTO book_index_groups (
+      book_id, group_key, name, description, category_scope, trigger_keywords,
+      l2_index_prompt, enabled, created_at, updated_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    group.group_key,
+    group.name,
+    group.description,
+    JSON.stringify(group.category_scope),
+    JSON.stringify(group.trigger_keywords),
+    group.l2_index_prompt,
+    group.enabled ? 1 : 0,
+    now,
+    now
+  );
+  return getBookIndexGroup(id, group.group_key);
+}
+
+export function updateBookIndexGroup(bookId, groupKey, payload = {}) {
+  const id = normalizeBookId(bookId);
+  const key = normalizeIndexGroupKey(groupKey);
+  if (key === BASE_INDEX_GROUP_KEY) {
+    const error = new Error("base 索引组请通过书籍 L2 Prompt 更新。");
+    error.status = 409;
+    throw error;
+  }
+  const current = getBookIndexGroup(id, key);
+  if (!current) {
+    const error = new Error("索引组不存在。");
+    error.status = 404;
+    throw error;
+  }
+  const group = normalizeBookIndexGroupPayload({ ...current, ...payload, group_key: key });
+  db.prepare(`
+    UPDATE book_index_groups
+    SET name = ?, description = ?, category_scope = ?, trigger_keywords = ?,
+      l2_index_prompt = ?, enabled = ?, updated_at = ?
+    WHERE book_id = ? AND group_key = ?
+  `).run(
+    group.name,
+    group.description,
+    JSON.stringify(group.category_scope),
+    JSON.stringify(group.trigger_keywords),
+    group.l2_index_prompt,
+    group.enabled ? 1 : 0,
+    nowIso(),
+    id,
+    key
+  );
+  return getBookIndexGroup(id, key);
+}
+
+export function deleteBookIndexGroup(bookId, groupKey) {
+  const id = normalizeBookId(bookId);
+  const key = normalizeIndexGroupKey(groupKey);
+  if (key === BASE_INDEX_GROUP_KEY) {
+    const error = new Error("base 索引组不可删除。");
+    error.status = 409;
+    throw error;
+  }
+  const result = db.transaction(() => {
+    const deleted = db.prepare("DELETE FROM book_index_groups WHERE book_id = ? AND group_key = ?").run(id, key);
+    db.prepare("DELETE FROM l2_chapter_statuses WHERE book_id = ? AND index_group_key = ?").run(id, key);
+    db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND index_group_key = ?").run(id, key);
+    return deleted;
+  })();
+  return { deleted: result.changes > 0, bookId: id, groupKey: key };
+}
+
+export function disableBookIndexGroup(bookId, groupKey) {
+  const id = normalizeBookId(bookId);
+  const key = normalizeIndexGroupKey(groupKey);
+  if (key === BASE_INDEX_GROUP_KEY) {
+    const error = new Error("base 索引组不可删除。");
+    error.status = 409;
+    throw error;
+  }
+  const result = db.prepare(`
+    UPDATE book_index_groups
+    SET enabled = 0, updated_at = ?
+    WHERE book_id = ? AND group_key = ?
+  `).run(nowIso(), id, key);
+  return { disabled: result.changes > 0, bookId: id, groupKey: key };
 }
 
 export function listPromptGroups(filters = {}) {
@@ -577,44 +763,45 @@ export function listPromptGroups(filters = {}) {
 
   if (hasBookFilter && category) {
     return db.prepare(`
-      SELECT id, book_id, name, category, chapter_prompt, summary_prompt, created_at, updated_at
+      SELECT id, book_id, name, category, chapter_prompt, summary_prompt, index_group_keys, created_at, updated_at
       FROM prompt_groups
       WHERE book_id = ? AND category = ?
       ORDER BY updated_at DESC
-    `).all(bookId ? normalizeBookId(bookId) : "", normalizePromptCategory(category));
+    `).all(bookId ? normalizeBookId(bookId) : "", normalizePromptCategory(category)).map(publicPromptGroup);
   }
 
   if (hasBookFilter) {
     return db.prepare(`
-      SELECT id, book_id, name, category, chapter_prompt, summary_prompt, created_at, updated_at
+      SELECT id, book_id, name, category, chapter_prompt, summary_prompt, index_group_keys, created_at, updated_at
       FROM prompt_groups
       WHERE book_id = ?
       ORDER BY updated_at DESC
-    `).all(bookId ? normalizeBookId(bookId) : "");
+    `).all(bookId ? normalizeBookId(bookId) : "").map(publicPromptGroup);
   }
 
   if (category) {
     return db.prepare(`
-      SELECT id, book_id, name, category, chapter_prompt, summary_prompt, created_at, updated_at
+      SELECT id, book_id, name, category, chapter_prompt, summary_prompt, index_group_keys, created_at, updated_at
       FROM prompt_groups
       WHERE category = ?
       ORDER BY category ASC, updated_at DESC
-    `).all(normalizePromptCategory(category));
+    `).all(normalizePromptCategory(category)).map(publicPromptGroup);
   }
 
   return db.prepare(`
-    SELECT id, book_id, name, category, chapter_prompt, summary_prompt, created_at, updated_at
+    SELECT id, book_id, name, category, chapter_prompt, summary_prompt, index_group_keys, created_at, updated_at
     FROM prompt_groups
     ORDER BY category ASC, updated_at DESC
-  `).all();
+  `).all().map(publicPromptGroup);
 }
 
 export function getPromptGroup(id) {
-  return db.prepare(`
-    SELECT id, book_id, name, category, chapter_prompt, summary_prompt, created_at, updated_at
+  const row = db.prepare(`
+    SELECT id, book_id, name, category, chapter_prompt, summary_prompt, index_group_keys, created_at, updated_at
     FROM prompt_groups
     WHERE id = ?
   `).get(String(id || ""));
+  return publicPromptGroup(row);
 }
 
 export function createPromptGroup(payload = {}) {
@@ -622,9 +809,9 @@ export function createPromptGroup(payload = {}) {
   const id = crypto.randomUUID();
   const now = nowIso();
   db.prepare(`
-    INSERT INTO prompt_groups (id, book_id, name, category, chapter_prompt, summary_prompt, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, group.book_id, group.name, group.category, group.chapter_prompt, group.summary_prompt, now, now);
+    INSERT INTO prompt_groups (id, book_id, name, category, chapter_prompt, summary_prompt, index_group_keys, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, group.book_id, group.name, group.category, group.chapter_prompt, group.summary_prompt, JSON.stringify(group.index_group_keys), now, now);
   return getPromptGroup(id);
 }
 
@@ -638,9 +825,9 @@ export function updatePromptGroup(id, payload = {}) {
   const next = normalizePromptGroup({ ...current, ...payload });
   db.prepare(`
     UPDATE prompt_groups
-    SET book_id = ?, name = ?, category = ?, chapter_prompt = ?, summary_prompt = ?, updated_at = ?
+    SET book_id = ?, name = ?, category = ?, chapter_prompt = ?, summary_prompt = ?, index_group_keys = ?, updated_at = ?
     WHERE id = ?
-  `).run(next.book_id, next.name, next.category, next.chapter_prompt, next.summary_prompt, nowIso(), current.id);
+  `).run(next.book_id, next.name, next.category, next.chapter_prompt, next.summary_prompt, JSON.stringify(next.index_group_keys), nowIso(), current.id);
   return getPromptGroup(current.id);
 }
 
@@ -753,13 +940,15 @@ export function saveL1ChapterIndex({ bookId, chapterIndex, status, sourceHmac, m
   const id = normalizeBookId(bookId);
   const index = normalizeChapterIndex(chapterIndex);
   const now = nowIso();
+  const routeValue = normalizeL1RouteValue(value);
   db.prepare(`
     INSERT INTO l1_chapter_indexes (
       book_id, chapter_index, status, source_hmac, model, prompt_hash,
       summary, keywords, entities, key_events, items_places_orgs, open_questions,
-      confidence, error_summary, created_at, updated_at
+      route_schema_version, route_summary, route_entities, route_keywords, signals,
+      category_scores, has_major_signal, confidence, error_summary, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(book_id, chapter_index) DO UPDATE SET
       status = excluded.status,
       source_hmac = excluded.source_hmac,
@@ -771,6 +960,13 @@ export function saveL1ChapterIndex({ bookId, chapterIndex, status, sourceHmac, m
       key_events = excluded.key_events,
       items_places_orgs = excluded.items_places_orgs,
       open_questions = excluded.open_questions,
+      route_schema_version = excluded.route_schema_version,
+      route_summary = excluded.route_summary,
+      route_entities = excluded.route_entities,
+      route_keywords = excluded.route_keywords,
+      signals = excluded.signals,
+      category_scores = excluded.category_scores,
+      has_major_signal = excluded.has_major_signal,
       confidence = excluded.confidence,
       error_summary = excluded.error_summary,
       updated_at = excluded.updated_at
@@ -781,13 +977,20 @@ export function saveL1ChapterIndex({ bookId, chapterIndex, status, sourceHmac, m
     String(sourceHmac || ""),
     String(model || ""),
     String(promptHash || ""),
-    String(value.summary || ""),
-    stringifyJsonArray(value.keywords),
-    stringifyJsonArray(value.entities),
+    routeValue.summary,
+    stringifyJsonArray(routeValue.keywords),
+    stringifyJsonArray(routeValue.entities),
     stringifyJsonArray(value.key_events),
     stringifyJsonArray(value.items_places_orgs),
     stringifyJsonArray(value.open_questions),
-    normalizeConfidence(value.confidence),
+    routeValue.route_schema_version,
+    routeValue.route_summary,
+    stringifyJsonArray(routeValue.route_entities),
+    stringifyJsonArray(routeValue.route_keywords),
+    stringifyJsonArray(routeValue.signals),
+    stringifyJsonObject(routeValue.category_scores),
+    routeValue.has_major_signal ? 1 : 0,
+    normalizeConfidence(routeValue.confidence),
     String(errorSummary || "").slice(0, 1000),
     now,
     now
@@ -964,21 +1167,22 @@ export function getL1Coverage({ bookId, startChapter, endChapter, model = "", pr
   };
 }
 
-export async function saveL2ChapterFacts({ bookId, chapterIndex, status, sourceHmac, model, promptHash, schemaVersion, facts = [], errorSummary = "" }) {
+export async function saveL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, chapterIndex, status, sourceHmac, model, promptHash, schemaVersion, facts = [], errorSummary = "" }) {
   const id = normalizeBookId(bookId);
+  const groupKey = normalizeIndexGroupKey(indexGroupKey);
   const index = normalizeChapterIndex(chapterIndex);
   const now = nowIso();
   const normalizedFacts = Array.isArray(facts) ? facts.map((fact) => normalizeL2Fact(fact)).filter(Boolean) : [];
 
-  db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND chapter_index = ?").run(id, index);
+  db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND index_group_key = ? AND chapter_index = ?").run(id, groupKey, index);
 
   db.prepare(`
     INSERT INTO l2_chapter_statuses (
-      book_id, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
+      book_id, index_group_key, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
       facts_count, error_summary, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(book_id, chapter_index) DO UPDATE SET
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(book_id, index_group_key, chapter_index) DO UPDATE SET
       status = excluded.status,
       source_hmac = excluded.source_hmac,
       model = excluded.model,
@@ -989,6 +1193,7 @@ export async function saveL2ChapterFacts({ bookId, chapterIndex, status, sourceH
       updated_at = excluded.updated_at
   `).run(
     id,
+    groupKey,
     index,
     String(status || "pending"),
     String(sourceHmac || ""),
@@ -1010,14 +1215,15 @@ export async function saveL2ChapterFacts({ bookId, chapterIndex, status, sourceH
     }), l2FactAad(factId));
     db.prepare(`
       INSERT INTO l2_facts (
-        id, book_id, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
+        id, book_id, index_group_key, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
         category, entity, aliases, tags, related_entities, fact_type, importance, confidence,
         review_source, ciphertext, iv, tag, algorithm, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       factId,
       id,
+      groupKey,
       index,
       String(status || "completed"),
       String(sourceHmac || ""),
@@ -1042,20 +1248,21 @@ export async function saveL2ChapterFacts({ bookId, chapterIndex, status, sourceH
     );
   }
 
-  return getL2ChapterStatus(id, index);
+  return getL2ChapterStatus(id, index, groupKey);
 }
 
-export function saveL2ChapterStatus({ bookId, chapterIndex, status, sourceHmac, model, promptHash, schemaVersion, errorSummary = "" }) {
+export function saveL2ChapterStatus({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, chapterIndex, status, sourceHmac, model, promptHash, schemaVersion, errorSummary = "" }) {
   const id = normalizeBookId(bookId);
+  const groupKey = normalizeIndexGroupKey(indexGroupKey);
   const index = normalizeChapterIndex(chapterIndex);
   const now = nowIso();
   db.prepare(`
     INSERT INTO l2_chapter_statuses (
-      book_id, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
+      book_id, index_group_key, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
       facts_count, error_summary, created_at, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
-    ON CONFLICT(book_id, chapter_index) DO UPDATE SET
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+    ON CONFLICT(book_id, index_group_key, chapter_index) DO UPDATE SET
       status = excluded.status,
       source_hmac = excluded.source_hmac,
       model = excluded.model,
@@ -1066,6 +1273,7 @@ export function saveL2ChapterStatus({ bookId, chapterIndex, status, sourceHmac, 
       updated_at = excluded.updated_at
   `).run(
     id,
+    groupKey,
     index,
     String(status || "pending"),
     String(sourceHmac || ""),
@@ -1076,35 +1284,36 @@ export function saveL2ChapterStatus({ bookId, chapterIndex, status, sourceHmac, 
     now,
     now
   );
-  if (status !== "failed") db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND chapter_index = ?").run(id, index);
-  return getL2ChapterStatus(id, index);
+  if (status !== "failed") db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND index_group_key = ? AND chapter_index = ?").run(id, groupKey, index);
+  return getL2ChapterStatus(id, index, groupKey);
 }
 
-export function getL2ChapterStatus(bookId, chapterIndex) {
+export function getL2ChapterStatus(bookId, chapterIndex, indexGroupKey = BASE_INDEX_GROUP_KEY) {
   const row = db.prepare(`
     SELECT *
     FROM l2_chapter_statuses
-    WHERE book_id = ? AND chapter_index = ?
-  `).get(normalizeBookId(bookId), normalizeChapterIndex(chapterIndex));
+    WHERE book_id = ? AND index_group_key = ? AND chapter_index = ?
+  `).get(normalizeBookId(bookId), normalizeIndexGroupKey(indexGroupKey), normalizeChapterIndex(chapterIndex));
   return publicL2ChapterStatus(row);
 }
 
-export function listL2ChapterStatuses(bookId, startChapter, endChapter) {
+export function listL2ChapterStatuses(bookId, startChapter, endChapter, indexGroupKey = BASE_INDEX_GROUP_KEY) {
   const range = normalizeRange(startChapter, endChapter);
   return db.prepare(`
     SELECT *
     FROM l2_chapter_statuses
-    WHERE book_id = ? AND chapter_index BETWEEN ? AND ?
+    WHERE book_id = ? AND index_group_key = ? AND chapter_index BETWEEN ? AND ?
     ORDER BY chapter_index ASC
-  `).all(normalizeBookId(bookId), range.startChapter, range.endChapter).map(publicL2ChapterStatus);
+  `).all(normalizeBookId(bookId), normalizeIndexGroupKey(indexGroupKey), range.startChapter, range.endChapter).map(publicL2ChapterStatus);
 }
 
-export function getL2Coverage({ bookId, startChapter, endChapter, model = "", promptHash = "", schemaVersion = "" }) {
+export function getL2Coverage({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, startChapter, endChapter, model = "", promptHash = "", schemaVersion = "" }) {
   const id = normalizeBookId(bookId);
+  const groupKey = normalizeIndexGroupKey(indexGroupKey);
   const range = normalizeRange(startChapter, endChapter);
   const chapters = listChapterMetadata(id)
     .filter((chapter) => chapter.chapter_index >= range.startChapter && chapter.chapter_index <= range.endChapter);
-  const statuses = new Map(listL2ChapterStatuses(id, range.startChapter, range.endChapter)
+  const statuses = new Map(listL2ChapterStatuses(id, range.startChapter, range.endChapter, groupKey)
     .map((entry) => [entry.chapter_index, entry]));
   const stats = {
     total: chapters.length,
@@ -1139,6 +1348,7 @@ export function getL2Coverage({ bookId, startChapter, endChapter, model = "", pr
   }
   return {
     book_id: id,
+    index_group_key: groupKey,
     start_chapter: range.startChapter,
     end_chapter: range.endChapter,
     chapters: stats,
@@ -1146,13 +1356,16 @@ export function getL2Coverage({ bookId, startChapter, endChapter, model = "", pr
   };
 }
 
-export async function listL2Facts({ bookId, startChapter, endChapter, chapterIndexes = [], categories = [], entity = "", entities = [], limit = 500, includeContent = true }) {
+export async function listL2Facts({ bookId, indexGroupKeys = [BASE_INDEX_GROUP_KEY], startChapter, endChapter, chapterIndexes = [], categories = [], entity = "", entities = [], limit = 500, includeContent = true }) {
   const range = normalizeRange(startChapter, endChapter);
   const indexes = normalizeChapterIndexList(chapterIndexes)
     .filter((index) => index >= range.startChapter && index <= range.endChapter);
+  const groupKeys = normalizeIndexGroupKeys(indexGroupKeys);
   const categoryList = normalizeL2Categories(categories);
   const params = [normalizeBookId(bookId), range.startChapter, range.endChapter];
   const where = ["book_id = ?", "chapter_index BETWEEN ? AND ?", "status = 'completed'"];
+  where.push(`index_group_key IN (${groupKeys.map(() => "?").join(", ")})`);
+  params.push(...groupKeys);
   if (indexes.length) {
     where.push(`chapter_index IN (${indexes.map(() => "?").join(", ")})`);
     params.push(...indexes);
@@ -1198,11 +1411,14 @@ function normalizeChapterIndexList(values) {
   return indexes.sort((left, right) => left - right);
 }
 
-export function listL2FactMetadata({ bookId, startChapter, endChapter, categories = [], entity = "", limit = 500 }) {
+export function listL2FactMetadata({ bookId, indexGroupKeys = [BASE_INDEX_GROUP_KEY], startChapter, endChapter, categories = [], entity = "", limit = 500 }) {
   const range = normalizeRange(startChapter, endChapter);
+  const groupKeys = normalizeIndexGroupKeys(indexGroupKeys);
   const categoryList = normalizeL2Categories(categories);
   const params = [normalizeBookId(bookId), range.startChapter, range.endChapter];
   const where = ["book_id = ?", "chapter_index BETWEEN ? AND ?", "status = 'completed'"];
+  where.push(`index_group_key IN (${groupKeys.map(() => "?").join(", ")})`);
+  params.push(...groupKeys);
   if (categoryList.length) {
     where.push(`category IN (${categoryList.map(() => "?").join(", ")})`);
     params.push(...categoryList);
@@ -1215,7 +1431,7 @@ export function listL2FactMetadata({ bookId, startChapter, endChapter, categorie
   }
   params.push(Math.max(1, Math.min(2000, Number.parseInt(limit, 10) || 500)));
   return db.prepare(`
-    SELECT id, book_id, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
+    SELECT id, book_id, index_group_key, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
       category, entity, aliases, tags, related_entities, fact_type, importance, confidence,
       review_source, created_at, updated_at
     FROM l2_facts
@@ -1518,7 +1734,7 @@ export function schemaHash(settings) {
 export function l1IndexPromptHash(settings = getPromptSettings()) {
   return isDefaultL1IndexPrompt(settings.l1_index_prompt)
     ? DEFAULT_L1_INDEX_PROMPT_HASH
-    : sha256(`l1-index-v2\n${settings.l1_index_prompt}`);
+    : sha256(`l1-route-v1\n${settings.l1_index_prompt}`);
 }
 
 export function l2IndexPromptHash(settings = getPromptSettings()) {
@@ -1530,13 +1746,23 @@ export function l2IndexPromptHash(settings = getPromptSettings()) {
 export function bookL1IndexPromptHash(bookPrompts = getPromptSettings()) {
   return isDefaultL1IndexPrompt(bookPrompts.l1_index_prompt)
     ? DEFAULT_L1_INDEX_PROMPT_HASH
-    : sha256(`book-l1-index-v1\n${bookPrompts.l1_index_prompt}`);
+    : sha256(`book-l1-route-v1\n${bookPrompts.l1_index_prompt}`);
 }
 
 export function bookL2IndexPromptHash(bookPrompts = getPromptSettings()) {
   return isDefaultL2IndexPrompt(bookPrompts.l2_index_prompt)
     ? DEFAULT_L2_INDEX_PROMPT_HASH
     : sha256(`book-l2-index-v1\n${bookPrompts.l2_index_prompt}`);
+}
+
+export function indexGroupL2PromptHash(group = {}) {
+  const prompt = normalizeIndexPrompt(group.l2_index_prompt, DEFAULT_L2_INDEX_PROMPT);
+  if (normalizeIndexGroupKey(group.group_key) === BASE_INDEX_GROUP_KEY) {
+    return isDefaultL2IndexPrompt(prompt)
+      ? DEFAULT_L2_INDEX_PROMPT_HASH
+      : sha256(`book-l2-index-v1\n${prompt}`);
+  }
+  return sha256(`book-l2-index-group-v1\n${normalizeIndexGroupKey(group.group_key)}\n${prompt}`);
 }
 
 export function normalizePromptSettings(settings = {}) {
@@ -1579,10 +1805,18 @@ function isDefaultL2IndexPrompt(value) {
 function migrateSchema() {
   ensureColumn("books", "book_name", "book_name TEXT NOT NULL DEFAULT ''");
   ensureColumn("prompt_groups", "book_id", "book_id TEXT NOT NULL DEFAULT ''");
+  ensureColumn("prompt_groups", "index_group_keys", "index_group_keys TEXT NOT NULL DEFAULT '[]'");
   ensureColumn("prompt_settings", "schema_mode", "schema_mode TEXT NOT NULL DEFAULT 'fields'");
   ensureColumn("prompt_settings", "schema_fields", "schema_fields TEXT NOT NULL DEFAULT '[]'");
   ensureColumn("prompt_settings", "l1_index_prompt", "l1_index_prompt TEXT NOT NULL DEFAULT ''");
   ensureColumn("prompt_settings", "l2_index_prompt", "l2_index_prompt TEXT NOT NULL DEFAULT ''");
+  ensureColumn("l1_chapter_indexes", "route_schema_version", "route_schema_version TEXT NOT NULL DEFAULT ''");
+  ensureColumn("l1_chapter_indexes", "route_summary", "route_summary TEXT NOT NULL DEFAULT ''");
+  ensureColumn("l1_chapter_indexes", "route_entities", "route_entities TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn("l1_chapter_indexes", "route_keywords", "route_keywords TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn("l1_chapter_indexes", "signals", "signals TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn("l1_chapter_indexes", "category_scores", "category_scores TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn("l1_chapter_indexes", "has_major_signal", "has_major_signal INTEGER NOT NULL DEFAULT 0");
   ensureColumn("analysis_runs", "name", "name TEXT NOT NULL DEFAULT ''");
   ensureColumn("analysis_runs", "chapter_selection", "chapter_selection TEXT NOT NULL DEFAULT ''");
   ensureColumn("analysis_runs", "source_stats", "source_stats TEXT NOT NULL DEFAULT ''");
@@ -1591,7 +1825,9 @@ function migrateSchema() {
   ensureColumn("analysis_runs", "prompt_tag", "prompt_tag TEXT");
   ensureColumn("analysis_runs", "prompt_algorithm", "prompt_algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm'");
   ensureColumn("analysis_summary_parts", "trace_summary", "trace_summary TEXT NOT NULL DEFAULT ''");
+  migrateL2IndexGroupColumns();
   migrateBookIndexPrompts();
+  migrateBookIndexGroups();
   migratePromptGroupsToBooks();
 }
 
@@ -1599,6 +1835,81 @@ function ensureColumn(table, column, definition) {
   const columns = db.prepare(`PRAGMA table_info(${table})`).all();
   if (columns.some((entry) => entry.name === column)) return;
   db.exec(`ALTER TABLE ${table} ADD COLUMN ${definition}`);
+}
+
+function migrateL2IndexGroupColumns() {
+  const statusColumns = db.prepare("PRAGMA table_info(l2_chapter_statuses)").all();
+  const indexGroupColumn = statusColumns.find((entry) => entry.name === "index_group_key");
+  const oldPrimaryKey = !indexGroupColumn || (indexGroupColumn.pk || 0) === 0;
+  if (oldPrimaryKey) {
+    const sourceIndexGroupSql = indexGroupColumn
+      ? "CASE WHEN index_group_key IS NULL OR index_group_key = '' THEN 'base' ELSE index_group_key END"
+      : "'base'";
+    db.exec(`
+      ALTER TABLE l2_chapter_statuses RENAME TO l2_chapter_statuses_old;
+      CREATE TABLE l2_chapter_statuses (
+        book_id TEXT NOT NULL,
+        index_group_key TEXT NOT NULL DEFAULT 'base',
+        chapter_index INTEGER NOT NULL,
+        status TEXT NOT NULL,
+        source_hmac TEXT NOT NULL DEFAULT '',
+        model TEXT NOT NULL DEFAULT '',
+        prompt_hash TEXT NOT NULL DEFAULT '',
+        schema_version TEXT NOT NULL DEFAULT '',
+        facts_count INTEGER NOT NULL DEFAULT 0,
+        error_summary TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (book_id, index_group_key, chapter_index),
+        FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
+      );
+      INSERT OR REPLACE INTO l2_chapter_statuses (
+        book_id, index_group_key, chapter_index, status, source_hmac, model, prompt_hash,
+        schema_version, facts_count, error_summary, created_at, updated_at
+      )
+      SELECT book_id,
+        ${sourceIndexGroupSql},
+        chapter_index, status, source_hmac, model, prompt_hash,
+        schema_version, facts_count, error_summary, created_at, updated_at
+      FROM l2_chapter_statuses_old;
+      DROP TABLE l2_chapter_statuses_old;
+    `);
+  }
+  migrateResidualL2StatusOldTable();
+  ensureColumn("l2_facts", "index_group_key", "index_group_key TEXT NOT NULL DEFAULT 'base'");
+  db.exec(`
+    UPDATE l2_chapter_statuses SET index_group_key = 'base' WHERE index_group_key = '' OR index_group_key IS NULL;
+    UPDATE l2_facts SET index_group_key = 'base' WHERE index_group_key = '' OR index_group_key IS NULL;
+    CREATE INDEX IF NOT EXISTS idx_l2_facts_lookup
+      ON l2_facts(book_id, index_group_key, category, entity, chapter_index);
+    CREATE INDEX IF NOT EXISTS idx_l2_facts_chapter
+      ON l2_facts(book_id, index_group_key, chapter_index);
+  `);
+}
+
+function migrateResidualL2StatusOldTable() {
+  const oldTable = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = 'l2_chapter_statuses_old'
+  `).get();
+  if (!oldTable) return;
+  const oldColumns = db.prepare("PRAGMA table_info(l2_chapter_statuses_old)").all();
+  const sourceIndexGroupSql = oldColumns.some((entry) => entry.name === "index_group_key")
+    ? "CASE WHEN index_group_key IS NULL OR index_group_key = '' THEN 'base' ELSE index_group_key END"
+    : "'base'";
+  db.exec(`
+    INSERT OR REPLACE INTO l2_chapter_statuses (
+      book_id, index_group_key, chapter_index, status, source_hmac, model, prompt_hash,
+      schema_version, facts_count, error_summary, created_at, updated_at
+    )
+    SELECT book_id,
+      ${sourceIndexGroupSql},
+      chapter_index, status, source_hmac, model, prompt_hash,
+      schema_version, facts_count, error_summary, created_at, updated_at
+    FROM l2_chapter_statuses_old;
+    DROP TABLE l2_chapter_statuses_old;
+  `);
 }
 
 function seedDefaultPrompts() {
@@ -1627,7 +1938,16 @@ function normalizePromptGroup(payload = {}) {
     name: String(payload.name || "未命名分析 Prompt").trim().slice(0, 120) || "未命名分析 Prompt",
     category: normalizePromptCategory(payload.category),
     chapter_prompt: String(payload.chapter_prompt || "").trim(),
-    summary_prompt: summaryPrompt || defaultSummaryPrompt()
+    summary_prompt: summaryPrompt || defaultSummaryPrompt(),
+    index_group_keys: normalizeOptionalIndexGroupKeys(payload.index_group_keys ?? payload.indexGroupKeys ?? [])
+  };
+}
+
+function publicPromptGroup(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    index_group_keys: parseJsonArray(row.index_group_keys)
   };
 }
 
@@ -1642,6 +1962,22 @@ function publicBookIndexPrompts(row) {
     ...prompts,
     l1_index_prompt_hash: bookL1IndexPromptHash(prompts),
     l2_index_prompt_hash: bookL2IndexPromptHash(prompts)
+  };
+}
+
+function publicBookIndexGroup(row) {
+  if (!row) return null;
+  const group = {
+    ...row,
+    group_key: normalizeIndexGroupKey(row.group_key),
+    category_scope: parseJsonArray(row.category_scope),
+    trigger_keywords: parseJsonArray(row.trigger_keywords),
+    l2_index_prompt: normalizeIndexPrompt(row.l2_index_prompt, DEFAULT_L2_INDEX_PROMPT),
+    enabled: Boolean(row.enabled)
+  };
+  return {
+    ...group,
+    l2_index_prompt_hash: indexGroupL2PromptHash(group)
   };
 }
 
@@ -1680,6 +2016,13 @@ function migrateBookIndexPrompts() {
   }
 }
 
+function migrateBookIndexGroups() {
+  const books = db.prepare("SELECT book_id FROM books").all();
+  for (const book of books) {
+    ensureBaseIndexGroup(book.book_id);
+  }
+}
+
 function migratePromptGroupsToBooks() {
   const books = db.prepare("SELECT book_id, book_name FROM books").all();
   if (!books.length) return;
@@ -1709,6 +2052,13 @@ function publicL1ChapterIndex(row) {
     key_events: parseJsonArray(row.key_events),
     items_places_orgs: parseJsonArray(row.items_places_orgs),
     open_questions: parseJsonArray(row.open_questions),
+    route_schema_version: row.route_schema_version || "",
+    route_summary: row.route_summary || "",
+    route_entities: parseJsonArray(row.route_entities),
+    route_keywords: parseJsonArray(row.route_keywords),
+    signals: parseJsonArray(row.signals),
+    category_scores: parseJsonObject(row.category_scores),
+    has_major_signal: Boolean(row.has_major_signal),
     confidence: Number(row.confidence || 0)
   };
 }
@@ -1731,6 +2081,7 @@ function publicL2ChapterStatus(row) {
   if (!row) return null;
   return {
     ...row,
+    index_group_key: normalizeIndexGroupKey(row.index_group_key),
     facts_count: Number(row.facts_count || 0)
   };
 }
@@ -1740,6 +2091,7 @@ function publicL2Fact(row) {
   return {
     id: row.id,
     book_id: row.book_id,
+    index_group_key: normalizeIndexGroupKey(row.index_group_key),
     chapter_index: row.chapter_index,
     status: row.status,
     source_hmac: row.source_hmac,
@@ -1796,6 +2148,10 @@ async function publicL2FactWithContent(row) {
 
 function stringifyJsonArray(value) {
   return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
+function stringifyJsonObject(value) {
+  return JSON.stringify(value && typeof value === "object" && !Array.isArray(value) ? value : {});
 }
 
 function parseJsonArray(value) {
@@ -1866,6 +2222,85 @@ const L2_CATEGORIES = new Set([
   "other"
 ]);
 
+const L1_ROUTE_SCHEMA_VERSION = "l1-route-v1";
+
+function normalizeL1RouteValue(value = {}) {
+  const routeSummary = String(value.route_summary ?? value.summary ?? "").trim().slice(0, 160);
+  const routeEntities = normalizeRouteEntities(value.route_entities ?? value.entities ?? []);
+  const routeKeywords = normalizeStringArray(value.route_keywords ?? value.keywords ?? [], 24, 80);
+  const signals = normalizeRouteSignals(value.signals ?? []);
+  const categoryScores = normalizeRouteCategoryScores(value.category_scores ?? {}, signals);
+  return {
+    summary: String(value.summary ?? routeSummary).trim().slice(0, 1000),
+    keywords: normalizeStringArray(value.keywords ?? routeKeywords, 24, 80),
+    entities: normalizeRouteEntities(value.entities ?? routeEntities),
+    route_schema_version: String(value.route_schema_version || L1_ROUTE_SCHEMA_VERSION).trim().slice(0, 40),
+    route_summary: routeSummary,
+    route_entities: routeEntities,
+    route_keywords: routeKeywords,
+    signals,
+    category_scores: categoryScores,
+    has_major_signal: Boolean(value.has_major_signal ?? signals.some((signal) => signal.strength >= 0.72)),
+    confidence: value.confidence
+  };
+}
+
+function normalizeRouteEntities(value) {
+  const raw = Array.isArray(value) ? value : [];
+  return raw.map((entry) => {
+    if (typeof entry === "string") {
+      return {
+        name: entry.trim().slice(0, 120),
+        type: "",
+        aliases: [],
+        role: "",
+        note: ""
+      };
+    }
+    if (!entry || typeof entry !== "object") return null;
+    const name = String(entry.name || "").trim().slice(0, 120);
+    if (!name) return null;
+    return {
+      name,
+      type: String(entry.type || "").trim().slice(0, 60),
+      aliases: normalizeStringArray(entry.aliases, 12, 80),
+      role: String(entry.role || "").trim().slice(0, 80),
+      note: String(entry.note || "").trim().slice(0, 160)
+    };
+  }).filter(Boolean).slice(0, 24);
+}
+
+function normalizeRouteSignals(value) {
+  const raw = Array.isArray(value) ? value : [];
+  return raw.map((entry) => {
+    if (!entry || typeof entry !== "object") return null;
+    const category = normalizeL2Category(entry.category);
+    const reason = String(entry.reason || "").trim().slice(0, 160);
+    const entities = normalizeStringArray(entry.entities, 12, 120);
+    const keywords = normalizeStringArray(entry.keywords, 12, 80);
+    if (!reason && !entities.length && !keywords.length) return null;
+    return {
+      category,
+      strength: normalizeConfidence(entry.strength),
+      entities,
+      keywords,
+      reason
+    };
+  }).filter(Boolean).slice(0, 16);
+}
+
+function normalizeRouteCategoryScores(value, signals = []) {
+  const scores = {};
+  for (const category of L2_CATEGORIES) {
+    const raw = Number(value?.[category]);
+    const signalStrength = Math.max(0, ...signals
+      .filter((signal) => signal.category === category)
+      .map((signal) => Number(signal.strength || 0)));
+    scores[category] = normalizeConfidence(Number.isFinite(raw) ? Math.max(raw, signalStrength) : signalStrength);
+  }
+  return scores;
+}
+
 function normalizeL2Fact(value) {
   if (!value || typeof value !== "object") return null;
   const fact = String(value.fact || "").trim();
@@ -1898,6 +2333,49 @@ function normalizeL2Categories(value) {
     ? value
     : String(value || "").split(",");
   return [...new Set(raw.map(normalizeL2Category).filter(Boolean))].filter((category) => category !== "other" || raw.some((entry) => String(entry).trim().toLowerCase() === "other"));
+}
+
+function normalizeBookIndexGroupPayload(payload = {}) {
+  const groupKey = normalizeIndexGroupKey(payload.group_key ?? payload.groupKey ?? payload.key);
+  const prompt = normalizeIndexPrompt(payload.l2_index_prompt ?? payload.l2IndexPrompt, DEFAULT_L2_INDEX_PROMPT);
+  return {
+    group_key: groupKey,
+    name: String(payload.name || groupKey).trim().slice(0, 80) || groupKey,
+    description: String(payload.description || "").trim().slice(0, 500),
+    category_scope: normalizeL2Categories(payload.category_scope ?? payload.categoryScope ?? []),
+    trigger_keywords: normalizeStringArray(payload.trigger_keywords ?? payload.triggerKeywords ?? [], 40, 80),
+    l2_index_prompt: prompt,
+    enabled: payload.enabled === undefined ? true : Boolean(payload.enabled)
+  };
+}
+
+export function normalizeIndexGroupKey(value) {
+  const raw = String(value || BASE_INDEX_GROUP_KEY).trim().toLowerCase();
+  const key = raw
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, 64);
+  return key || BASE_INDEX_GROUP_KEY;
+}
+
+function normalizeIndexGroupKeys(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || "").split(/[,\s]+/);
+  const keys = [...new Set(raw.map(normalizeIndexGroupKey).filter(Boolean))];
+  return keys.length ? keys : [BASE_INDEX_GROUP_KEY];
+}
+
+function normalizeOptionalIndexGroupKeys(value) {
+  const raw = Array.isArray(value)
+    ? value
+    : String(value || "").split(/[,\s]+/);
+  return [...new Set(raw
+    .map((entry) => String(entry || "").trim())
+    .filter(Boolean)
+    .map(normalizeIndexGroupKey)
+    .filter(Boolean))];
 }
 
 function normalizeEntityQueries(entity, entities) {
