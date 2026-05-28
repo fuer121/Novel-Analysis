@@ -6,8 +6,11 @@ import {
   bookL1IndexPromptHash,
   deleteBook,
   deleteAnalysisRun,
+  createBookIndexGroup,
   createPromptGroup,
+  deleteBookIndexGroup,
   deletePromptGroup,
+  disableBookIndexGroup,
   ensureBook,
   getBookIndexPrompts,
   getDatabaseDiagnostics,
@@ -15,12 +18,14 @@ import {
   getPromptSettings,
   getIndexPromptSettings,
   getL1Coverage,
+  listBookIndexGroups,
   listL1ChapterIndexes,
   listL1WindowIndexes,
   listAnalysisRuns,
   listBooks,
   listChapterMetadata,
   listPromptGroups,
+  updateBookIndexGroup,
   updateBookIndexPrompts,
   updatePromptGroup,
   saveIndexPromptSettings,
@@ -276,6 +281,55 @@ app.post("/api/books/:bookId/delete", (request, response) => {
   response.json({ ok: true, ...deleteBook(request.params.bookId) });
 });
 
+app.get("/api/books/:bookId/index-groups", (request, response, next) => {
+  try {
+    response.json({
+      ok: true,
+      indexGroups: listBookIndexGroups(request.params.bookId, {
+        includeDisabled: request.query.include_disabled === "1" || request.query.includeDisabled === "1"
+      })
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.post("/api/books/:bookId/index-groups", (request, response, next) => {
+  try {
+    response.status(201).json({
+      ok: true,
+      indexGroup: createBookIndexGroup(request.params.bookId, request.body || {})
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.put("/api/books/:bookId/index-groups/:groupKey", (request, response, next) => {
+  try {
+    response.json({
+      ok: true,
+      indexGroup: updateBookIndexGroup(request.params.bookId, request.params.groupKey, request.body || {})
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.delete("/api/books/:bookId/index-groups/:groupKey", (request, response, next) => {
+  try {
+    const mode = request.query.mode || "disable";
+    response.json({
+      ok: true,
+      ...(mode === "delete"
+        ? deleteBookIndexGroup(request.params.bookId, request.params.groupKey)
+        : disableBookIndexGroup(request.params.bookId, request.params.groupKey))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 app.post("/api/books/:bookId/l2-indexes", (request, response, next) => {
   try {
     const task = startL2IndexTask({
@@ -334,6 +388,7 @@ app.get("/api/books/:bookId/l2-indexes/coverage", (request, response, next) => {
       ok: true,
       coverage: getL2IndexCoverageForBook({
         bookId: request.params.bookId,
+        indexGroupKey: request.query.index_group_key || request.query.indexGroupKey || "base",
         startChapter: request.query.start_chapter || request.query.startChapter || 1,
         endChapter: request.query.end_chapter || request.query.endChapter || 1
       })
@@ -351,6 +406,8 @@ app.get("/api/books/:bookId/l2-facts", async (request, response, next) => {
         bookId: request.params.bookId,
         startChapter: request.query.start_chapter || request.query.startChapter || 1,
         endChapter: request.query.end_chapter || request.query.endChapter || 1,
+        indexGroupKey: request.query.index_group_key || request.query.indexGroupKey,
+        indexGroupKeys: request.query.index_group_keys || request.query.indexGroupKeys,
         category: request.query.category || "",
         entity: request.query.entity || "",
         limit: request.query.limit || 500
@@ -371,6 +428,7 @@ app.get("/api/books/:bookId/index-prompts", (request, response, next) => {
     response.json({
       ok: true,
       indexPrompts: bookPrompts,
+      indexGroups: listBookIndexGroups(request.params.bookId),
       coverage: {
         l1: getL1Coverage({
           bookId: request.params.bookId,
@@ -382,6 +440,7 @@ app.get("/api/books/:bookId/index-prompts", (request, response, next) => {
         }),
         l2: getL2IndexCoverageForBook({
           bookId: request.params.bookId,
+          indexGroupKey: request.query.index_group_key || request.query.indexGroupKey || "base",
           startChapter,
           endChapter
         })

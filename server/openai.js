@@ -670,8 +670,11 @@ export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, ind
 
 export function defaultL1IndexPrompt() {
   return [
-    "请为当前小说章节建立可复用 L1 基础索引。",
-    "要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；实体和事件尽量短句化，保留可用于后续分析的事实。"
+    "请为当前小说章节建立轻量 L1 章节路由/信号索引。",
+    "定位：L1 只判断本章有哪些可召回信号，服务后续按章节命中后读取 L2 专项事实；不要写长摘要，不要沉淀事实卡，不要替代 L2。",
+    "只依据本章原文，输出稳定主体、别名、关键词、分类信号和置信度；信号要短、准、可检索。",
+    "分类只能使用：character、relationship、cultivation、force、item、location、event、foreshadowing、other。",
+    "如果本章没有明显信号，signals 输出空数组，category_scores 保持低分。"
   ].join("\n");
 }
 
@@ -808,12 +811,9 @@ export function l1ChapterIndexSchema() {
     type: "object",
     additionalProperties: false,
     properties: {
-      summary: { type: "string" },
-      keywords: {
-        type: "array",
-        items: { type: "string" }
-      },
-      entities: {
+      route_schema_version: { type: "string" },
+      route_summary: { type: "string" },
+      route_entities: {
         type: "array",
         items: {
           type: "object",
@@ -825,35 +825,60 @@ export function l1ChapterIndexSchema() {
               type: "array",
               items: { type: "string" }
             },
+            role: { type: "string" },
             note: { type: "string" }
           },
-          required: ["name", "type", "aliases", "note"]
+          required: ["name", "type", "aliases", "role", "note"]
         }
       },
-      key_events: {
+      route_keywords: {
         type: "array",
         items: { type: "string" }
       },
-      items_places_orgs: {
+      signals: {
         type: "array",
         items: {
           type: "object",
           additionalProperties: false,
           properties: {
-            name: { type: "string" },
-            type: { type: "string" },
-            note: { type: "string" }
+            category: {
+              type: "string",
+              enum: ["character", "relationship", "cultivation", "force", "item", "location", "event", "foreshadowing", "other"]
+            },
+            strength: { type: "number" },
+            entities: {
+              type: "array",
+              items: { type: "string" }
+            },
+            keywords: {
+              type: "array",
+              items: { type: "string" }
+            },
+            reason: { type: "string" }
           },
-          required: ["name", "type", "note"]
+          required: ["category", "strength", "entities", "keywords", "reason"]
         }
       },
-      open_questions: {
-        type: "array",
-        items: { type: "string" }
+      category_scores: {
+        type: "object",
+        additionalProperties: false,
+        properties: {
+          character: { type: "number" },
+          relationship: { type: "number" },
+          cultivation: { type: "number" },
+          force: { type: "number" },
+          item: { type: "number" },
+          location: { type: "number" },
+          event: { type: "number" },
+          foreshadowing: { type: "number" },
+          other: { type: "number" }
+        },
+        required: ["character", "relationship", "cultivation", "force", "item", "location", "event", "foreshadowing", "other"]
       },
+      has_major_signal: { type: "boolean" },
       confidence: { type: "number" }
     },
-    required: ["summary", "keywords", "entities", "key_events", "items_places_orgs", "open_questions", "confidence"]
+    required: ["route_schema_version", "route_summary", "route_entities", "route_keywords", "signals", "category_scores", "has_major_signal", "confidence"]
   };
 }
 

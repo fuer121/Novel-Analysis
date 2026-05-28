@@ -1543,6 +1543,96 @@ textarea:focus {
   color: var(--accent-deep);
 }
 
+.index-group-manager {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: rgba(250, 251, 250, 0.72);
+}
+
+.index-group-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.index-group-head > div {
+  display: grid;
+  gap: 3px;
+}
+
+.index-group-head strong,
+.index-group-binding > span {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.index-group-head span,
+.index-group-binding small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.index-group-tabs,
+.index-group-checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.index-group-tabs button,
+.index-group-checks button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 780;
+}
+
+.index-group-tabs button.active,
+.index-group-checks button.active {
+  border-color: rgba(9, 107, 77, 0.34);
+  background: var(--accent-soft);
+  color: var(--accent-deep);
+}
+
+.index-group-tabs button span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.index-group-editor,
+.index-group-binding {
+  display: grid;
+  gap: 8px;
+}
+
+.block-label {
+  display: grid;
+  gap: 6px;
+}
+
+.block-label span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.block-label textarea {
+  min-height: 96px;
+}
+
 .guide-drawer-overlay {
   position: fixed;
   inset: 0;

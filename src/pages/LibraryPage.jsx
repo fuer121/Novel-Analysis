@@ -43,6 +43,7 @@ export function LibraryPage({
   onStartImport,
   onStartL1Index,
   onStartL2Index,
+  onLoadBookIndexGroups,
   onImportCancel,
   onImportPause,
   onImportResume,
@@ -61,6 +62,8 @@ export function LibraryPage({
   const [l1Chapters, setL1Chapters] = useState([]);
   const [l2Coverage, setL2Coverage] = useState(null);
   const [l2Facts, setL2Facts] = useState([]);
+  const [indexGroups, setIndexGroups] = useState([]);
+  const [selectedIndexGroupKey, setSelectedIndexGroupKey] = useState("base");
   const [showImportForm, setShowImportForm] = useState(false);
   const [importForm, setImportForm] = useState({
     ...initialImportForm,
@@ -94,10 +97,10 @@ export function LibraryPage({
     }
   }, [setError]);
 
-  const loadL2Data = useCallback(async (bookId, startChapter, endChapter) => {
+  const loadL2Data = useCallback(async (bookId, startChapter, endChapter, indexGroupKey = "base") => {
     if (!validChapterNumber(startChapter) || !validChapterNumber(endChapter)) return;
     try {
-      const query = `start_chapter=${encodeURIComponent(startChapter)}&end_chapter=${encodeURIComponent(endChapter)}&limit=80`;
+      const query = `start_chapter=${encodeURIComponent(startChapter)}&end_chapter=${encodeURIComponent(endChapter)}&index_group_key=${encodeURIComponent(indexGroupKey)}&limit=80`;
       const [coverageData, factsData] = await Promise.all([
         apiGet(`/api/books/${encodeURIComponent(bookId)}/l2-indexes/coverage?${query}`),
         apiGet(`/api/books/${encodeURIComponent(bookId)}/l2-facts?${query}`)
@@ -108,6 +111,23 @@ export function LibraryPage({
       setError(error.message);
     }
   }, [setError]);
+
+  const loadIndexGroups = useCallback(async (bookId) => {
+    if (!bookId) {
+      setIndexGroups([]);
+      setSelectedIndexGroupKey("base");
+      return;
+    }
+    try {
+      const groups = await onLoadBookIndexGroups(bookId);
+      setIndexGroups(groups);
+      setSelectedIndexGroupKey((current) => (
+        groups.some((group) => group.group_key === current) ? current : "base"
+      ));
+    } catch (error) {
+      setError(error.message);
+    }
+  }, [onLoadBookIndexGroups, setError]);
 
   async function loadChapters(bookId) {
     if (!bookId) {
@@ -128,6 +148,7 @@ export function LibraryPage({
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadChapters(selectedBookId);
+    void loadIndexGroups(selectedBookId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedBookId]);
 
@@ -148,8 +169,8 @@ export function LibraryPage({
   useEffect(() => {
     if (!selectedBookId) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    void loadL2Data(selectedBookId, coverageRange.startChapter, coverageRange.endChapter);
-  }, [selectedBookId, coverageRange.startChapter, coverageRange.endChapter, l2Task?.id, l2Task?.status, loadL2Data]);
+    void loadL2Data(selectedBookId, coverageRange.startChapter, coverageRange.endChapter, selectedIndexGroupKey);
+  }, [selectedBookId, selectedIndexGroupKey, coverageRange.startChapter, coverageRange.endChapter, l2Task?.id, l2Task?.status, loadL2Data]);
 
   async function startImport() {
     if (!validChapterNumber(importForm.start_chapter) || !validChapterNumber(importForm.end_chapter)) {
@@ -194,6 +215,7 @@ export function LibraryPage({
     }
     await onStartL2Index({
       bookId: selectedBookId,
+      indexGroupKey: selectedIndexGroupKey,
       startChapter: Number(l2Form.start_chapter),
       endChapter: Number(l2Form.end_chapter),
       force: l2Form.force,
@@ -358,7 +380,7 @@ export function LibraryPage({
           <div className="index-workgrid">
             <Panel
               icon={Layers}
-              title="L1 基础索引"
+              title="L1 章节路由"
               className="index-work-panel"
               action={(
                 <button className="secondary inline" type="button" onClick={() => openPromptManager("index")} disabled={!selectedBookId}>
@@ -416,7 +438,7 @@ export function LibraryPage({
 
             <Panel
               icon={Database}
-              title="L2 类型化事实"
+              title="L2 专项事实"
               className="index-work-panel"
               action={(
                 <button className="secondary inline" type="button" onClick={() => openPromptManager("index")} disabled={!selectedBookId}>
@@ -425,6 +447,19 @@ export function LibraryPage({
               )}
             >
               <div className="form-grid compact">
+                <label>
+                  <span>索引组</span>
+                  <select
+                    value={selectedIndexGroupKey}
+                    onChange={(event) => setSelectedIndexGroupKey(event.target.value)}
+                  >
+                    {indexGroups.map((group) => (
+                      <option key={group.group_key} value={group.group_key}>
+                        {group.name || group.group_key}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <label>
                   <span>起始章节</span>
                   <input
@@ -618,6 +653,10 @@ function L2CoverageSummary({ coverage }) {
 function L1Preview({ chapters }) {
   if (!chapters.length) return null;
   const chapter = chapters[0];
+  const signals = Array.isArray(chapter.signals) ? chapter.signals : [];
+  const entities = Array.isArray(chapter.route_entities) ? chapter.route_entities : [];
+  const keywords = Array.isArray(chapter.route_keywords) ? chapter.route_keywords : [];
+  const hasRoute = Boolean(chapter.route_schema_version || chapter.route_summary || signals.length || entities.length || keywords.length);
   return (
     <details className="index-preview">
       <summary>
@@ -626,7 +665,22 @@ function L1Preview({ chapters }) {
       </summary>
       <article>
         <strong>章节 {chapter.chapter_index}</strong>
-        <p>{chapter.summary || chapter.error_summary || "无摘要"}</p>
+        {hasRoute ? (
+          <>
+            <p>{chapter.route_summary || chapter.error_summary || "无路由摘要"}</p>
+            {signals.length ? (
+              <small>信号 {signals.slice(0, 4).map((signal) => categoryLabel(signal.category)).join(" / ")}</small>
+            ) : null}
+            {entities.length ? (
+              <small>主体 {entities.slice(0, 5).map((entity) => entity.name).filter(Boolean).join("、")}</small>
+            ) : null}
+            {keywords.length ? (
+              <small>关键词 {keywords.slice(0, 6).join("、")}</small>
+            ) : null}
+          </>
+        ) : (
+          <p>{chapter.summary || chapter.error_summary || "旧版 L1 暂无路由信号"}</p>
+        )}
       </article>
     </details>
   );
