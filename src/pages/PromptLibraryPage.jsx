@@ -40,15 +40,15 @@ const emptyIndexGroupDraft = {
 const emptyBookForm = { book_id: "", book_name: "" };
 
 const l1WritingTips = [
-  "L1 只做章节路由和信号索引，不写深度设定集。",
+  "章节线索只判断章节是否值得继续读取，不写深度设定集。",
   "所有内容贴近本章原文，禁止补全和脑补。",
   "优先记录主体、别名、关键词和分类信号。",
   "控制长度，结构清晰，不堆流水账。",
-  "服务所有 L2 索引组，信号要稳定可复用。"
+  "服务所有事实索引，信号要稳定可复用。"
 ];
 
 const l2WritingTips = [
-  "L2 只抽可复用事实，不写章节摘要。",
+  "事实索引只抽可复用事实，不写章节摘要。",
   "主体、别名、相关主体要稳定，方便后续召回。",
   "事实颗粒要小而完整，避免把多件事揉成一条。",
   "每条事实保留证据摘记、重要度和置信度。",
@@ -162,7 +162,7 @@ export function PromptLibraryPage({
   }
 
   function selectGroup(group) {
-    if (dirty && !window.confirm("当前分析 Prompt 有未保存修改，确定切换吗？")) return;
+    if (dirty && !window.confirm("当前分析模板有未保存修改，确定切换吗？")) return;
     setSelectedId(group.id);
     setDraft(normalizeGroupDraft(group, selectedBookId));
   }
@@ -172,7 +172,7 @@ export function PromptLibraryPage({
       setError("请先选择或新建一本书。");
       return;
     }
-    if (dirty && !window.confirm("当前分析 Prompt 有未保存修改，确定新建吗？")) return;
+    if (dirty && !window.confirm("当前分析模板有未保存修改，确定新建吗？")) return;
     setSelectedId("");
     setDraft({ ...emptyDraft, book_id: selectedBookId });
   }
@@ -210,7 +210,7 @@ export function PromptLibraryPage({
 
   async function deleteGroup() {
     if (!draft.id) return;
-    const confirmed = window.confirm(`删除分析 Prompt《${draft.name}》？`);
+    const confirmed = window.confirm(`删除分析模板《${draft.name}》？`);
     if (!confirmed) return;
     setBusy(true);
     setError("");
@@ -282,7 +282,7 @@ export function PromptLibraryPage({
   async function saveIndexGroup() {
     if (!selectedBookId) return;
     if (!selectedIndexGroupKey && !indexGroupDraft.group_key.trim()) {
-      setError("索引组 Key 不能为空。");
+      setError("事实索引 Key 不能为空。");
       return;
     }
     setIndexGroupBusy(true);
@@ -313,7 +313,7 @@ export function PromptLibraryPage({
   async function deleteIndexGroup() {
     if (!selectedBookId || selectedIndexGroupKey === "base") return;
     const group = indexGroups.find((entry) => entry.group_key === selectedIndexGroupKey);
-    if (!window.confirm(`删除索引组《${group?.name || selectedIndexGroupKey}》？`)) return;
+    if (!window.confirm(`删除事实索引《${factIndexName(group) || selectedIndexGroupKey}》？`)) return;
     setIndexGroupBusy(true);
     setError("");
     try {
@@ -339,7 +339,7 @@ export function PromptLibraryPage({
       return;
     }
     if (mode === "optimize" && !String(currentPrompt || "").trim()) {
-      setError("请先选择或填写一条分析 Prompt。");
+      setError("请先选择或填写一条分析模板。");
       return;
     }
     setGuideRequest({
@@ -379,7 +379,7 @@ export function PromptLibraryPage({
       setIndexGroupDraft((current) => ({
         ...current,
         group_key: current.group_key || slugifyIndexGroupKey(suggestion.title_suggestion),
-        name: current.name || suggestion.title_suggestion || "专项索引组",
+        name: current.name || suggestion.title_suggestion || "事实索引",
         description: suggestion.rationale || current.description || "",
         trigger_keywords: current.trigger_keywords || extractTriggerKeywords(suggestion),
         l2_index_prompt: prompt
@@ -410,9 +410,9 @@ export function PromptLibraryPage({
     <section className="prompt-workbench">
       <header className="page-hero">
         <div>
-          <span>Prompt 工作台</span>
-          <h2>Prompt 管理</h2>
-          <p>L1/L2 是书籍级索引 Prompt，分析 Prompt 面向具体分析任务，同一本书内独立管理。</p>
+          <span>模板工作台</span>
+          <h2>模板与事实索引</h2>
+          <p>维护书籍的章节线索规则、事实索引规则、多个事实索引和分析模板。普通运营按业务用途管理，高级细节保留在规则内容里。</p>
         </div>
         <div className="page-hero-actions">
           <IconButton icon={RefreshCcw} label="刷新" onClick={refreshAll} />
@@ -472,7 +472,7 @@ export function PromptLibraryPage({
         </aside>
 
         <section className="prompt-index-column">
-          <Panel icon={Database} title="索引 Prompt" action={<PromptBookMeta book={selectedBook} />}>
+          <Panel icon={Database} title="索引规则" action={<PromptBookMeta book={selectedBook} />}>
             {!selectedBookId || !indexPrompts ? (
               <div className="empty-state">选择书籍</div>
             ) : (
@@ -480,7 +480,7 @@ export function PromptLibraryPage({
                 <IndexPromptEditor
                   key={`l1-${selectedBookId}-${indexPrompts.l1_index_prompt_hash}-${indexPrompts.updated_at}`}
                   type="l1"
-                  title="L1 Prompt"
+                  title="章节线索规则"
                   value={indexPrompts.l1_index_prompt}
                   hash={indexPrompts.l1_index_prompt_hash}
                   updatedAt={indexPrompts.updated_at}
@@ -492,7 +492,7 @@ export function PromptLibraryPage({
                 <IndexPromptEditor
                   key={`l2-${selectedBookId}-${selectedIndexGroupKey}-${activeL2Hash}-${activeL2UpdatedAt}`}
                   type="l2"
-                  title={selectedIndexGroupKey === "base" ? "L2 Prompt" : `L2 Prompt · ${selectedIndexGroup?.name || selectedIndexGroupKey}`}
+                  title={selectedIndexGroupKey === "base" ? "事实索引规则" : `事实索引规则 · ${factIndexName(selectedIndexGroup)}`}
                   value={activeL2Prompt}
                   hash={activeL2Hash}
                   updatedAt={activeL2UpdatedAt}
@@ -541,7 +541,7 @@ export function PromptLibraryPage({
         <section className="prompt-analysis-column">
           <Panel
             icon={ClipboardList}
-            title="分析 Prompt"
+            title="分析模板"
             action={
               <div className="panel-action-row">
                 <IconButton icon={Sparkles} label="创建引导" onClick={() => openGuide("analysis", draft.summary_prompt, "create")} />
@@ -561,7 +561,7 @@ export function PromptLibraryPage({
                     <strong>{group.name}</strong>
                     <span>{formatTime(group.updated_at)}</span>
                   </button>
-                )) : <div className="empty-state">无分析 Prompt</div>}
+                )) : <div className="empty-state">无分析模板</div>}
               </div>
 
               <div className="prompt-editor">
@@ -578,7 +578,7 @@ export function PromptLibraryPage({
                 </label>
                 <label>
                   <span className="label-action-row">
-                    分析 Prompt
+                    分析模板
                     <button
                       className="ghost mini"
                       type="button"
@@ -645,10 +645,10 @@ function IndexPromptEditor({ type, title, description, value, hash, updatedAt, c
   const syncedDraftState = draftState.source === value ? draftState : { source: value, draft: value };
   const draft = syncedDraftState.draft;
   const shortHash = String(hash || "").slice(0, 10);
-  const tipConfig = title.startsWith("L1")
-    ? { title: "L1 撰写建议", tips: l1WritingTips }
-    : title.startsWith("L2")
-      ? { title: "L2 撰写建议", tips: l2WritingTips }
+  const tipConfig = type === "l1"
+    ? { title: "章节线索建议", tips: l1WritingTips }
+    : type === "l2"
+      ? { title: "事实索引建议", tips: l2WritingTips }
       : null;
 
   function setDraft(nextDraft) {
@@ -705,7 +705,7 @@ function IndexPromptEditor({ type, title, description, value, hash, updatedAt, c
       <div className="index-prompt-guide-row">
         <button className="ghost" type="button" onClick={() => onOpenGuide?.(draft)}>
           <Sparkles size={14} />
-          {type === "l1" ? "L1 创建引导" : "L2 创建引导"}
+          {type === "l1" ? "章节线索引导" : "事实索引引导"}
         </button>
       </div>
     </div>
@@ -719,12 +719,12 @@ function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, 
     <div className="index-group-manager">
       <div className="index-group-head">
         <div>
-          <strong>索引组</strong>
-          <span>base 保持通用 L2，专项组按分析诉求拆分事实压力。</span>
+          <strong>事实索引</strong>
+          <span>默认事实索引用于常规分析；也可按稳定分析方向创建多个事实索引，减少无关事实干扰。</span>
         </div>
         <button className="secondary inline" type="button" onClick={onNew}>
           <Plus size={14} />
-          新建专项组
+          新建事实索引
         </button>
         <button className="ghost inline" type="button" onClick={onOpenGuide}>
           <Sparkles size={14} />
@@ -739,8 +739,8 @@ function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, 
             className={group.group_key === selectedKey ? "active" : ""}
             onClick={() => onSelect(group.group_key)}
           >
-            <strong>{group.name || group.group_key}</strong>
-            <span>{group.group_key}</span>
+            <strong>{factIndexName(group)}</strong>
+            <span>{group.group_key === "base" ? "默认" : group.group_key}</span>
           </button>
         ))}
       </div>
@@ -749,13 +749,13 @@ function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, 
           <div className="form-grid compact">
             {isCreating ? (
               <label>
-                <span>组 Key</span>
+                <span>事实索引 Key</span>
                 <input value={draft.group_key} placeholder="cultivation-items" onChange={(event) => onDraftChange({ group_key: event.target.value })} />
               </label>
             ) : null}
             <label>
               <span>名称</span>
-              <input value={draft.name} placeholder="修炼法宝" onChange={(event) => onDraftChange({ name: event.target.value })} />
+              <input value={draft.name} placeholder="修炼法宝事实索引" onChange={(event) => onDraftChange({ name: event.target.value })} />
             </label>
             <label>
               <span>触发词</span>
@@ -764,16 +764,16 @@ function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, 
           </div>
           <label className="block-label">
             <span>用途说明</span>
-            <textarea value={draft.description} placeholder="说明这个索引组负责哪些内容。" onChange={(event) => onDraftChange({ description: event.target.value })} />
+            <textarea value={draft.description} placeholder="说明这个事实索引负责哪些内容。" onChange={(event) => onDraftChange({ description: event.target.value })} />
           </label>
           <label className="block-label">
-            <span>L2 Prompt</span>
-            <textarea value={draft.l2_index_prompt} placeholder="写清楚这个专项组只提取哪些类型化事实。" onChange={(event) => onDraftChange({ l2_index_prompt: event.target.value })} />
+            <span>事实索引规则</span>
+            <textarea value={draft.l2_index_prompt} placeholder="写清楚这个事实索引只提取哪些可复用事实。" onChange={(event) => onDraftChange({ l2_index_prompt: event.target.value })} />
           </label>
           <div className="action-row wrap">
             <button className="secondary inline" type="button" onClick={onSave} disabled={busy}>
               {busy ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
-              保存索引组
+              保存事实索引
             </button>
             {!isCreating ? (
               <button className="danger inline" type="button" onClick={onDelete} disabled={busy}>
@@ -798,14 +798,14 @@ function IndexGroupBinding({ groups, value, onChange }) {
   }
   return (
     <div className="index-group-binding">
-      <span>使用索引组</span>
+      <span>使用事实索引</span>
       <div className="index-group-checks">
         <button
           type="button"
           className={!value?.length ? "active" : ""}
           onClick={() => onChange([])}
         >
-          自动推断
+          自动匹配事实索引
         </button>
         {groups.map((group) => (
           <button
@@ -814,11 +814,11 @@ function IndexGroupBinding({ groups, value, onChange }) {
             className={selected.has(group.group_key) ? "active" : ""}
             onClick={() => toggle(group.group_key)}
           >
-            {group.name || group.group_key}
+            {factIndexName(group)}
           </button>
         ))}
       </div>
-      <small>{value?.length ? "分析时只召回已绑定索引组。" : "根据 Prompt 触发词自动选择，未命中则使用 base。"}</small>
+      <small>{value?.length ? "分析时只召回已绑定事实索引。" : "根据分析模板触发词自动选择，未命中则使用默认事实索引。"}</small>
     </div>
   );
 }
@@ -897,11 +897,11 @@ function PromptGuideDrawer({ request, templates, onClose, onApply, setError }) {
     <div className="guide-drawer-overlay" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
-      <aside className="guide-drawer" aria-label="Prompt 创建引导">
+      <aside className="guide-drawer" aria-label="模板创建引导">
         <div className="guide-drawer-head">
           <div>
             <span>{request.bookName}</span>
-            <h2>{template?.label || "Prompt 创建引导"}</h2>
+            <h2>{template?.label || "模板创建引导"}</h2>
             <p>{template?.positioning}</p>
           </div>
           <button className="icon-only" type="button" onClick={onClose} aria-label="关闭">
@@ -910,14 +910,14 @@ function PromptGuideDrawer({ request, templates, onClose, onApply, setError }) {
         </div>
 
         <div className={`guide-scope-card ${guideKind}`}>
-          <strong>{guideKind === "index" ? "书籍级索引 Prompt" : guideKind === "indexGroup" ? "书籍级专项索引组" : "书籍级分析 Prompt"}</strong>
+          <strong>{guideKind === "index" ? "书籍级索引规则" : guideKind === "indexGroup" ? "书籍级事实索引" : "书籍级分析模板"}</strong>
           <span>
             {guideKind === "index"
-              ? "绑定当前书籍，构建后不轻易调整；修改会影响索引过期判断。"
+              ? "绑定当前书籍，准备索引后不轻易调整；修改会影响索引过期判断。"
               : guideKind === "indexGroup"
-                ? "只负责一类稳定分析诉求；生成后会套用到新建专项组草稿。"
+                ? "只负责一类稳定分析诉求；生成后会套用到新建事实索引草稿。"
                 : isOptimize
-                  ? "基于当前分析 Prompt 进行打磨；生成后可套用到草稿，仍需手动保存。"
+                  ? "基于当前分析模板进行打磨；生成后可套用到草稿，仍需手动保存。"
                   : "绑定当前书籍，可为不同分析任务创建多条；创建任务时选择使用。"}
           </span>
         </div>
@@ -971,7 +971,7 @@ function PromptGuideDrawer({ request, templates, onClose, onApply, setError }) {
         <div className="guide-generate-row">
           <button className="primary" type="button" onClick={isOptimize ? optimizeSuggestion : generateSuggestion} disabled={!canGenerate}>
             {generating ? <Loader2 className="spin" size={16} /> : <Sparkles size={16} />}
-            {isOptimize ? "生成优化参考" : "生成 Prompt 参考"}
+            {isOptimize ? "生成优化参考" : "生成模板参考"}
           </button>
           <span>{answeredCount}/{steps.length} 段已填写</span>
         </div>
@@ -981,7 +981,7 @@ function PromptGuideDrawer({ request, templates, onClose, onApply, setError }) {
             <div className="guide-result-head">
               <div>
                 <span>参考结果</span>
-                <h3>{suggestion.title_suggestion || "Prompt 建议"}</h3>
+                <h3>{suggestion.title_suggestion || "模板建议"}</h3>
               </div>
               <div className="guide-result-actions">
                 <button className="ghost" type="button" onClick={copySuggestion}>
@@ -1115,7 +1115,7 @@ function RebuildConfirm({ type, book, onCancel, onStart }) {
   const first = book?.first_chapter || 1;
   const last = book?.last_chapter || first;
   const [form, setForm] = useState({ start_chapter: String(first), end_chapter: String(last), force: true });
-  const label = type === "l1" ? "L1 章节路由" : "L2 类型化事实";
+  const label = type === "l1" ? "章节线索规则" : "事实索引规则";
 
   function submit() {
     const startChapter = Number(form.start_chapter);
@@ -1126,8 +1126,8 @@ function RebuildConfirm({ type, book, onCancel, onStart }) {
 
   return (
     <div className="rebuild-confirm">
-      <strong>{label} Prompt 已保存</strong>
-      <p>选择范围后可立即重建。</p>
+      <strong>{label}已保存</strong>
+      <p>选择范围后可立即重新准备索引。</p>
       <div className="form-grid compact">
         <label>
           <span>起始章节</span>
@@ -1143,7 +1143,7 @@ function RebuildConfirm({ type, book, onCancel, onStart }) {
         </label>
       </div>
       <div className="action-row wrap">
-        <button className="primary inline" type="button" onClick={submit}>立即重建</button>
+        <button className="primary inline" type="button" onClick={submit}>立即准备</button>
         <button className="secondary inline" type="button" onClick={onCancel}>稍后处理</button>
       </div>
     </div>
@@ -1183,6 +1183,12 @@ function groupToDraft(group) {
     trigger_keywords: (group.trigger_keywords || []).join("、"),
     l2_index_prompt: group.l2_index_prompt || ""
   };
+}
+
+function factIndexName(group) {
+  if (!group) return "默认事实索引";
+  if (group.group_key === "base") return "默认事实索引";
+  return group.name || group.group_key;
 }
 
 function splitKeywords(value) {

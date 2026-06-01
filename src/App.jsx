@@ -77,7 +77,7 @@ export default function App() {
       (finishedTask) => {
         l1SourceRef.current = null;
         setL1Busy(false);
-        if (finishedTask.status === "failed") setError(finishedTask.error || "L1 索引失败");
+        if (finishedTask.status === "failed") setError(finishedTask.error || "章节线索准备失败");
       }
     );
   }, []);
@@ -95,7 +95,7 @@ export default function App() {
       (finishedTask) => {
         l2SourceRef.current = null;
         setL2Busy(false);
-        if (finishedTask.status === "failed") setError(finishedTask.error || "L2 索引失败");
+        if (finishedTask.status === "failed") setError(finishedTask.error || "事实索引准备失败");
       }
     );
   }, []);
@@ -443,15 +443,15 @@ export default function App() {
         </button>
       ) : null}
       {l1Busy && l1Task ? (
-        <button className="background-task-chip" type="button" title={l1Task.progress?.current || "L1 索引构建中"} onClick={() => navigate("library")}>
+        <button className="background-task-chip" type="button" title={l1Task.progress?.current || "章节线索准备中"} onClick={() => navigate("library")}>
           <StatusPill status={l1Task.status} />
-          <span>L1 · {l1Task.progress?.current || "索引构建中"}</span>
+          <span>章节线索 · {l1Task.progress?.current || "准备中"}</span>
         </button>
       ) : null}
       {l2Busy && l2Task ? (
-        <button className="background-task-chip" type="button" title={l2Task.progress?.current || "L2 索引构建中"} onClick={() => navigate("library")}>
+        <button className="background-task-chip" type="button" title={l2Task.progress?.current || "事实索引准备中"} onClick={() => navigate("library")}>
           <StatusPill status={l2Task.status} />
-          <span>L2 · {l2Task.progress?.current || "事实索引中"}</span>
+          <span>事实索引 · {l2Task.progress?.current || "准备中"}</span>
         </button>
       ) : null}
       {analysisBusy && analysisTask ? (
@@ -496,10 +496,10 @@ export default function App() {
             className={route === "prompts" ? "active" : ""}
             aria-current={route === "prompts" ? "page" : undefined}
             onClick={() => navigate("prompts")}
-            title="Prompt 库"
+            title="模板库"
           >
             <ClipboardList size={18} />
-            <span>Prompt</span>
+            <span>模板</span>
           </button>
           <button
             type="button"
