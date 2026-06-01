@@ -298,9 +298,12 @@ export function PromptLibraryPage({
     setError("");
     try {
       const creating = !selectedIndexGroupKey;
-      const nextGroupKey = creating
+      const rawGroupKey = creating
         ? (indexGroupDraft.group_key || slugifyIndexGroupKey(indexGroupDraft.name))
         : selectedIndexGroupKey;
+      const nextGroupKey = creating
+        ? resolveAvailableIndexGroupKey(rawGroupKey, indexGroups)
+        : normalizeIndexGroupKeyClient(rawGroupKey);
       const payload = {
         group_key: nextGroupKey,
         name: indexGroupDraft.name,
@@ -647,12 +650,11 @@ function PromptBookMeta({ book }) {
   );
 }
 
-function IndexPromptEditor({ type, title, description, value, hash, updatedAt, coverage, saving, onSave, onOpenGuide }) {
+function IndexPromptEditor({ type, title, description, value, updatedAt, coverage, saving, onSave, onOpenGuide }) {
   const [locked, setLocked] = useState(true);
   const [draftState, setDraftState] = useState({ source: value, draft: value });
   const syncedDraftState = draftState.source === value ? draftState : { source: value, draft: value };
   const draft = syncedDraftState.draft;
-  const shortHash = String(hash || "").slice(0, 10);
   const tipConfig = type === "l1"
     ? { title: "章节线索建议", tips: l1WritingTips }
     : type === "l2"
@@ -722,6 +724,10 @@ function IndexPromptEditor({ type, title, description, value, hash, updatedAt, c
 
 function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, onOpenGuide, onDraftChange, onSave, onDelete }) {
   const isCreating = !selectedKey;
+  const previewRawKey = draft.group_key || slugifyIndexGroupKey(draft.name);
+  const previewKey = resolveAvailableIndexGroupKey(previewRawKey, groups);
+  const previewBaseKey = normalizeIndexGroupKeyClient(previewRawKey);
+  const previewAdjusted = isCreating && previewBaseKey !== previewKey;
   return (
     <div className="index-group-manager">
       <div className="index-group-head">
@@ -758,6 +764,12 @@ function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, 
               <input value={draft.name} placeholder="修炼法宝事实索引" onChange={(event) => onDraftChange({ name: event.target.value })} />
             </label>
           </div>
+          {isCreating ? (
+            <div className="muted-line">
+              索引 key：{previewKey}
+              {previewAdjusted ? `（${previewBaseKey} 已存在，自动避让）` : ""}
+            </div>
+          ) : null}
           <label className="block-label hidden">
             <span>用途说明</span>
             <textarea value={draft.description} placeholder="说明这个事实索引负责哪些内容。" onChange={(event) => onDraftChange({ description: event.target.value })} />
@@ -1033,6 +1045,27 @@ function slugifyIndexGroupKey(value) {
     .replace(/-+/g, "-")
     .replace(/^[-_]+|[-_]+$/g, "");
   return ascii || "custom-index";
+}
+
+function normalizeIndexGroupKeyClient(value) {
+  const raw = String(value || "").trim().toLowerCase();
+  const key = raw
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "")
+    .slice(0, 64);
+  return key || "custom-index";
+}
+
+function resolveAvailableIndexGroupKey(rawValue, groups) {
+  const baseKey = normalizeIndexGroupKeyClient(rawValue);
+  const used = new Set((groups || []).map((group) => normalizeIndexGroupKeyClient(group.group_key)));
+  if (!used.has(baseKey)) return baseKey;
+  for (let index = 2; index <= 999; index += 1) {
+    const candidate = normalizeIndexGroupKeyClient(`${baseKey}-${index}`);
+    if (!used.has(candidate)) return candidate;
+  }
+  return `${baseKey}-${Date.now()}`;
 }
 
 function PromptTipPopover({ title, tips }) {
