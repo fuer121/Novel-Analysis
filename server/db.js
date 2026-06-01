@@ -617,20 +617,20 @@ export function ensureBaseIndexGroup(bookId) {
     `).run(
       id,
       BASE_INDEX_GROUP_KEY,
-      "基础索引",
-      "兼容默认 L2 类型化事实索引。",
+      "专项事实索引",
+      "书籍级专项事实索引，兼容历史迁移数据。",
       JSON.stringify([]),
       JSON.stringify([]),
       prompts.l2_index_prompt,
       now,
       now
     );
-  } else if (current.l2_index_prompt !== prompts.l2_index_prompt) {
+  } else if (current.l2_index_prompt !== prompts.l2_index_prompt || current.name !== "专项事实索引" || current.description !== "书籍级专项事实索引，兼容历史迁移数据。") {
     db.prepare(`
       UPDATE book_index_groups
       SET name = ?, description = ?, l2_index_prompt = ?, enabled = 1, updated_at = ?
       WHERE book_id = ? AND group_key = ?
-    `).run("基础索引", "兼容默认 L2 类型化事实索引。", prompts.l2_index_prompt, now, id, BASE_INDEX_GROUP_KEY);
+    `).run("专项事实索引", "书籍级专项事实索引，兼容历史迁移数据。", prompts.l2_index_prompt, now, id, BASE_INDEX_GROUP_KEY);
   }
   return getBookIndexGroup(id, BASE_INDEX_GROUP_KEY);
 }
@@ -663,7 +663,7 @@ export function createBookIndexGroup(bookId, payload = {}) {
   ensureBook(id);
   const group = normalizeBookIndexGroupPayload(payload);
   if (group.group_key === BASE_INDEX_GROUP_KEY) {
-    const error = new Error("base 索引组不能手动创建。");
+    const error = new Error("专项事实索引不能手动创建。");
     error.status = 409;
     throw error;
   }
@@ -693,7 +693,7 @@ export function updateBookIndexGroup(bookId, groupKey, payload = {}) {
   const id = normalizeBookId(bookId);
   const key = normalizeIndexGroupKey(groupKey);
   if (key === BASE_INDEX_GROUP_KEY) {
-    const error = new Error("base 索引组请通过书籍 L2 Prompt 更新。");
+    const error = new Error("专项事实索引请通过书籍 L2 Prompt 更新。");
     error.status = 409;
     throw error;
   }
@@ -727,7 +727,7 @@ export function deleteBookIndexGroup(bookId, groupKey) {
   const id = normalizeBookId(bookId);
   const key = normalizeIndexGroupKey(groupKey);
   if (key === BASE_INDEX_GROUP_KEY) {
-    const error = new Error("base 索引组不可删除。");
+    const error = new Error("专项事实索引不可删除。");
     error.status = 409;
     throw error;
   }
@@ -744,7 +744,7 @@ export function disableBookIndexGroup(bookId, groupKey) {
   const id = normalizeBookId(bookId);
   const key = normalizeIndexGroupKey(groupKey);
   if (key === BASE_INDEX_GROUP_KEY) {
-    const error = new Error("base 索引组不可删除。");
+    const error = new Error("专项事实索引不可删除。");
     error.status = 409;
     throw error;
   }
@@ -984,12 +984,12 @@ export function saveL1ChapterIndex({ bookId, chapterIndex, status, sourceHmac, m
     stringifyJsonArray(value.items_places_orgs),
     stringifyJsonArray(value.open_questions),
     routeValue.route_schema_version,
-    routeValue.route_summary,
+    "",
     stringifyJsonArray(routeValue.route_entities),
     stringifyJsonArray(routeValue.route_keywords),
     stringifyJsonArray(routeValue.signals),
     stringifyJsonObject(routeValue.category_scores),
-    routeValue.has_major_signal ? 1 : 0,
+    deriveRouteMajorSignal(routeValue) ? 1 : 0,
     normalizeConfidence(routeValue.confidence),
     String(errorSummary || "").slice(0, 1000),
     now,
@@ -2045,21 +2045,22 @@ function normalizeAnalysisName(name, bookId, startChapter, endChapter) {
 
 function publicL1ChapterIndex(row) {
   if (!row) return null;
+  const rest = { ...row };
+  delete rest.route_summary;
+  delete rest.confidence;
+  delete rest.has_major_signal;
   return {
-    ...row,
+    ...rest,
     keywords: parseJsonArray(row.keywords),
     entities: parseJsonArray(row.entities),
     key_events: parseJsonArray(row.key_events),
     items_places_orgs: parseJsonArray(row.items_places_orgs),
     open_questions: parseJsonArray(row.open_questions),
     route_schema_version: row.route_schema_version || "",
-    route_summary: row.route_summary || "",
     route_entities: parseJsonArray(row.route_entities),
     route_keywords: parseJsonArray(row.route_keywords),
     signals: parseJsonArray(row.signals),
-    category_scores: parseJsonObject(row.category_scores),
-    has_major_signal: Boolean(row.has_major_signal),
-    confidence: Number(row.confidence || 0)
+    category_scores: parseJsonObject(row.category_scores)
   };
 }
 
@@ -2225,24 +2226,29 @@ const L2_CATEGORIES = new Set([
 const L1_ROUTE_SCHEMA_VERSION = "l1-route-v1";
 
 function normalizeL1RouteValue(value = {}) {
-  const routeSummary = String(value.route_summary ?? value.summary ?? "").trim().slice(0, 160);
   const routeEntities = normalizeRouteEntities(value.route_entities ?? value.entities ?? []);
   const routeKeywords = normalizeStringArray(value.route_keywords ?? value.keywords ?? [], 24, 80);
   const signals = normalizeRouteSignals(value.signals ?? []);
   const categoryScores = normalizeRouteCategoryScores(value.category_scores ?? {}, signals);
   return {
-    summary: String(value.summary ?? routeSummary).trim().slice(0, 1000),
+    summary: String(value.summary ?? "").trim().slice(0, 1000),
     keywords: normalizeStringArray(value.keywords ?? routeKeywords, 24, 80),
     entities: normalizeRouteEntities(value.entities ?? routeEntities),
     route_schema_version: String(value.route_schema_version || L1_ROUTE_SCHEMA_VERSION).trim().slice(0, 40),
-    route_summary: routeSummary,
     route_entities: routeEntities,
     route_keywords: routeKeywords,
     signals,
-    category_scores: categoryScores,
-    has_major_signal: Boolean(value.has_major_signal ?? signals.some((signal) => signal.strength >= 0.72)),
-    confidence: value.confidence
+    category_scores: categoryScores
   };
+}
+
+function deriveRouteMajorSignal(routeValue) {
+  const signals = Array.isArray(routeValue?.signals) ? routeValue.signals : [];
+  const scores = routeValue?.category_scores && typeof routeValue.category_scores === "object"
+    ? routeValue.category_scores
+    : {};
+  if (signals.some((signal) => Number(signal?.strength || 0) >= 0.72)) return true;
+  return Object.values(scores).some((score) => Number(score || 0) >= 0.8);
 }
 
 function normalizeRouteEntities(value) {

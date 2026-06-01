@@ -3,7 +3,6 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { config, publicRuntimeConfig } from "./config.js";
 import {
-  bookL1IndexPromptHash,
   deleteBook,
   deleteAnalysisRun,
   createBookIndexGroup,
@@ -17,7 +16,6 @@ import {
   getPromptGroup,
   getPromptSettings,
   getIndexPromptSettings,
-  getL1Coverage,
   listBookIndexGroups,
   listL1ChapterIndexes,
   listL1WindowIndexes,
@@ -36,6 +34,7 @@ import { sanitizeError } from "./sanitize.js";
 import { testDifyConnection } from "./dify.js";
 import { generatePromptGuideSuggestion, getPromptGuideTemplates, optimizeAnalysisPromptSuggestion } from "./promptGuides.js";
 import {
+  getL1IndexCoverageForBook,
   publicAnalysisRunWithResult,
   getL2IndexCoverageForBook,
   listL2FactsForBook,
@@ -86,7 +85,39 @@ app.get("/api/openai/test", async (_request, response, next) => {
 
 app.get("/api/dify/test", async (_request, response, next) => {
   try {
-    response.json({ ok: true, dify: await testDifyConnection() });
+    const target = normalizeDifyTestTarget(_request.query.target);
+    const targets = target === "all" ? ["import", "l1", "l2"] : [target];
+    const results = {};
+    for (const key of targets) {
+      try {
+        results[key] = await testDifyConnection({ target: key });
+      } catch (error) {
+        const safe = sanitizeError(error);
+        results[key] = {
+          ok: false,
+          status: safe.status || 500,
+          error: safe.message,
+          details: safe.details || null
+        };
+      }
+    }
+    if (target === "all") {
+      const allOk = targets.every((key) => Boolean(results[key]?.ok));
+      response.json({
+        ok: allOk,
+        target,
+        dify: results
+      });
+      return;
+    }
+    const single = results[target];
+    if (!single?.ok) {
+      const error = new Error(single?.error || "Dify 连通性测试失败。");
+      error.status = single?.status || 500;
+      error.details = single?.details || undefined;
+      throw error;
+    }
+    response.json({ ok: true, target, dify: single });
   } catch (error) {
     next(error);
   }
@@ -228,17 +259,12 @@ app.get("/api/books/:bookId/chapters", (request, response) => {
 
 app.get("/api/books/:bookId/l1-indexes/coverage", (request, response, next) => {
   try {
-    const settings = getPromptSettings();
-    const bookPrompts = getBookIndexPrompts(request.params.bookId);
     response.json({
       ok: true,
-      coverage: getL1Coverage({
+      coverage: getL1IndexCoverageForBook({
         bookId: request.params.bookId,
         startChapter: request.query.start_chapter || request.query.startChapter || 1,
         endChapter: request.query.end_chapter || request.query.endChapter || 1,
-        model: settings.model,
-        promptHash: bookL1IndexPromptHash(bookPrompts),
-        windowSize: 10,
         includeWindows: false
       })
     });
@@ -421,7 +447,6 @@ app.get("/api/books/:bookId/l2-facts", async (request, response, next) => {
 app.get("/api/books/:bookId/index-prompts", (request, response, next) => {
   try {
     const bookPrompts = getBookIndexPrompts(request.params.bookId);
-    const settings = getPromptSettings();
     const chapters = listChapterMetadata(request.params.bookId);
     const startChapter = chapters[0]?.chapter_index || 1;
     const endChapter = chapters.at(-1)?.chapter_index || 1;
@@ -430,12 +455,10 @@ app.get("/api/books/:bookId/index-prompts", (request, response, next) => {
       indexPrompts: bookPrompts,
       indexGroups: listBookIndexGroups(request.params.bookId),
       coverage: {
-        l1: getL1Coverage({
+        l1: getL1IndexCoverageForBook({
           bookId: request.params.bookId,
           startChapter,
           endChapter,
-          model: settings.model,
-          promptHash: bookPrompts.l1_index_prompt_hash,
           includeWindows: false
         }),
         l2: getL2IndexCoverageForBook({
@@ -648,3 +671,11 @@ app.use((error, _request, response, _next) => {
 app.listen(config.port, config.host, () => {
   console.log(`Novel Chapter GPT Service: http://${config.host}:${config.port}`);
 });
+
+function normalizeDifyTestTarget(value) {
+  const normalized = String(value || "all").trim().toLowerCase();
+  if (["import", "l1", "l2", "all"].includes(normalized)) return normalized;
+  const error = new Error("target 只支持 import、l1、l2、all。");
+  error.status = 422;
+  throw error;
+}

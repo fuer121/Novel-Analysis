@@ -5,9 +5,10 @@
 1. 本地服务按小批次调用自托管 Dify。
 2. Dify 返回章节原文后，本地服务立即加密并写入 SQLite。
 3. 前端只显示章节元数据，不显示正文。
-4. GPT 分析任务按章节临时解密，调用 OpenAI Responses API。
-5. 逐章结果和最终结果再次加密写入 SQLite。
-6. L1 基础索引按当前内测方案明文写入 SQLite，但仍视为敏感小说派生内容。
+4. L1/L2 索引执行器可走 OpenAI 或 Dify Workflow（由 provider 开关控制），后端仍按章节调度并写库。
+5. GPT 分析任务按章节临时解密，调用 OpenAI Responses API。
+6. 逐章结果和最终结果再次加密写入 SQLite。
+7. L1 章节线索按当前内测方案明文写入 SQLite，但仍视为敏感小说派生内容。
 
 ## 不做的事
 

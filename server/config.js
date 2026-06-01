@@ -18,8 +18,16 @@ export const config = {
   dify: {
     base: normalizeBase(process.env.DIFY_API_BASE || ""),
     apiKey: process.env.DIFY_CHAPTER_WORKFLOW_API_KEY || "",
+    l1ApiKey: process.env.DIFY_L1_WORKFLOW_API_KEY || "",
+    l2ApiKey: process.env.DIFY_L2_WORKFLOW_API_KEY || "",
+    l1WorkflowVersion: String(process.env.DIFY_L1_WORKFLOW_VERSION || "v1").trim() || "v1",
+    l2WorkflowVersion: String(process.env.DIFY_L2_WORKFLOW_VERSION || "v1").trim() || "v1",
     user: process.env.DIFY_USER || "local-secure-importer",
     batchSize: clampInteger(process.env.IMPORT_BATCH_SIZE, 1, 50, 10)
+  },
+  indexing: {
+    l1Provider: normalizeIndexProvider(process.env.L1_INDEX_PROVIDER, "dify"),
+    l2Provider: normalizeIndexProvider(process.env.L2_INDEX_PROVIDER, "dify")
   },
   openai: {
     base: normalizeBase(process.env.OPENAI_API_BASE || "https://api.openai.com/v1"),
@@ -42,8 +50,12 @@ fs.mkdirSync(config.dataDir, { recursive: true });
 export function publicRuntimeConfig() {
   return {
     host: config.host,
-    difyConfigured: Boolean(config.dify.base && config.dify.apiKey),
+    difyConfigured: isDifyTargetConfigured("import"),
+    difyL1Configured: isDifyTargetConfigured("l1"),
+    difyL2Configured: isDifyTargetConfigured("l2"),
     difyBase: maskUrl(config.dify.base),
+    l1IndexProvider: config.indexing.l1Provider,
+    l2IndexProvider: config.indexing.l2Provider,
     openaiConfigured: Boolean(config.openai.apiKey),
     openaiBase: maskUrl(config.openai.base),
     openaiModel: config.openai.model,
@@ -60,9 +72,10 @@ export function publicRuntimeConfig() {
   };
 }
 
-export function requireDifyConfig() {
-  if (!config.dify.base || !config.dify.apiKey) {
-    const error = new Error("缺少 DIFY_API_BASE 或 DIFY_CHAPTER_WORKFLOW_API_KEY。");
+export function requireDifyConfig(target = "import") {
+  const apiKey = difyApiKeyForTarget(target);
+  if (!config.dify.base || !apiKey) {
+    const error = new Error(`缺少 DIFY_API_BASE 或 ${difyApiKeyEnvName(target)}。`);
     error.status = 500;
     throw error;
   }
@@ -86,6 +99,24 @@ export function isRetentionModeConfirmed() {
   return ["zdr", "mam"].includes(config.openai.retentionMode);
 }
 
+export function isDifyTargetConfigured(target = "import") {
+  return Boolean(config.dify.base && difyApiKeyForTarget(target));
+}
+
+export function difyApiKeyForTarget(target = "import") {
+  const key = String(target || "import").trim().toLowerCase();
+  if (key === "l1") return config.dify.l1ApiKey;
+  if (key === "l2") return config.dify.l2ApiKey;
+  return config.dify.apiKey;
+}
+
+export function difyApiKeyEnvName(target = "import") {
+  const key = String(target || "import").trim().toLowerCase();
+  if (key === "l1") return "DIFY_L1_WORKFLOW_API_KEY";
+  if (key === "l2") return "DIFY_L2_WORKFLOW_API_KEY";
+  return "DIFY_CHAPTER_WORKFLOW_API_KEY";
+}
+
 function normalizeBase(value) {
   return String(value || "").replace(/\/+$/, "");
 }
@@ -104,6 +135,12 @@ function clampInteger(value, min, max, fallback) {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.max(min, Math.min(max, parsed));
+}
+
+function normalizeIndexProvider(value, fallback) {
+  const provider = String(value || "").trim().toLowerCase();
+  if (provider === "openai" || provider === "dify") return provider;
+  return fallback;
 }
 
 function defaultAppLabel(appEnv) {

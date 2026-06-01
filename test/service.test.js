@@ -10,6 +10,12 @@ process.env.DATA_DIR = tempDir;
 process.env.NOVEL_SERVICE_TEST_MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
 process.env.DIFY_API_BASE = "http://127.0.0.1:9999/v1";
 process.env.DIFY_CHAPTER_WORKFLOW_API_KEY = "app-test";
+process.env.DIFY_L1_WORKFLOW_API_KEY = "app-l1-test";
+process.env.DIFY_L2_WORKFLOW_API_KEY = "app-l2-test";
+process.env.DIFY_L1_WORKFLOW_VERSION = "v1";
+process.env.DIFY_L2_WORKFLOW_VERSION = "v1";
+process.env.L1_INDEX_PROVIDER = "openai";
+process.env.L2_INDEX_PROVIDER = "openai";
 process.env.OPENAI_API_KEY = "sk-test";
 process.env.OPENAI_RETENTION_MODE = "zdr";
 process.env.OPENAI_MODEL = "gpt-5.5";
@@ -52,6 +58,42 @@ test("builds Dify batches and normalizes chapter output", () => {
   assert.equal(chapters[0].chapter_title, "第一章");
   assert.equal(chapters[1].chapter_index, 2);
   assert.equal(chapters[1].content, "正文二");
+});
+
+test("normalizes Dify L1/L2 workflow outputs from result/text/output/data envelopes", () => {
+  const l1 = dify.normalizeDifyL1Output({
+    result: JSON.stringify({
+      route_schema_version: "l1-route-v1",
+      route_entities: [{ name: "陈平安", type: "character", aliases: ["平安"], role: "主角", note: "核心主体" }],
+      route_keywords: ["陈平安", "飞剑"],
+      signals: [{ category: "item", strength: 0.9, entities: ["飞剑"], keywords: ["飞剑"], reason: "高价值物件" }],
+      category_scores: { item: 0.9 }
+    })
+  });
+  assert.equal(l1.route_schema_version, "l1-route-v1");
+  assert.equal(l1.route_entities[0].name, "陈平安");
+  assert.equal(l1.category_scores.item, 0.9);
+  assert.equal(l1.category_scores.character, 0);
+
+  const l2 = dify.normalizeDifyL2Output({
+    output: {
+      facts: [{
+        category: "item",
+        entity: "初一",
+        aliases: ["本命飞剑"],
+        tags: ["飞剑"],
+        related_entities: ["陈平安"],
+        fact_type: "origin",
+        fact: "初一是陈平安本命飞剑之一。",
+        evidence: ["本命飞剑"],
+        importance: 0.8,
+        confidence: 0.9
+      }]
+    }
+  });
+  assert.equal(l2.facts.length, 1);
+  assert.equal(l2.facts[0].entity, "初一");
+  assert.equal(l2.facts[0].category, "item");
 });
 
 test("encrypts chapter content and stores only metadata in plain SQLite rows", async () => {
@@ -799,7 +841,6 @@ test("builds chapter-only L1 indexes, skips fresh indexes, and keeps OpenAI requ
     capturedBodies.push(body);
     const outputValue = {
       route_schema_version: "l1-route-v1",
-      route_summary: "章节信号",
       route_entities: [{ name: "角色", type: "character", aliases: ["别名"], role: "主体", note: "章节主体" }],
       route_keywords: ["关键词"],
       signals: [{ category: "character", strength: 0.8, entities: ["角色"], keywords: ["关键词"], reason: "角色信号" }],
@@ -813,9 +854,7 @@ test("builds chapter-only L1 indexes, skips fresh indexes, and keeps OpenAI requ
         event: 0,
         foreshadowing: 0,
         other: 0
-      },
-      has_major_signal: true,
-      confidence: 0.9
+      }
     };
     return {
       ok: true,
@@ -837,13 +876,11 @@ test("builds chapter-only L1 indexes, skips fresh indexes, and keeps OpenAI requ
     assert.equal(responseCalls, 2);
     const savedIndex = db.getL1ChapterIndex("book-l1-task", 1);
     assert.equal(savedIndex.route_schema_version, "l1-route-v1");
-    assert.equal(savedIndex.route_summary, "章节信号");
     assert.equal(savedIndex.route_entities[0].name, "角色");
     assert.equal(savedIndex.route_keywords[0], "关键词");
     assert.equal(savedIndex.signals[0].category, "character");
     assert.equal(savedIndex.category_scores.character, 0.8);
-    assert.equal(savedIndex.has_major_signal, true);
-    assert.equal(savedIndex.summary, "章节信号");
+    assert.equal(savedIndex.summary, "");
     assert.equal(db.getL1WindowIndex("book-l1-task", 1, 10), null);
     assert.equal(capturedBodies.every((body) => body.store === false), true);
     assert.equal(capturedBodies.every((body) => !Object.hasOwn(body, "background")), true);
@@ -1070,6 +1107,173 @@ test("builds L2 indexes, skips fresh facts, and keeps requests ZDR-shaped", asyn
   }
 });
 
+test("routes L1/L2 single-chapter indexing through Dify provider and stores workflow signatures", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-dify-index-provider",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "陈平安得到飞剑。"
+  });
+
+  const previousFetch = global.fetch;
+  const previousL1Provider = appConfig.config.indexing.l1Provider;
+  const previousL2Provider = appConfig.config.indexing.l2Provider;
+  const previousL1Version = appConfig.config.dify.l1WorkflowVersion;
+  const previousL2Version = appConfig.config.dify.l2WorkflowVersion;
+  let openaiCalls = 0;
+  let l1WorkflowCalls = 0;
+  let l2WorkflowCalls = 0;
+  const seenInputs = [];
+
+  appConfig.config.indexing.l1Provider = "dify";
+  appConfig.config.indexing.l2Provider = "dify";
+  appConfig.config.dify.l1WorkflowVersion = "v7";
+  appConfig.config.dify.l2WorkflowVersion = "v9";
+
+  global.fetch = async (url, request = {}) => {
+    if (String(url).includes("api.openai.com/v1/models") || String(url).includes("api.openai.com/v1/responses")) {
+      openaiCalls += 1;
+      throw new Error("Dify provider should not call OpenAI");
+    }
+    if (String(url).includes("/parameters")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ user_input_form: [] })
+      };
+    }
+    if (!String(url).includes("/workflows/run")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    const body = JSON.parse(request.body);
+    seenInputs.push(body.inputs || {});
+    const isL2 = Object.hasOwn(body.inputs || {}, "index_group_key");
+    if (isL2) {
+      l2WorkflowCalls += 1;
+      return {
+        ok: true,
+        json: async () => ({
+          data: {
+            outputs: {
+              output: JSON.stringify({
+                facts: [{
+                  category: "item",
+                  entity: "飞剑",
+                  aliases: ["本命飞剑"],
+                  tags: ["飞剑"],
+                  related_entities: ["陈平安"],
+                  fact_type: "item_gain",
+                  fact: "陈平安得到飞剑。",
+                  evidence: ["飞剑"],
+                  importance: 0.8,
+                  confidence: 0.9
+                }]
+              })
+            }
+          }
+        })
+      };
+    }
+    l1WorkflowCalls += 1;
+    return {
+      ok: true,
+      json: async () => ({
+        data: {
+          outputs: {
+            result: JSON.stringify({
+              route_schema_version: "l1-route-v1",
+              route_entities: [{ name: "陈平安", type: "character", aliases: [], role: "主角", note: "得到飞剑" }],
+              route_keywords: ["陈平安", "飞剑"],
+              signals: [{ category: "item", strength: 0.8, entities: ["飞剑"], keywords: ["飞剑"], reason: "物件获得" }],
+              category_scores: {
+                character: 0.6,
+                relationship: 0,
+                cultivation: 0,
+                force: 0,
+                item: 0.8,
+                location: 0,
+                event: 0.4,
+                foreshadowing: 0,
+                other: 0
+              }
+            })
+          }
+        }
+      })
+    };
+  };
+
+  try {
+    const l1Task = workflows.startL1IndexTask({
+      book_id: "book-dify-index-provider",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l1Task);
+    assert.equal(l1Task.status, "completed");
+    assert.equal(l1WorkflowCalls, 1);
+    assert.equal(db.getL1ChapterIndex("book-dify-index-provider", 1).model, "dify:l1:v7");
+
+    const l2Task = workflows.startL2IndexTask({
+      book_id: "book-dify-index-provider",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l2Task);
+    assert.equal(l2Task.status, "completed");
+    assert.equal(l2WorkflowCalls, 1);
+    assert.equal(db.getL2ChapterStatus("book-dify-index-provider", 1).model, "dify:l2:v9");
+    assert.equal(openaiCalls, 0);
+    assert.equal(seenInputs.some((input) => typeof input.l1_route_json === "string"), true);
+
+    const l1Skipped = workflows.startL1IndexTask({
+      book_id: "book-dify-index-provider",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l1Skipped);
+    assert.equal(l1Skipped.progress.skipped, 1);
+    assert.equal(l1WorkflowCalls, 1);
+
+    appConfig.config.dify.l1WorkflowVersion = "v8";
+    const l1Rebuilt = workflows.startL1IndexTask({
+      book_id: "book-dify-index-provider",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l1Rebuilt);
+    assert.equal(l1Rebuilt.progress.completed, 1);
+    assert.equal(l1WorkflowCalls, 2);
+    assert.equal(db.getL1ChapterIndex("book-dify-index-provider", 1).model, "dify:l1:v8");
+
+    const l2Skipped = workflows.startL2IndexTask({
+      book_id: "book-dify-index-provider",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l2Skipped);
+    assert.equal(l2Skipped.progress.skipped, 1);
+    assert.equal(l2WorkflowCalls, 1);
+
+    appConfig.config.dify.l2WorkflowVersion = "v10";
+    const l2Rebuilt = workflows.startL2IndexTask({
+      book_id: "book-dify-index-provider",
+      start_chapter: 1,
+      end_chapter: 1
+    });
+    await waitForTask(l2Rebuilt);
+    assert.equal(l2Rebuilt.progress.completed, 1);
+    assert.equal(l2WorkflowCalls, 2);
+    assert.equal(db.getL2ChapterStatus("book-dify-index-provider", 1).model, "dify:l2:v10");
+  } finally {
+    global.fetch = previousFetch;
+    appConfig.config.indexing.l1Provider = previousL1Provider;
+    appConfig.config.indexing.l2Provider = previousL2Provider;
+    appConfig.config.dify.l1WorkflowVersion = previousL1Version;
+    appConfig.config.dify.l2WorkflowVersion = previousL2Version;
+  }
+});
+
 test("L2 targeted modes ignore force and do not rebuild the whole range", async () => {
   for (const chapterIndex of [1, 2, 3]) {
     await db.saveEncryptedChapter({
@@ -1210,7 +1414,6 @@ test("book index prompts are saved, used by L1/L2 tasks, and change freshness ha
     const outputValue = formatName === "l1_chapter_index"
       ? {
         route_schema_version: "l1-route-v1",
-        route_summary: "木剑信号",
         route_entities: [{ name: "陈平安", type: "character", aliases: [], role: "持有者", note: "得到木剑" }],
         route_keywords: ["陈平安", "木剑"],
         signals: [{ category: "item", strength: 0.8, entities: ["陈平安", "木剑"], keywords: ["木剑"], reason: "物品获得信号" }],
@@ -1224,9 +1427,7 @@ test("book index prompts are saved, used by L1/L2 tasks, and change freshness ha
           event: 0.4,
           foreshadowing: 0,
           other: 0
-        },
-        has_major_signal: true,
-        confidence: 0.8
+        }
       }
       : {
         facts: [{
@@ -1472,6 +1673,30 @@ test("import preflights Dify token before running chapter batches", async () => 
     assert.equal(workflowCalls, 0);
     assert.match(task.error, /Dify .*鉴权失败/);
     assert.match(task.error, /DIFY_CHAPTER_WORKFLOW_API_KEY/);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("tests Dify connection with target-specific API keys", async () => {
+  const previousFetch = global.fetch;
+  const seenTokens = [];
+  global.fetch = async (_url, request = {}) => {
+    seenTokens.push(String(request.headers?.Authorization || ""));
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ user_input_form: [] })
+    };
+  };
+
+  try {
+    await dify.testDifyConnection({ target: "import" });
+    await dify.testDifyConnection({ target: "l1" });
+    await dify.testDifyConnection({ target: "l2" });
+    assert.equal(seenTokens.includes("Bearer app-test"), true);
+    assert.equal(seenTokens.includes("Bearer app-l1-test"), true);
+    assert.equal(seenTokens.includes("Bearer app-l2-test"), true);
   } finally {
     global.fetch = previousFetch;
   }
@@ -2074,7 +2299,6 @@ test("balanced index analysis routes through structured L1 route signals", async
       promptHash: "l1-route-v1",
       value: {
         route_schema_version: "l1-route-v1",
-        route_summary: chapterIndex === 3 ? "云筝外貌变化信号" : "普通剧情信号",
         route_entities: chapterIndex === 3
           ? [{ name: "云筝", type: "character", aliases: ["女主"], role: "核心角色", note: "外貌变化" }]
           : [{ name: "路人", type: "character", aliases: [], role: "", note: "" }],
@@ -2092,9 +2316,7 @@ test("balanced index analysis routes through structured L1 route signals", async
           event: chapterIndex === 3 ? 0.2 : 0.3,
           foreshadowing: 0,
           other: 0
-        },
-        has_major_signal: chapterIndex === 3,
-        confidence: 0.9
+        }
       }
     });
     await db.saveL2ChapterFacts({

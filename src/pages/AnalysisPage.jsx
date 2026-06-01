@@ -103,6 +103,11 @@ export function AnalysisPage({
     () => books.find((book) => book.book_id === analysisForm.book_id) || null,
     [books, analysisForm.book_id]
   );
+  const selectedPromptGroupEntry = useMemo(
+    () => selectedPromptGroup(bookPromptGroups, selectedPromptGroupId),
+    [bookPromptGroups, selectedPromptGroupId]
+  );
+  const hasBoundIndexGroups = (selectedPromptGroupEntry?.index_group_keys || []).length > 0;
 
   const chaptersInRange = useMemo(
     () => {
@@ -182,8 +187,11 @@ export function AnalysisPage({
       return;
     }
     try {
-      const selectedGroup = bookPromptGroups.find((group) => group.id === selectedPromptGroupId);
-      const groupKey = selectedGroup?.index_group_keys?.[0] || "base";
+      const groupKey = selectedPromptGroupEntry?.index_group_keys?.[0];
+      if (!groupKey) {
+        setL2Coverage(null);
+        return;
+      }
       const query = `start_chapter=${encodeURIComponent(analysisForm.start_chapter)}&end_chapter=${encodeURIComponent(analysisForm.end_chapter)}&index_group_key=${encodeURIComponent(groupKey)}`;
       const l2Data = await apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l2-indexes/coverage?${query}`);
       setL2Coverage(l2Data.coverage);
@@ -204,6 +212,10 @@ export function AnalysisPage({
     }
     if (!selectedPromptGroupId) {
       setError("当前书籍还没有分析模板，请先到模板管理中创建。");
+      return;
+    }
+    if (!hasBoundIndexGroups) {
+      setError("分析模板必须绑定至少一个事实索引，请先到模板管理中选择并保存。");
       return;
     }
 
@@ -404,13 +416,13 @@ export function AnalysisPage({
 
           <div className="command-footer">
             <div className="index-route-note">
-              {analysisRouteNote(analysisForm.analysis_mode, l2Coverage, selectedIndexes.length, selectedPromptGroup(bookPromptGroups, selectedPromptGroupId), indexGroups)}
+              {analysisRouteNote(analysisForm.analysis_mode, l2Coverage, selectedIndexes.length, selectedPromptGroupEntry, indexGroups)}
             </div>
             <button
               className="primary inline command-primary"
               type="button"
               onClick={startAnalysis}
-              disabled={analysisBusy || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId}
+              disabled={analysisBusy || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId || !hasBoundIndexGroups}
             >
               {analysisBusy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
               {analysisBusy ? "分析中" : "开始分析"}
@@ -513,7 +525,7 @@ function selectedPromptGroup(groups, groupId) {
 
 function indexGroupText(promptGroup, indexGroups) {
   const keys = promptGroup?.index_group_keys || [];
-  if (!keys.length) return "事实索引自动匹配";
+  if (!keys.length) return "未绑定事实索引";
   const names = keys.map((key) => factIndexName(indexGroups.find((group) => group.group_key === key)) || key);
   return `事实索引 ${names.join("、")}`;
 }
@@ -759,8 +771,8 @@ function categoryLabel(value) {
 }
 
 function factIndexName(group) {
-  if (!group) return "默认事实索引";
-  if (group.group_key === "base") return "默认事实索引";
+  if (!group) return "事实索引";
+  if (group.group_key === "base") return "事实索引";
   return group.name || group.group_key;
 }
 

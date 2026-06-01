@@ -1,0 +1,289 @@
+app:
+  description: L1 章节线索索引工作流。输入单章文本与索引规则，输出可落库 JSON。
+  icon: 🧭
+  icon_background: '#EAF7F2'
+  mode: workflow
+  name: L1 章节线索索引
+  use_icon_as_answer_icon: false
+dependencies:
+- current_identifier: null
+  type: marketplace
+  value:
+    marketplace_plugin_unique_identifier: langgenius/deepseek:0.0.15@725407927b04e236212083d20e92830d60fa944e42cd357ef6902c160414f6f1
+    version: null
+kind: app
+version: 0.5.0
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    file_upload:
+      allowed_file_extensions:
+      - .JPG
+      - .JPEG
+      - .PNG
+      - .GIF
+      - .WEBP
+      - .SVG
+      allowed_file_types:
+      - image
+      allowed_file_upload_methods:
+      - local_file
+      - remote_url
+      enabled: false
+      fileUploadConfig:
+        audio_file_size_limit: 600
+        batch_count_limit: 5
+        file_size_limit: 600
+        image_file_batch_limit: 10
+        image_file_size_limit: 600
+        single_chunk_attachment_limit: 10
+        video_file_size_limit: 600
+        workflow_file_upload_limit: 10
+      image:
+        enabled: false
+        number_limits: 3
+        transfer_methods:
+        - local_file
+        - remote_url
+      number_limits: 3
+    opening_statement: ''
+    retriever_resource:
+      enabled: true
+    sensitive_word_avoidance:
+      enabled: false
+    speech_to_text:
+      enabled: false
+    suggested_questions: []
+    suggested_questions_after_answer:
+      enabled: false
+    text_to_speech:
+      enabled: false
+      language: ''
+      voice: ''
+  graph:
+    edges:
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: start
+        targetType: llm
+      id: 2000000000001-source-2000000000002-target
+      source: '2000000000001'
+      sourceHandle: source
+      target: '2000000000002'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: llm
+        targetType: code
+      id: 2000000000002-source-2000000000003-target
+      source: '2000000000002'
+      sourceHandle: source
+      target: '2000000000003'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    - data:
+        isInIteration: false
+        isInLoop: false
+        sourceType: code
+        targetType: end
+      id: 2000000000003-source-2000000000004-target
+      source: '2000000000003'
+      sourceHandle: source
+      target: '2000000000004'
+      targetHandle: target
+      type: custom
+      zIndex: 0
+    nodes:
+    - data:
+        selected: false
+        title: 用户输入
+        type: start
+        variables:
+        - default: ''
+          hint: ''
+          label: 书籍ID
+          max_length: 64
+          options: []
+          placeholder: ''
+          required: true
+          type: text-input
+          variable: book_id
+        - default: ''
+          hint: ''
+          label: 章节号
+          max_length: 48
+          options: []
+          placeholder: ''
+          required: true
+          type: number
+          variable: chapter_index
+        - default: ''
+          hint: ''
+          label: 章节标题
+          max_length: 200
+          options: []
+          placeholder: ''
+          required: false
+          type: text-input
+          variable: chapter_title
+        - default: ''
+          hint: ''
+          label: 章节正文
+          max_length: 200000
+          options: []
+          placeholder: ''
+          required: true
+          type: paragraph
+          variable: chapter_content
+        - default: ''
+          hint: ''
+          label: 索引规则Prompt
+          max_length: 50000
+          options: []
+          placeholder: ''
+          required: true
+          type: paragraph
+          variable: index_prompt
+      height: 220
+      id: '2000000000001'
+      position:
+        x: 80
+        y: 300
+      positionAbsolute:
+        x: 80
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    - data:
+        context:
+          enabled: false
+          variable_selector: []
+        model:
+          completion_params:
+            temperature: 0.1
+          mode: chat
+          name: deepseek-chat
+          provider: langgenius/deepseek/deepseek
+        prompt_template:
+        - id: l1-system
+          role: system
+          text: |
+            你是小说 L1 章节路由/信号索引引擎。仅基于当前章节原文输出 JSON。
+            输出必须符合以下结构（字段不可缺失）：
+            {
+              "route_schema_version": "l1-route-v1",
+              "route_entities": [{"name":"string","type":"string","aliases":["string"],"role":"string","note":"string"}],
+              "route_keywords": ["string"],
+              "signals": [{"category":"character|relationship|cultivation|force|item|location|event|foreshadowing|other","strength":0.0,"entities":["string"],"keywords":["string"],"reason":"string"}],
+              "category_scores": {"character":0.0,"relationship":0.0,"cultivation":0.0,"force":0.0,"item":0.0,"location":0.0,"event":0.0,"foreshadowing":0.0,"other":0.0}
+            }
+            只输出 JSON，不要 Markdown，不要解释文字。
+        - id: l1-user
+          role: user
+          text: |
+            书籍ID：{{#2000000000001.book_id#}}
+            章节号：{{#2000000000001.chapter_index#}}
+            章节标题：{{#2000000000001.chapter_title#}}
+
+            索引规则：
+            {{#2000000000001.index_prompt#}}
+
+            章节正文：
+            {{#2000000000001.chapter_content#}}
+        selected: false
+        title: 生成L1索引
+        type: llm
+        vision:
+          enabled: false
+      height: 92
+      id: '2000000000002'
+      position:
+        x: 420
+        y: 300
+      positionAbsolute:
+        x: 420
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    - data:
+        code: |
+          def main(text: str):
+              import json
+              import re
+
+              raw = (text or "").strip()
+              raw = re.sub(r"^```(?:json)?", "", raw).strip()
+              raw = re.sub(r"```$", "", raw).strip()
+
+              try:
+                  parsed = json.loads(raw)
+                  return {"result": json.dumps(parsed, ensure_ascii=False)}
+              except Exception:
+                  return {"result": raw}
+        code_language: python3
+        outputs:
+          result:
+            children: null
+            type: string
+        selected: false
+        title: 规范输出
+        type: code
+        variables:
+        - value_selector:
+          - '2000000000002'
+          - text
+          value_type: string
+          variable: text
+      height: 52
+      id: '2000000000003'
+      position:
+        x: 760
+        y: 300
+      positionAbsolute:
+        x: 760
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    - data:
+        outputs:
+        - value_selector:
+          - '2000000000003'
+          - result
+          value_type: string
+          variable: result
+        selected: false
+        title: 输出
+        type: end
+      height: 88
+      id: '2000000000004'
+      position:
+        x: 1100
+        y: 300
+      positionAbsolute:
+        x: 1100
+        y: 300
+      selected: false
+      sourcePosition: right
+      targetPosition: left
+      type: custom
+      width: 260
+    viewport:
+      x: 120
+      y: 180
+      zoom: 0.6
+  rag_pipeline_variables: []

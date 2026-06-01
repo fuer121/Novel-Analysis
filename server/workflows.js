@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 
+import { config } from "./config.js";
 import {
   createAnalysisRun,
   decryptAnalysisChapterResult,
@@ -48,7 +49,14 @@ import {
   updateAnalysisRun,
   updateBookImportStatus
 } from "./db.js";
-import { buildChapterBatches, fetchChapterBatch, testDifyConnection } from "./dify.js";
+import {
+  buildChapterBatches,
+  fetchChapterBatch,
+  normalizeDifyL1Output,
+  normalizeDifyL2Output,
+  runDifyWorkflow,
+  testDifyConnection
+} from "./dify.js";
 import {
   buildChapterInput,
   buildL1ChapterInput,
@@ -82,6 +90,16 @@ const CUSTOM_FIELD_SUMMARY_MAX_OUTPUT_TOKENS = 3000;
 const SUMMARY_STAGE_MAX_ATTEMPTS = 3;
 const SUMMARY_STAGE_RETRY_DELAY_MS = 1200;
 const L2_SCHEMA_VERSION = "l2-facts-v1";
+
+export function l1IndexExecutionSignature(openaiModel = config.openai.model) {
+  if (config.indexing.l1Provider === "dify") return `dify:l1:${config.dify.l1WorkflowVersion}`;
+  return String(openaiModel || config.openai.model || "");
+}
+
+export function l2IndexExecutionSignature(openaiModel = config.openai.model) {
+  if (config.indexing.l2Provider === "dify") return `dify:l2:${config.dify.l2WorkflowVersion}`;
+  return String(openaiModel || config.openai.model || "");
+}
 
 export function startImportTask(payload) {
   const bookId = normalizeBookId(payload.book_id ?? payload.bookId);
@@ -322,6 +340,8 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
   const bookPrompts = getBookIndexPrompts(bookId);
   const model = promptSettings.model;
   const reasoningEffort = promptSettings.reasoning_effort;
+  const provider = config.indexing.l1Provider;
+  const executionModel = l1IndexExecutionSignature(model);
   const indexPromptHash = bookL1IndexPromptHash(bookPrompts);
   try {
     const chapters = listChapterMetadata(bookId)
@@ -332,7 +352,11 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
       throw error;
     }
 
-    await testOpenAIConnection();
+    if (provider === "dify") {
+      await testDifyConnection({ target: "l1" });
+    } else {
+      await testOpenAIConnection();
+    }
     markTaskRunning(task, {
       progress: {
         total: chapters.length,
@@ -346,7 +370,7 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
     for (const chapter of chapters) {
       await waitIfPaused(task);
       const existing = getL1ChapterIndex(bookId, chapter.chapter_index);
-      if (!force && existing?.status === "completed" && existing.source_hmac === chapter.content_hmac && existing.model === model && existing.prompt_hash === indexPromptHash) {
+      if (!force && existing?.status === "completed" && existing.source_hmac === chapter.content_hmac && existing.model === executionModel && existing.prompt_hash === indexPromptHash) {
         task.progress.skipped += 1;
         updateTask(task, {
           progress: { ...task.progress, current: `跳过章节 ${chapter.chapter_index}` },
@@ -363,27 +387,39 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
       try {
         assertNotCancelled(task);
         const content = await decryptChapterContent(bookId, chapter.chapter_index);
-        const response = await callOpenAIJson({
-          model,
-          reasoningEffort,
-          instructions: "你是小说 L1 章节路由/信号索引引擎。只输出符合 Schema 的 JSON。",
-          input: buildL1ChapterInput({
-            chapterIndex: chapter.chapter_index,
-            title: chapter.title,
-            content,
-            indexPrompt: bookPrompts.l1_index_prompt
-          }),
-          schema: l1ChapterIndexSchema(),
-          schemaName: "l1_chapter_index"
-        });
+        const value = provider === "dify"
+          ? normalizeDifyL1Output(await runDifyWorkflow({
+            apiKey: config.dify.l1ApiKey,
+            target: "l1",
+            inputs: {
+              book_id: bookId,
+              chapter_index: chapter.chapter_index,
+              chapter_title: chapter.title || "",
+              chapter_content: content,
+              index_prompt: bookPrompts.l1_index_prompt
+            }
+          }))
+          : (await callOpenAIJson({
+            model,
+            reasoningEffort,
+            instructions: "你是小说 L1 章节路由/信号索引引擎。只输出符合 Schema 的 JSON。",
+            input: buildL1ChapterInput({
+              chapterIndex: chapter.chapter_index,
+              title: chapter.title,
+              content,
+              indexPrompt: bookPrompts.l1_index_prompt
+            }),
+            schema: l1ChapterIndexSchema(),
+            schemaName: "l1_chapter_index"
+          })).value;
         saveL1ChapterIndex({
           bookId,
           chapterIndex: chapter.chapter_index,
           status: "completed",
           sourceHmac: chapter.content_hmac,
-          model,
+          model: executionModel,
           promptHash: indexPromptHash,
-          value: response.value
+          value
         });
         task.progress.completed += 1;
         updateTask(task, {
@@ -399,7 +435,7 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
           chapterIndex: chapter.chapter_index,
           status: "failed",
           sourceHmac: chapter.content_hmac,
-          model,
+          model: executionModel,
           promptHash: indexPromptHash,
           errorSummary: safeMessage
         });
@@ -416,7 +452,7 @@ async function runL1IndexTask(task, { bookId, startChapter, endChapter, force })
 
     completeTask(task, {
       bookId,
-      coverage: getL1Coverage({ bookId, startChapter, endChapter, model, promptHash: indexPromptHash, includeWindows: false })
+      coverage: getL1Coverage({ bookId, startChapter, endChapter, model: executionModel, promptHash: indexPromptHash, includeWindows: false })
     });
   } catch (error) {
     if (error?.status === 499) return;
@@ -435,6 +471,8 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
     }
     const model = promptSettings.model;
     const reasoningEffort = promptSettings.reasoning_effort;
+    const provider = config.indexing.l2Provider;
+    const executionModel = l2IndexExecutionSignature(model);
     const indexPromptHash = indexGroupL2PromptHash(indexGroup);
     const chapters = listChapterMetadata(bookId)
       .filter((chapter) => chapter.chapter_index >= startChapter && chapter.chapter_index <= endChapter);
@@ -444,7 +482,11 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
       throw error;
     }
 
-    await testOpenAIConnection();
+    if (provider === "dify") {
+      await testDifyConnection({ target: "l2" });
+    } else {
+      await testOpenAIConnection();
+    }
     markTaskRunning(task, {
       progress: {
         total: chapters.length,
@@ -460,7 +502,7 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
       const existing = getL2ChapterStatus(bookId, chapter.chapter_index, indexGroup.group_key);
       const fresh = existing?.status === "completed"
         && existing.source_hmac === chapter.content_hmac
-        && existing.model === model
+        && existing.model === executionModel
         && existing.prompt_hash === indexPromptHash
         && existing.schema_version === L2_SCHEMA_VERSION;
       if (mode === "retry_failed" && existing?.status !== "failed") {
@@ -498,30 +540,44 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
         const content = await decryptChapterContent(bookId, chapter.chapter_index);
         const l1Index = getL1ChapterIndex(bookId, chapter.chapter_index);
         const l1Route = compactL1RouteForPrompt(l1Index);
-        const response = await callOpenAIJson({
-          model,
-          reasoningEffort,
-          instructions: "你是小说 L2 类型化事实索引引擎。只输出符合 Schema 的 JSON。",
-          input: buildL2ChapterInput({
-            chapterIndex: chapter.chapter_index,
-            title: chapter.title,
-            content,
-            l1Index: l1Route,
-            indexPrompt: indexGroup.l2_index_prompt
-          }),
-          schema: l2ChapterFactsSchema(),
-          schemaName: "l2_chapter_facts"
-        });
+        const facts = provider === "dify"
+          ? normalizeDifyL2Output(await runDifyWorkflow({
+            apiKey: config.dify.l2ApiKey,
+            target: "l2",
+            inputs: {
+              book_id: bookId,
+              index_group_key: indexGroup.group_key,
+              chapter_index: chapter.chapter_index,
+              chapter_title: chapter.title || "",
+              chapter_content: content,
+              l1_route_json: JSON.stringify(l1Route || null),
+              index_prompt: indexGroup.l2_index_prompt
+            }
+          })).facts
+          : (await callOpenAIJson({
+            model,
+            reasoningEffort,
+            instructions: "你是小说 L2 类型化事实索引引擎。只输出符合 Schema 的 JSON。",
+            input: buildL2ChapterInput({
+              chapterIndex: chapter.chapter_index,
+              title: chapter.title,
+              content,
+              l1Index: l1Route,
+              indexPrompt: indexGroup.l2_index_prompt
+            }),
+            schema: l2ChapterFactsSchema(),
+            schemaName: "l2_chapter_facts"
+          })).value?.facts || [];
         await saveL2ChapterFacts({
           bookId,
           indexGroupKey: indexGroup.group_key,
           chapterIndex: chapter.chapter_index,
           status: "completed",
           sourceHmac: chapter.content_hmac,
-          model,
+          model: executionModel,
           promptHash: indexPromptHash,
           schemaVersion: L2_SCHEMA_VERSION,
-          facts: response.value?.facts || []
+          facts
         });
         task.progress.completed += 1;
         updateTask(task, {
@@ -538,7 +594,7 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
           chapterIndex: chapter.chapter_index,
           status: "failed",
           sourceHmac: chapter.content_hmac,
-          model,
+          model: executionModel,
           promptHash: indexPromptHash,
           schemaVersion: L2_SCHEMA_VERSION,
           errorSummary: safeMessage
@@ -557,7 +613,7 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
     completeTask(task, {
       bookId,
       indexGroupKey: indexGroup.group_key,
-      coverage: getL2Coverage({ bookId, indexGroupKey: indexGroup.group_key, startChapter, endChapter, model, promptHash: indexPromptHash, schemaVersion: L2_SCHEMA_VERSION })
+      coverage: getL2Coverage({ bookId, indexGroupKey: indexGroup.group_key, startChapter, endChapter, model: executionModel, promptHash: indexPromptHash, schemaVersion: L2_SCHEMA_VERSION })
     });
   } catch (error) {
     failTask(task, error);
@@ -591,6 +647,7 @@ async function prepareNewAnalysis(analysisId, { name, bookId, startChapter, endC
   const indexGroups = resolveAnalysisIndexGroups({ bookId, settings, promptGroup });
   validateAnalysisPromptBeforeRun({
     settings,
+    indexGroups,
     bookId,
     taskName: name || settings.name || ""
   });
@@ -691,7 +748,12 @@ async function prepareResumedAnalysis(run) {
   };
 }
 
-function validateAnalysisPromptBeforeRun({ settings, bookId, taskName }) {
+function validateAnalysisPromptBeforeRun({ settings, indexGroups = [], bookId, taskName }) {
+  if (!Array.isArray(indexGroups) || !indexGroups.length) {
+    const error = new Error("分析模板必须显式绑定至少一个事实索引。请先在模板管理中选择并保存事实索引。");
+    error.status = 422;
+    throw error;
+  }
   const finalSchema = deriveFinalSummarySchema({
     userPrompt: settings.summary_prompt,
     configuredSchema: parseOutputSchemaOrNull(settings.output_schema)
@@ -896,7 +958,9 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
   const primaryEntityQuery = entityQueries[0] || "";
   const bookPrompts = getBookIndexPrompts(bookId);
   const l1PromptHash = bookL1IndexPromptHash(bookPrompts);
-  const activeIndexGroups = indexGroups.length ? indexGroups : resolveAnalysisIndexGroups({ bookId, settings });
+  const l1ExecutionModel = l1IndexExecutionSignature(model);
+  const l2ExecutionModel = l2IndexExecutionSignature(model);
+  const activeIndexGroups = indexGroups;
   const indexGroupKeys = activeIndexGroups.map((group) => group.group_key);
   await waitIfPaused(task);
   updateTask(task, {
@@ -910,7 +974,7 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
     .filter((index) => {
       const chapter = chapters.find((entry) => entry.chapter_index === index.chapter_index);
       if (index.status !== "completed" || !chapter || index.source_hmac !== chapter.content_hmac) return false;
-      if (index.model !== model) return false;
+      if (index.model !== l1ExecutionModel) return false;
       if (index.prompt_hash === l1PromptHash) return true;
       return isLegacyReusableL1Route(index);
     })
@@ -960,7 +1024,7 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
     indexGroupKey: group.group_key,
     startChapter,
     endChapter,
-    model,
+    model: l2ExecutionModel,
     promptHash: indexGroupL2PromptHash(group),
     schemaVersion: L2_SCHEMA_VERSION
   })]));
@@ -972,7 +1036,7 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
       return !status
         || status.status !== "completed"
         || status.source_hmac !== chapter.content_hmac
-        || status.model !== model
+        || status.model !== l2ExecutionModel
         || status.prompt_hash !== indexGroupL2PromptHash(group)
         || status.schema_version !== L2_SCHEMA_VERSION;
     });
@@ -1164,7 +1228,6 @@ function selectChaptersByL1Route({ l1Indexes, selectedIndexes, categories, entit
 
 function hasStructuredL1Route(index) {
   return Boolean(index?.route_schema_version)
-    || Boolean(index?.route_summary)
     || (Array.isArray(index?.route_entities) && index.route_entities.length)
     || (Array.isArray(index?.route_keywords) && index.route_keywords.length)
     || (Array.isArray(index?.signals) && index.signals.length);
@@ -1196,7 +1259,6 @@ function structuredL1RouteText(index) {
   const entities = Array.isArray(index.route_entities) ? index.route_entities : [];
   const signals = Array.isArray(index.signals) ? index.signals : [];
   return [
-    index.route_summary,
     ...(index.route_keywords || []),
     ...entities.flatMap((entity) => [
       entity?.name,
@@ -1219,24 +1281,18 @@ function compactL1RouteForPrompt(index) {
   if (hasStructuredL1Route(index)) {
     return {
       route_schema_version: index.route_schema_version || "l1-route-v1",
-      route_summary: index.route_summary || "",
       route_entities: index.route_entities || [],
       route_keywords: index.route_keywords || [],
       signals: index.signals || [],
-      category_scores: index.category_scores || {},
-      has_major_signal: Boolean(index.has_major_signal),
-      confidence: Number(index.confidence || 0)
+      category_scores: index.category_scores || {}
     };
   }
   return {
     route_schema_version: "legacy-l1-compatible",
-    route_summary: String(index.summary || "").slice(0, 160),
     route_entities: normalizeLegacyRouteEntities(index.entities),
     route_keywords: normalizeLegacyRouteKeywords(index),
     signals: legacySignalsFromL1(index),
-    category_scores: {},
-    has_major_signal: Boolean((index.key_events || []).length || (index.open_questions || []).length),
-    confidence: Number(index.confidence || 0)
+    category_scores: {}
   };
 }
 
@@ -1346,24 +1402,16 @@ function shouldFallbackL2Recall(facts, entityQueries, usedL1Route = false) {
 function resolveAnalysisIndexGroups({ bookId, settings = {}, promptGroup = null }) {
   const groups = listBookIndexGroups(bookId);
   const byKey = new Map(groups.map((group) => [group.group_key, group]));
-  const explicitKeys = normalizeIndexGroupKeysForWorkflow(promptGroup?.index_group_keys || settings.index_group_keys || []);
-  if (explicitKeys.length) {
-    const matched = explicitKeys.map((key) => byKey.get(key)).filter(Boolean);
-    if (matched.length) return matched;
+  const explicitKeys = normalizeIndexGroupKeysForWorkflow(promptGroup?.index_group_keys || settings.index_group_keys || [])
+    .filter((key) => key !== "base");
+  if (!explicitKeys.length) return [];
+  const missing = explicitKeys.filter((key) => !byKey.has(key));
+  if (missing.length) {
+    const error = new Error(`分析模板绑定的事实索引不存在或已禁用：${missing.join("、")}`);
+    error.status = 422;
+    throw error;
   }
-  const inferred = inferIndexGroupsFromPrompt(settings.summary_prompt, groups);
-  return inferred.length ? inferred : [byKey.get("base") || getBookIndexGroup(bookId, "base")].filter(Boolean);
-}
-
-function inferIndexGroupsFromPrompt(prompt, groups) {
-  const text = normalizeRouteToken(prompt);
-  const categories = new Set(inferL2CategoriesFromPrompt(prompt));
-  return groups.filter((group) => group.group_key !== "base").filter((group) => {
-    const keywords = group.trigger_keywords || [];
-    const categoryScope = group.category_scope || [];
-    return keywords.some((keyword) => text.includes(normalizeRouteToken(keyword)))
-      || categoryScope.some((category) => categories.has(category));
-  });
+  return explicitKeys.map((key) => byKey.get(key)).filter(Boolean);
 }
 
 function normalizeIndexGroupKeysForWorkflow(value) {
@@ -3980,9 +4028,22 @@ export function getL2IndexCoverageForBook({ bookId, indexGroupKey = "base", star
     indexGroupKey: indexGroup.group_key,
     startChapter,
     endChapter,
-    model: settings.model,
+    model: l2IndexExecutionSignature(settings.model),
     promptHash: indexGroupL2PromptHash(indexGroup),
     schemaVersion: L2_SCHEMA_VERSION
+  });
+}
+
+export function getL1IndexCoverageForBook({ bookId, startChapter, endChapter, includeWindows = false }) {
+  const settings = getPromptSettings();
+  const bookPrompts = getBookIndexPrompts(bookId);
+  return getL1Coverage({
+    bookId,
+    startChapter,
+    endChapter,
+    model: l1IndexExecutionSignature(settings.model),
+    promptHash: bookL1IndexPromptHash(bookPrompts),
+    includeWindows
   });
 }
 

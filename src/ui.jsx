@@ -11,6 +11,10 @@ import { useEffect, useState } from "react";
 import { downloadJson, formatTime } from "./api.js";
 
 export function RuntimeGrid({ config }) {
+  const l1Provider = config.l1IndexProvider || "openai";
+  const l2Provider = config.l2IndexProvider || "openai";
+  const l1Ready = l1Provider === "dify" ? config.difyL1Configured : config.openaiConfigured;
+  const l2Ready = l2Provider === "dify" ? config.difyL2Configured : config.openaiConfigured;
   return (
     <div className="runtime-grid">
       {config.isPreview ? (
@@ -27,6 +31,18 @@ export function RuntimeGrid({ config }) {
         ok={config.difyConfigured}
         value={config.difyConfigured ? "已配置" : "未配置"}
         title={config.difyBase || "未配置"}
+      />
+      <RuntimeItem
+        icon={Database}
+        label="L1 索引"
+        ok={l1Ready}
+        value={`${providerLabel(l1Provider)} · ${l1Ready ? "已配置" : "未配置"}`}
+      />
+      <RuntimeItem
+        icon={Database}
+        label="L2 索引"
+        ok={l2Ready}
+        value={`${providerLabel(l2Provider)} · ${l2Ready ? "已配置" : "未配置"}`}
       />
       <RuntimeItem
         icon={KeyRound}
@@ -185,6 +201,10 @@ function formatDuration(ms) {
   if (hours) return `${hours}小时${String(minutes).padStart(2, "0")}分`;
   if (minutes) return `${minutes}分${String(seconds).padStart(2, "0")}秒`;
   return `${seconds}秒`;
+}
+
+function providerLabel(provider) {
+  return provider === "dify" ? "Dify" : "OpenAI";
 }
 
 export function BookList({ books, selectedBookId, onSelect }) {
