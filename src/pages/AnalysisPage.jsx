@@ -203,7 +203,7 @@ export function AnalysisPage({
       return;
     }
     if (!selectedPromptGroupId) {
-      setError("当前书籍还没有分析 Prompt，请先到 Prompt 管理中创建。");
+      setError("当前书籍还没有分析模板，请先到模板管理中创建。");
       return;
     }
 
@@ -325,12 +325,12 @@ export function AnalysisPage({
         <div>
           <span>分析工作台</span>
           <h2>分析任务</h2>
-          <p>选择书籍、分析 Prompt 和章节范围，基于 L1 路标与 L2 事实生成结构化结果。</p>
+          <p>选择书籍、分析模板和章节范围，基于已准备的章节线索与事实索引生成结构化结果。</p>
         </div>
         <div className="page-hero-actions">
           <button className="secondary inline" type="button" onClick={openPromptManager} disabled={!analysisForm.book_id}>
             <ClipboardList size={16} />
-            管理 Prompt
+            管理模板
           </button>
         </div>
       </header>
@@ -357,11 +357,11 @@ export function AnalysisPage({
               </select>
             </label>
             <label>
-              <span>分析 Prompt</span>
+              <span>分析模板</span>
               <select value={selectedPromptGroupId} onChange={(event) => applyPromptGroup(event.target.value)}>
-                <option value="">选择 Prompt</option>
+                <option value="">选择分析模板</option>
                 {selectedPromptGroupId === "__snapshot__" ? (
-                  <option value="__snapshot__">历史任务 Prompt 快照</option>
+                  <option value="__snapshot__">历史任务模板快照</option>
                 ) : null}
                 {bookPromptGroups.map((group) => (
                   <option key={group.id} value={group.id}>{group.name}</option>
@@ -494,7 +494,7 @@ function sanitizeChapterInput(value) {
 function analysisRouteNote(mode, coverage, selectedCount, promptGroup, indexGroups) {
   const groupText = indexGroupText(promptGroup, indexGroups);
   if (mode === "full_text") return `全文精读 · 最完整 · 逐章读取原文 · ${groupText}`;
-  if (mode === "fast_index") return `快速探索 · 只用索引 · ${groupText} · ${coverageText(coverage)}`;
+  if (mode === "fast_index") return `快速探索 · 只用已准备事实索引 · ${groupText} · ${coverageText(coverage)}`;
   const reviewBudget = mode === "precision"
     ? Math.min(30, Math.max(5, Math.ceil(selectedCount * 0.03)))
     : Math.min(10, Math.max(3, Math.ceil(selectedCount * 0.01)));
@@ -504,7 +504,7 @@ function analysisRouteNote(mode, coverage, selectedCount, promptGroup, indexGrou
 
 function coverageText(coverage) {
   if (!coverage?.chapters) return "读取中";
-  return `${coverage.chapters.completed}/${coverage.chapters.total} 章，${coverage.chapters.facts || 0} 条事实`;
+  return `事实索引 ${coverage.chapters.completed}/${coverage.chapters.total} 章，${coverage.chapters.facts || 0} 条`;
 }
 
 function selectedPromptGroup(groups, groupId) {
@@ -513,9 +513,9 @@ function selectedPromptGroup(groups, groupId) {
 
 function indexGroupText(promptGroup, indexGroups) {
   const keys = promptGroup?.index_group_keys || [];
-  if (!keys.length) return "索引组自动推断";
-  const names = keys.map((key) => indexGroups.find((group) => group.group_key === key)?.name || key);
-  return `索引组 ${names.join("、")}`;
+  if (!keys.length) return "事实索引自动匹配";
+  const names = keys.map((key) => factIndexName(indexGroups.find((group) => group.group_key === key)) || key);
+  return `事实索引 ${names.join("、")}`;
 }
 
 function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDelete }) {
@@ -669,12 +669,12 @@ function SourceStats({ stats }) {
       <span>{modeLabel}</span>
       <span>召回事实 {Number(stats.recalled_facts || 0)} 条</span>
       <span>涉及章节 {Number(stats.recalled_chapters || 0)} 章</span>
-      {stats.l1_route_enabled ? <span>L1 命中 {stats.l1_matched_chapters?.length || 0} 章</span> : null}
+      {stats.l1_route_enabled ? <span>章节线索命中 {stats.l1_matched_chapters?.length || 0} 章</span> : null}
       <span>原文复核 {Number(stats.source_review_chapters || 0)}/{Number(stats.source_review_budget || 0)} 章</span>
-      {stats.index_groups?.length ? <span>索引组 {stats.index_groups.map((group) => group.name || group.group_key).join(" / ")}</span> : null}
+      {stats.index_groups?.length ? <span>事实索引 {stats.index_groups.map((group) => factIndexName(group)).join(" / ")}</span> : null}
       {stats.entity_queries?.length ? <span>主体 {stats.entity_queries.slice(0, 4).join(" / ")}</span> : null}
       {stats.recall_fallback_used ? <span>已启用兜底召回</span> : null}
-      {stats.l2_missing_chapters?.length ? <span>L2 覆盖缺口 {stats.l2_missing_chapters.length} 章</span> : null}
+      {stats.l2_missing_chapters?.length ? <span>事实索引缺口 {stats.l2_missing_chapters.length} 章</span> : null}
       {stats.unrecalled_chapters?.length ? <span>未召回 {stats.unrecalled_chapters.length} 章</span> : null}
     </div>
   );
@@ -738,7 +738,7 @@ function countEntries(value) {
 
 function sourceTypeLabel(value) {
   return {
-    l2_fact: "L2",
+    l2_fact: "事实索引",
     source_review: "原文复核",
     chapter_summary: "章节摘要"
   }[value] || value;
@@ -756,6 +756,12 @@ function categoryLabel(value) {
     foreshadowing: "伏笔",
     other: "其他"
   }[value] || value;
+}
+
+function factIndexName(group) {
+  if (!group) return "默认事实索引";
+  if (group.group_key === "base") return "默认事实索引";
+  return group.name || group.group_key;
 }
 
 function PartialResultView({ analysis, analysisBusy, onResume }) {

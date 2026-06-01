@@ -394,14 +394,14 @@ test("OpenAI caller retries transient network failures when configured", async (
 test("prompt guide generation exposes templates and keeps OpenAI request ZDR-shaped", async () => {
   db.ensureBook("guide-book", "引导测试书");
   const templates = promptGuides.getPromptGuideTemplates();
-  assert.equal(templates.l1.scope, "书籍级索引 Prompt");
+  assert.equal(templates.l1.scope, "书籍级章节线索规则");
   assert.equal(templates.l1.steps.map((step) => step.title).join(","), "范围,取舍");
   assert.equal(templates.l2.steps.map((step) => step.title).join(","), "范围,规则");
-  assert.equal(templates.indexgroup.scope, "书籍级 L2 专项索引组");
+  assert.equal(templates.indexgroup.scope, "书籍级事实索引");
   assert.equal(templates.indexgroup.steps.map((step) => step.title).join(","), "用途,边界");
-  assert.equal(templates.analysis.scope, "书籍级分析 Prompt");
+  assert.equal(templates.analysis.scope, "书籍级分析模板");
   assert.equal(templates.analysis.steps.map((step) => step.title).join(","), "用途,输出");
-  assert.equal(templates.analysisOptimization.label, "分析 Prompt 优化");
+  assert.equal(templates.analysisOptimization.label, "分析模板优化");
   assert.equal(templates.analysisOptimization.steps.length, 1);
   assert.equal(templates.analysisOptimization.builtInPrompt.includes("优化一条已经存在"), true);
   for (const template of Object.values(templates)) {
@@ -492,10 +492,10 @@ test("index group guide is available and generates specialized L2 prompt", async
       answers: [{ id: "group_goal", answer: "修炼体系和法宝武器" }]
     });
     assert.equal(result.type, "indexgroup");
-    assert.equal(result.template.scope, "书籍级 L2 专项索引组");
+    assert.equal(result.template.scope, "书籍级事实索引");
     assert.equal(result.suggestion.title_suggestion, "修炼法宝");
     assert.equal(result.suggestion.prompt_suggestion.includes("L2 事实"), true);
-    assert.equal(JSON.stringify(capturedBody.input).includes("索引组创建引导"), true);
+    assert.equal(JSON.stringify(capturedBody.input).includes("事实索引创建引导"), true);
   } finally {
     global.fetch = previousFetch;
   }

@@ -81,6 +81,10 @@ export function LibraryPage({
     [books, importForm.book_id]
   );
   const coverageRange = useMemo(() => coverageRangeForBook(selectedBook), [selectedBook]);
+  const selectedIndexGroup = useMemo(
+    () => indexGroups.find((group) => group.group_key === selectedIndexGroupKey) || null,
+    [indexGroups, selectedIndexGroupKey]
+  );
 
   const loadL1Data = useCallback(async (bookId, startChapter, endChapter) => {
     if (!validChapterNumber(startChapter) || !validChapterNumber(endChapter)) return;
@@ -193,7 +197,7 @@ export function LibraryPage({
       return;
     }
     if (!validChapterNumber(l1Form.start_chapter) || !validChapterNumber(l1Form.end_chapter)) {
-      setError("L1 起始章节和结束章节必须填写为大于 0 的整数。");
+      setError("章节线索起始章节和结束章节必须填写为大于 0 的整数。");
       return;
     }
     await onStartL1Index({
@@ -210,7 +214,7 @@ export function LibraryPage({
       return;
     }
     if (!validChapterNumber(l2Form.start_chapter) || !validChapterNumber(l2Form.end_chapter)) {
-      setError("L2 起始章节和结束章节必须填写为大于 0 的整数。");
+      setError("事实索引起始章节和结束章节必须填写为大于 0 的整数。");
       return;
     }
     await onStartL2Index({
@@ -264,12 +268,12 @@ export function LibraryPage({
       <header className="page-hero">
         <div>
           <span>书库工作台</span>
-          <h2>书库与索引</h2>
-          <p>书籍导入在左侧完成，当前书籍的 L1 路标和 L2 事实索引在右侧管理。</p>
+          <h2>书籍索引管理</h2>
+          <p>导入章节、准备章节线索和事实索引。普通运营只需要看索引是否够用，高级规则在模板管理中维护。</p>
         </div>
         <div className="page-hero-actions">
           <button className="secondary inline" type="button" onClick={() => openPromptManager("index")} disabled={!selectedBookId}>
-            管理索引 Prompt
+            管理索引规则
           </button>
         </div>
       </header>
@@ -352,7 +356,7 @@ export function LibraryPage({
                       checked={importForm.auto_l1_index}
                       onChange={(event) => setImportForm({ ...importForm, auto_l1_index: event.target.checked })}
                     />
-                    <span>完成后构建 L1</span>
+                    <span>完成后准备章节线索</span>
                   </label>
                 </div>
                 <div className="action-row wrap">
@@ -377,14 +381,21 @@ export function LibraryPage({
 
         <section className="library-detail-column">
           <SelectedBookSummary book={selectedBook} />
+          <MaterialReadiness
+            book={selectedBook}
+            l1Coverage={l1Coverage}
+            l2Coverage={l2Coverage}
+            selectedIndexGroup={selectedIndexGroup}
+            onOpenPromptManager={() => openPromptManager("index")}
+          />
           <div className="index-workgrid">
             <Panel
               icon={Layers}
-              title="L1 章节路由"
+              title="章节线索"
               className="index-work-panel"
               action={(
                 <button className="secondary inline" type="button" onClick={() => openPromptManager("index")} disabled={!selectedBookId}>
-                  Prompt
+                  规则
                 </button>
               )}
             >
@@ -422,7 +433,7 @@ export function LibraryPage({
               <div className="index-action-bar">
                 <button className="primary inline" type="button" onClick={startL1Index} disabled={l1Busy || !selectedBookId || !config.openaiConfigured}>
                   {l1Busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-                  {l1Busy ? "索引中" : "构建 L1"}
+                  {l1Busy ? "准备中" : "准备章节线索"}
                 </button>
               </div>
               {l1Task ? (
@@ -438,24 +449,24 @@ export function LibraryPage({
 
             <Panel
               icon={Database}
-              title="L2 专项事实"
+              title="事实索引"
               className="index-work-panel"
               action={(
                 <button className="secondary inline" type="button" onClick={() => openPromptManager("index")} disabled={!selectedBookId}>
-                  Prompt
+                  规则
                 </button>
               )}
             >
               <div className="form-grid compact">
                 <label>
-                  <span>索引组</span>
+                  <span>事实索引</span>
                   <select
                     value={selectedIndexGroupKey}
                     onChange={(event) => setSelectedIndexGroupKey(event.target.value)}
                   >
                     {indexGroups.map((group) => (
                       <option key={group.group_key} value={group.group_key}>
-                        {group.name || group.group_key}
+                        {factIndexName(group)}
                       </option>
                     ))}
                   </select>
@@ -493,7 +504,7 @@ export function LibraryPage({
               <div className="index-action-bar">
                 <button className="primary inline" type="button" onClick={() => startL2Index()} disabled={l2Busy || !selectedBookId || !config.openaiConfigured}>
                   {l2Busy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
-                  {l2Busy ? "索引中" : "构建 L2"}
+                  {l2Busy ? "准备中" : `准备 ${selectedIndexGroup ? factIndexName(selectedIndexGroup) : "事实索引"}`}
                 </button>
               </div>
               {l2Task ? (
@@ -528,6 +539,54 @@ function SelectedBookSummary({ book }) {
         <span>{book.last_import_status || "idle"}</span>
       </div>
     </section>
+  );
+}
+
+function MaterialReadiness({ book, l1Coverage, l2Coverage, selectedIndexGroup, onOpenPromptManager }) {
+  if (!book) return null;
+  const imported = Number(book.chapter_count || 0);
+  const l1Ratio = coveragePercent(l1Coverage);
+  const l2Ratio = coveragePercent(l2Coverage);
+  const factIndex = selectedIndexGroup ? factIndexName(selectedIndexGroup) : "默认事实索引";
+  const l1Missing = Number(l1Coverage?.chapters?.missing || 0);
+  const l2Missing = Number(l2Coverage?.chapters?.missing || 0);
+  const l2Facts = Number(l2Coverage?.chapters?.facts || 0);
+  const readyLevel = materialReadinessLevel({ imported, l1Ratio, l2Ratio, l2Facts });
+  return (
+    <section className={`material-readiness ${readyLevel.tone}`}>
+      <div className="material-readiness-head">
+        <div>
+          <span>索引准备状态</span>
+          <h3>{readyLevel.title}</h3>
+          <p>{readyLevel.description}</p>
+        </div>
+        <button className="secondary inline" type="button" onClick={onOpenPromptManager}>
+          管理事实索引
+        </button>
+      </div>
+      <div className="material-step-grid">
+        <MaterialStep label="章节已导入" value={`${imported} 章`} state={imported ? "ready" : "todo"} />
+        <MaterialStep
+          label="章节线索"
+          value={l1Coverage?.chapters ? `${l1Coverage.chapters.completed}/${l1Coverage.chapters.total} 章` : "读取中"}
+          state={l1Ratio >= 80 ? "ready" : l1Missing ? "todo" : "partial"}
+        />
+        <MaterialStep
+          label={factIndex}
+          value={l2Coverage?.chapters ? `${l2Coverage.chapters.completed}/${l2Coverage.chapters.total} 章` : "读取中"}
+          state={l2Ratio >= 80 && l2Facts ? "ready" : l2Missing ? "todo" : "partial"}
+        />
+      </div>
+    </section>
+  );
+}
+
+function MaterialStep({ label, value, state }) {
+  return (
+    <div className={`material-step ${state}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 
@@ -602,7 +661,7 @@ function coverageRangeForBook(book) {
 }
 
 function CoverageSummary({ coverage, chapters }) {
-  if (!coverage) return <div className="index-summary">L1 读取中</div>;
+  if (!coverage) return <div className="index-summary">章节线索读取中</div>;
   const total = Math.max(coverage.chapters.total || 0, 1);
   const completed = coverage.chapters.completed || 0;
   const failedChapters = chapters.filter((chapter) => chapter.status === "failed").map((chapter) => chapter.chapter_index);
@@ -610,10 +669,10 @@ function CoverageSummary({ coverage, chapters }) {
   return (
     <div className="coverage-card">
       <div className="coverage-head">
-        <strong>L1 覆盖 {finishedRatio}%</strong>
+        <strong>章节线索 {finishedRatio}%</strong>
         <span>{coverage.chapters.completed}/{coverage.chapters.total} 章完成</span>
       </div>
-      <div className="coverage-bar" aria-label={`L1 覆盖 ${finishedRatio}%`}>
+      <div className="coverage-bar" aria-label={`章节线索 ${finishedRatio}%`}>
         <span style={{ width: `${finishedRatio}%` }} />
       </div>
       <p className="coverage-note">
@@ -628,23 +687,23 @@ function CoverageSummary({ coverage, chapters }) {
 }
 
 function L2CoverageSummary({ coverage }) {
-  if (!coverage) return <div className="index-summary">L2 读取中</div>;
+  if (!coverage) return <div className="index-summary">事实索引读取中</div>;
   const total = Math.max(coverage.chapters.total || 0, 1);
   const completed = coverage.chapters.completed || 0;
   const finishedRatio = Math.round((completed / total) * 100);
   return (
     <div className="coverage-card">
       <div className="coverage-head">
-        <strong>L2 覆盖 {finishedRatio}%</strong>
+        <strong>事实索引 {finishedRatio}%</strong>
         <span>{completed}/{coverage.chapters.total} 章 · {coverage.chapters.facts || 0} 条事实</span>
       </div>
-      <div className="coverage-bar" aria-label={`L2 覆盖 ${finishedRatio}%`}>
+      <div className="coverage-bar" aria-label={`事实索引 ${finishedRatio}%`}>
         <span style={{ width: `${finishedRatio}%` }} />
       </div>
       <p className="coverage-note">
         {coverage.failed_chapters?.length
           ? `失败章节：${compactChapterList(coverage.failed_chapters.slice(0, 16))}`
-          : "优先召回 L2"}
+          : "可用于快速分析"}
       </p>
     </div>
   );
@@ -660,7 +719,7 @@ function L1Preview({ chapters }) {
   return (
     <details className="index-preview">
       <summary>
-        <span>L1 预览</span>
+        <span>章节线索预览</span>
         <small>章节 {chapter.chapter_index}</small>
       </summary>
       <article>
@@ -679,7 +738,7 @@ function L1Preview({ chapters }) {
             ) : null}
           </>
         ) : (
-          <p>{chapter.summary || chapter.error_summary || "旧版 L1 暂无路由信号"}</p>
+          <p>{chapter.summary || chapter.error_summary || "旧版章节线索暂无路由信号"}</p>
         )}
       </article>
     </details>
@@ -691,7 +750,7 @@ function L2FactPreview({ facts }) {
   return (
     <details className="index-preview">
       <summary>
-        <span>L2 预览</span>
+        <span>事实索引预览</span>
         <small>{fact ? `第 ${fact.chapter_index} 章 · ${categoryLabel(fact.category)}` : "无事实"}</small>
       </summary>
       {fact ? (
@@ -720,4 +779,45 @@ function formatScore(value) {
 
 function compactChapterList(indexes) {
   return indexes.length ? indexes.join(", ") : "-";
+}
+
+function coveragePercent(coverage) {
+  const total = Number(coverage?.chapters?.total || 0);
+  if (!total) return 0;
+  return Math.round((Number(coverage.chapters.completed || 0) / total) * 100);
+}
+
+function materialReadinessLevel({ imported, l1Ratio, l2Ratio, l2Facts }) {
+  if (!imported) {
+    return {
+      tone: "blocked",
+      title: "需要先导入章节",
+      description: "导入章节后，系统才能准备章节线索和事实索引。"
+    };
+  }
+  if (l1Ratio >= 80 && l2Ratio >= 80 && l2Facts > 0) {
+    return {
+      tone: "ready",
+      title: "可以开始分析",
+      description: "当前章节线索和事实索引已经有较好覆盖，可直接创建或运行分析模板。"
+    };
+  }
+  if (l1Ratio > 0 || l2Ratio > 0) {
+    return {
+      tone: "partial",
+      title: "建议补齐索引",
+      description: "已有部分索引可用。若要提高召回质量，建议先补齐当前范围。"
+    };
+  }
+  return {
+    tone: "blocked",
+    title: "需要准备索引",
+    description: "建议先准备章节线索，再准备事实索引。"
+  };
+}
+
+function factIndexName(group) {
+  if (!group) return "默认事实索引";
+  if (group.group_key === "base") return "默认事实索引";
+  return group.name || group.group_key;
 }

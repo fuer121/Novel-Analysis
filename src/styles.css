@@ -2928,6 +2928,97 @@ code {
   font-size: 12px;
 }
 
+.material-readiness {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: var(--inset);
+}
+
+.material-readiness.ready {
+  border-color: rgba(9, 107, 77, 0.26);
+  background: linear-gradient(180deg, rgba(246, 251, 248, 0.94), rgba(255, 255, 255, 0.78));
+}
+
+.material-readiness.partial {
+  border-color: rgba(138, 90, 8, 0.26);
+  background: linear-gradient(180deg, rgba(255, 251, 238, 0.92), rgba(255, 255, 255, 0.78));
+}
+
+.material-readiness.blocked {
+  background: rgba(250, 251, 250, 0.72);
+}
+
+.material-readiness-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.material-readiness-head span,
+.material-step span {
+  color: var(--accent-deep);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.material-readiness-head h3 {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.22;
+}
+
+.material-readiness-head p {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.material-step-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.material-step {
+  min-height: 58px;
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--surface-soft);
+}
+
+.material-step strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.25;
+}
+
+.material-step.ready {
+  border-color: rgba(9, 107, 77, 0.22);
+  background: var(--accent-soft);
+}
+
+.material-step.partial {
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.material-step.todo,
+.material-step.blocked {
+  color: var(--muted);
+  background: #f3f5f3;
+}
+
 .index-workgrid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -3077,7 +3168,8 @@ code {
   .topbar,
   .page-hero,
   .command-footer,
-  .selected-book-summary {
+  .selected-book-summary,
+  .material-readiness-head {
     grid-template-columns: 1fr;
     align-items: start;
   }
@@ -3089,6 +3181,10 @@ code {
   .summary-metrics {
     justify-items: start;
     justify-content: flex-start;
+  }
+
+  .material-step-grid {
+    grid-template-columns: 1fr;
   }
 
   .background-task-stack {
