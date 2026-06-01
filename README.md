@@ -35,6 +35,12 @@ cp .env.example .env
 ```bash
 DIFY_API_BASE=http://127.0.0.1:5001/v1
 DIFY_CHAPTER_WORKFLOW_API_KEY=app-你的自托管Dify章节工作流Key
+DIFY_L1_WORKFLOW_API_KEY=app-你的L1工作流Key
+DIFY_L2_WORKFLOW_API_KEY=app-你的L2工作流Key
+DIFY_L1_WORKFLOW_VERSION=v1
+DIFY_L2_WORKFLOW_VERSION=v1
+L1_INDEX_PROVIDER=dify
+L2_INDEX_PROVIDER=dify
 OPENAI_API_KEY=sk-你的OpenAIKey
 OPENAI_MODEL=gpt-5.5
 OPENAI_RETENTION_MODE=zdr
@@ -50,6 +56,14 @@ OPENAI_API_BASE=https://api.openai.com/v1
 如果服务器所在网络不能直连 `api.openai.com`，可把 `OPENAI_PROXY_URL` 设置为本机或 VPN 的 HTTP 代理，例如 `http://127.0.0.1:7897`。如需使用 OpenAI 兼容网关，`OPENAI_API_BASE` 必须指向你确认合规、可承载版权章节内容的地址。
 
 把 `dify-workflows/minimal-chapter-fetch.workflow.yml` 导入自托管 Dify，并发布为 Workflow API。该工作流只负责返回章节原文 JSON，不接 LLM。
+
+L1/L2 索引默认也支持由 Dify Workflow 承接单章执行（后端调度不变）：
+
+- `dify-workflows/l1-route-index.workflow.yml`
+- `dify-workflows/l2-fact-index.workflow.yml`
+
+两者都使用后端动态传入 `index_prompt`，不在 Dify 里固化 Prompt。  
+如果需要回退旧执行链，可把 `L1_INDEX_PROVIDER` 或 `L2_INDEX_PROVIDER` 改成 `openai`。
 
 ## 启动
 

@@ -1,4 +1,4 @@
-import { config, requireDifyConfig } from "./config.js";
+import { config, difyApiKeyEnvName, difyApiKeyForTarget } from "./config.js";
 import { sanitizeDetails, sanitizeText } from "./sanitize.js";
 
 export function buildChapterBatches(startChapter, endChapter, batchSize = config.dify.batchSize) {
@@ -13,23 +13,43 @@ export function buildChapterBatches(startChapter, endChapter, batchSize = config
 }
 
 export async function fetchChapterBatch({ bookId, startChapter, endChapter }) {
-  requireDifyConfig();
+  const outputs = await runDifyWorkflow({
+    apiKey: difyApiKeyForTarget("import"),
+    inputs: {
+      book_id: bookId,
+      start_chapter: startChapter,
+      end_chapter: endChapter
+    },
+    target: "import"
+  });
+  const raw = outputs.result ?? outputs.text ?? outputs.chapters ?? outputs.output;
+  return normalizeDifyChapterOutput(raw, { bookId, startChapter, endChapter });
+}
+
+export async function runDifyWorkflow({ apiKey, inputs = {}, user = config.dify.user, target = "workflow" }) {
+  if (!config.dify.base) {
+    const error = new Error("缺少 DIFY_API_BASE。");
+    error.status = 500;
+    throw error;
+  }
+  if (!apiKey) {
+    const error = new Error(`缺少 ${difyApiKeyEnvName(target)}。`);
+    error.status = 500;
+    throw error;
+  }
+
   let response;
   try {
     response = await fetch(`${config.dify.base}/workflows/run`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${config.dify.apiKey}`,
+        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json"
       },
       body: JSON.stringify({
-        inputs: {
-          book_id: bookId,
-          start_chapter: startChapter,
-          end_chapter: endChapter
-        },
+        inputs,
         response_mode: "blocking",
-        user: config.dify.user
+        user
       })
     });
   } catch (error) {
@@ -40,24 +60,37 @@ export async function fetchChapterBatch({ bookId, startChapter, endChapter }) {
 
   const { data, text } = await readDifyResponse(response);
   if (!response.ok) {
-    const error = new Error(difyErrorMessage(response.status, data?.message || data?.error || text || `Dify 调用失败：HTTP ${response.status}`, "workflow"));
+    const error = new Error(difyErrorMessage(
+      response.status,
+      data?.message || data?.error || text || `Dify 调用失败：HTTP ${response.status}`,
+      "workflow",
+      target
+    ));
     error.status = response.status;
     error.details = sanitizeDetails(data || { status: response.status, message: text });
     throw error;
   }
 
-  const outputs = data?.data?.outputs || {};
-  const raw = outputs.result ?? outputs.text ?? outputs.chapters ?? outputs.output;
-  return normalizeDifyChapterOutput(raw, { bookId, startChapter, endChapter });
+  return data?.data?.outputs || {};
 }
 
-export async function testDifyConnection() {
-  requireDifyConfig();
+export async function testDifyConnection({ apiKey, target = "import" } = {}) {
+  if (!config.dify.base) {
+    const error = new Error("缺少 DIFY_API_BASE。");
+    error.status = 500;
+    throw error;
+  }
+  const token = apiKey || difyApiKeyForTarget(target);
+  if (!token) {
+    const error = new Error(`缺少 ${difyApiKeyEnvName(target)}。`);
+    error.status = 500;
+    throw error;
+  }
   let response;
   try {
     response = await fetch(`${config.dify.base}/parameters`, {
       headers: {
-        Authorization: `Bearer ${config.dify.apiKey}`
+        Authorization: `Bearer ${token}`
       }
     });
   } catch (error) {
@@ -68,7 +101,12 @@ export async function testDifyConnection() {
 
   const { data, text } = await readDifyResponse(response);
   if (!response.ok) {
-    const error = new Error(difyErrorMessage(response.status, data?.message || data?.error || text || `Dify 连通性测试失败：HTTP ${response.status}`, "parameters"));
+    const error = new Error(difyErrorMessage(
+      response.status,
+      data?.message || data?.error || text || `Dify 连通性测试失败：HTTP ${response.status}`,
+      "parameters",
+      target
+    ));
     error.status = response.status;
     error.details = sanitizeDetails(data || { status: response.status, message: text });
     throw error;
@@ -83,8 +121,33 @@ export async function testDifyConnection() {
   };
 }
 
+export function normalizeDifyL1Output(raw) {
+  const value = normalizeDifyOutputEnvelope(raw);
+  const record = (value && typeof value === "object" && !Array.isArray(value)) ? value : {};
+  return {
+    route_schema_version: normalizeString(record.route_schema_version ?? record.routeSchemaVersion, "l1-route-v1"),
+    route_entities: normalizeDifyRouteEntities(record.route_entities ?? record.routeEntities ?? record.entities),
+    route_keywords: normalizeStringArray(record.route_keywords ?? record.routeKeywords ?? record.keywords),
+    signals: normalizeDifySignals(record.signals),
+    category_scores: normalizeDifyCategoryScores(record.category_scores ?? record.categoryScores)
+  };
+}
+
+export function normalizeDifyL2Output(raw) {
+  const value = normalizeDifyOutputEnvelope(raw);
+  const record = (value && typeof value === "object" && !Array.isArray(value)) ? value : {};
+  const facts = Array.isArray(record.facts)
+    ? record.facts
+    : Array.isArray(record.items)
+      ? record.items
+      : [];
+  return {
+    facts: facts.map(normalizeDifyFact).filter(Boolean)
+  };
+}
+
 export function normalizeDifyChapterOutput(raw, context = {}) {
-  const value = parseJsonMaybe(raw);
+  const value = normalizeDifyOutputEnvelope(raw);
   const chapters = extractChapters(value);
   return chapters.map((chapter, offset) => {
     const index = Number.parseInt(
@@ -138,13 +201,98 @@ function parseJsonText(text) {
   }
 }
 
-function difyErrorMessage(status, message, phase) {
+function difyErrorMessage(status, message, phase, target = "import") {
   const safeMessage = sanitizeText(message);
   if (status === 401 || status === 403) {
     const action = phase === "parameters" ? "连通性测试" : "工作流调用";
-    return `Dify ${action}鉴权失败：当前 DIFY_CHAPTER_WORKFLOW_API_KEY 无效或不属于当前 DIFY_API_BASE。请在自托管 Dify 的目标工作流中重新复制 API Key，并确认 DIFY_API_BASE 指向同一个 Dify 服务。底层错误：${safeMessage}`;
+    return `Dify ${action}鉴权失败：当前 ${difyApiKeyEnvName(target)} 无效或不属于当前 DIFY_API_BASE。请在自托管 Dify 的目标工作流中重新复制 API Key，并确认 DIFY_API_BASE 指向同一个 Dify 服务。底层错误：${safeMessage}`;
   }
   return safeMessage;
+}
+
+function normalizeDifyOutputEnvelope(raw) {
+  const value = parseJsonMaybe(raw);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const mapped = value.result ?? value.text ?? value.output ?? value.data;
+    if (mapped !== undefined) return parseJsonMaybe(mapped);
+  }
+  return value;
+}
+
+function normalizeDifyRouteEntities(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entity) => {
+    if (!entity || typeof entity !== "object") return null;
+    return {
+      name: normalizeString(entity.name),
+      type: normalizeString(entity.type),
+      aliases: normalizeStringArray(entity.aliases),
+      role: normalizeString(entity.role),
+      note: normalizeString(entity.note)
+    };
+  }).filter((entity) => entity && entity.name);
+}
+
+function normalizeDifySignals(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((signal) => {
+    if (!signal || typeof signal !== "object") return null;
+    return {
+      category: normalizeCategory(signal.category),
+      strength: normalizeNumber(signal.strength),
+      entities: normalizeStringArray(signal.entities),
+      keywords: normalizeStringArray(signal.keywords),
+      reason: normalizeString(signal.reason)
+    };
+  }).filter(Boolean);
+}
+
+function normalizeDifyCategoryScores(value) {
+  const source = value && typeof value === "object" ? value : {};
+  const scores = {};
+  for (const category of DIFY_FACT_CATEGORIES) {
+    scores[category] = normalizeNumber(source[category]);
+  }
+  return scores;
+}
+
+function normalizeDifyFact(value) {
+  if (!value || typeof value !== "object") return null;
+  return {
+    category: normalizeCategory(value.category),
+    entity: normalizeString(value.entity),
+    aliases: normalizeStringArray(value.aliases),
+    tags: normalizeStringArray(value.tags),
+    related_entities: normalizeStringArray(value.related_entities ?? value.relatedEntities),
+    fact_type: normalizeString(value.fact_type ?? value.factType),
+    fact: normalizeString(value.fact),
+    evidence: normalizeStringArray(value.evidence),
+    importance: normalizeNumber(value.importance),
+    confidence: normalizeNumber(value.confidence)
+  };
+}
+
+function normalizeCategory(value) {
+  const normalized = normalizeString(value).toLowerCase();
+  return DIFY_FACT_CATEGORIES.includes(normalized) ? normalized : "other";
+}
+
+function normalizeStringArray(value) {
+  if (!Array.isArray(value)) return [];
+  return value.map((entry) => normalizeString(entry)).filter(Boolean);
+}
+
+function normalizeString(value, fallback = "") {
+  const normalized = String(value ?? "").trim();
+  return normalized || fallback;
+}
+
+function normalizeNumber(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return 0;
+  if (number < 0) return 0;
+  if (number > 1) return 1;
+  return number;
 }
 
 function extractChapters(value) {
@@ -160,3 +308,15 @@ function extractChapters(value) {
   }
   return [];
 }
+
+const DIFY_FACT_CATEGORIES = [
+  "character",
+  "relationship",
+  "cultivation",
+  "force",
+  "item",
+  "location",
+  "event",
+  "foreshadowing",
+  "other"
+];

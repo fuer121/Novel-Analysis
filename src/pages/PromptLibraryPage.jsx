@@ -33,7 +33,6 @@ const emptyIndexGroupDraft = {
   name: "",
   description: "",
   category_scope: [],
-  trigger_keywords: "",
   l2_index_prompt: ""
 };
 
@@ -81,7 +80,7 @@ export function PromptLibraryPage({
   const [busy, setBusy] = useState(false);
   const [indexData, setIndexData] = useState(null);
   const [indexGroups, setIndexGroups] = useState([]);
-  const [selectedIndexGroupKey, setSelectedIndexGroupKey] = useState("base");
+  const [selectedIndexGroupKey, setSelectedIndexGroupKey] = useState("");
   const [indexGroupDraft, setIndexGroupDraft] = useState(emptyIndexGroupDraft);
   const [indexGroupBusy, setIndexGroupBusy] = useState(false);
   const [indexSaving, setIndexSaving] = useState({ l1: false, l2: false });
@@ -97,6 +96,10 @@ export function PromptLibraryPage({
   const dirty = useMemo(
     () => !samePromptGroup(draft, bookPromptGroups.find((group) => group.id === selectedId) || emptyDraft),
     [draft, bookPromptGroups, selectedId]
+  );
+  const editableIndexGroups = useMemo(
+    () => indexGroups.filter((group) => group.group_key !== "base"),
+    [indexGroups]
   );
 
   useEffect(() => {
@@ -124,7 +127,9 @@ export function PromptLibraryPage({
       setIndexData(indexResponse);
       setIndexGroups(indexGroupRows);
       setSelectedIndexGroupKey((current) => (
-        indexGroupRows.some((group) => group.group_key === current) ? current : "base"
+        indexGroupRows.some((group) => group.group_key !== "base" && group.group_key === current)
+          ? current
+          : (indexGroupRows.find((group) => group.group_key !== "base")?.group_key || "")
       ));
       setIndexGroupDraft(emptyIndexGroupDraft);
       setGuideTemplates(templatesResponse.templates || {});
@@ -180,6 +185,10 @@ export function PromptLibraryPage({
   async function saveGroup() {
     if (!selectedBookId) {
       setError("请先选择一本书。");
+      return;
+    }
+    if (!(draft.index_group_keys || []).length) {
+      setError("分析模板必须绑定至少一个事实索引。");
       return;
     }
     setBusy(true);
@@ -249,7 +258,7 @@ export function PromptLibraryPage({
   }
 
   async function saveSpecializedL2Prompt(prompt) {
-    if (!selectedBookId || !selectedIndexGroupKey || selectedIndexGroupKey === "base") return;
+    if (!selectedBookId || !selectedIndexGroupKey) return;
     setIndexSaving((state) => ({ ...state, l2: true }));
     setError("");
     try {
@@ -281,22 +290,26 @@ export function PromptLibraryPage({
 
   async function saveIndexGroup() {
     if (!selectedBookId) return;
-    if (!selectedIndexGroupKey && !indexGroupDraft.group_key.trim()) {
-      setError("事实索引 Key 不能为空。");
+    if (!indexGroupDraft.name.trim()) {
+      setError("事实索引名称不能为空。");
       return;
     }
     setIndexGroupBusy(true);
     setError("");
     try {
+      const creating = !selectedIndexGroupKey;
+      const nextGroupKey = creating
+        ? (indexGroupDraft.group_key || slugifyIndexGroupKey(indexGroupDraft.name))
+        : selectedIndexGroupKey;
       const payload = {
-        group_key: indexGroupDraft.group_key,
+        group_key: nextGroupKey,
         name: indexGroupDraft.name,
         description: indexGroupDraft.description,
         category_scope: indexGroupDraft.category_scope,
-        trigger_keywords: splitKeywords(indexGroupDraft.trigger_keywords),
+        trigger_keywords: [],
         l2_index_prompt: indexGroupDraft.l2_index_prompt
       };
-      const saved = selectedIndexGroupKey && selectedIndexGroupKey !== "base"
+      const saved = selectedIndexGroupKey
         ? await onUpdateBookIndexGroup(selectedBookId, selectedIndexGroupKey, payload)
         : await onCreateBookIndexGroup(selectedBookId, payload);
       const groups = await onLoadBookIndexGroups(selectedBookId);
@@ -311,7 +324,7 @@ export function PromptLibraryPage({
   }
 
   async function deleteIndexGroup() {
-    if (!selectedBookId || selectedIndexGroupKey === "base") return;
+    if (!selectedBookId || !selectedIndexGroupKey) return;
     const group = indexGroups.find((entry) => entry.group_key === selectedIndexGroupKey);
     if (!window.confirm(`删除事实索引《${factIndexName(group) || selectedIndexGroupKey}》？`)) return;
     setIndexGroupBusy(true);
@@ -320,7 +333,7 @@ export function PromptLibraryPage({
       await onDeleteBookIndexGroup(selectedBookId, selectedIndexGroupKey);
       const groups = await onLoadBookIndexGroups(selectedBookId);
       setIndexGroups(groups);
-      setSelectedIndexGroupKey("base");
+      setSelectedIndexGroupKey(groups.find((entry) => entry.group_key !== "base")?.group_key || "");
       setIndexGroupDraft(emptyIndexGroupDraft);
     } catch (error) {
       setError(error.message);
@@ -378,10 +391,9 @@ export function PromptLibraryPage({
       setSelectedIndexGroupKey("");
       setIndexGroupDraft((current) => ({
         ...current,
-        group_key: current.group_key || slugifyIndexGroupKey(suggestion.title_suggestion),
+        group_key: current.group_key || slugifyIndexGroupKey(current.name || suggestion.title_suggestion),
         name: current.name || suggestion.title_suggestion || "事实索引",
         description: suggestion.rationale || current.description || "",
-        trigger_keywords: current.trigger_keywords || extractTriggerKeywords(suggestion),
         l2_index_prompt: prompt
       }));
       return;
@@ -395,16 +407,10 @@ export function PromptLibraryPage({
   const indexPrompts = indexData?.indexPrompts || null;
   const l1Coverage = indexData?.coverage?.l1 || null;
   const l2Coverage = indexData?.coverage?.l2 || null;
-  const selectedIndexGroup = indexGroups.find((group) => group.group_key === selectedIndexGroupKey) || indexGroups[0] || null;
-  const activeL2Prompt = selectedIndexGroup?.group_key && selectedIndexGroup.group_key !== "base"
-    ? selectedIndexGroup.l2_index_prompt
-    : indexPrompts?.l2_index_prompt;
-  const activeL2Hash = selectedIndexGroup?.group_key && selectedIndexGroup.group_key !== "base"
-    ? selectedIndexGroup.l2_index_prompt_hash
-    : indexPrompts?.l2_index_prompt_hash;
-  const activeL2UpdatedAt = selectedIndexGroup?.group_key && selectedIndexGroup.group_key !== "base"
-    ? selectedIndexGroup.updated_at
-    : indexPrompts?.updated_at;
+  const selectedIndexGroup = editableIndexGroups.find((group) => group.group_key === selectedIndexGroupKey) || editableIndexGroups[0] || null;
+  const activeL2Prompt = selectedIndexGroup?.l2_index_prompt || "";
+  const activeL2Hash = selectedIndexGroup?.l2_index_prompt_hash || "";
+  const activeL2UpdatedAt = selectedIndexGroup?.updated_at || "";
 
   return (
     <section className="prompt-workbench">
@@ -489,38 +495,40 @@ export function PromptLibraryPage({
                   onSave={(prompt) => saveIndexPrompt("l1", prompt)}
                   onOpenGuide={(currentPrompt) => openGuide("l1", currentPrompt)}
                 />
-                <IndexPromptEditor
-                  key={`l2-${selectedBookId}-${selectedIndexGroupKey}-${activeL2Hash}-${activeL2UpdatedAt}`}
-                  type="l2"
-                  title={selectedIndexGroupKey === "base" ? "事实索引规则" : `事实索引规则 · ${factIndexName(selectedIndexGroup)}`}
-                  value={activeL2Prompt}
-                  hash={activeL2Hash}
-                  updatedAt={activeL2UpdatedAt}
-                  coverage={l2Coverage}
-                  saving={indexSaving.l2}
-                  onSave={(prompt) => selectedIndexGroupKey === "base"
-                    ? saveIndexPrompt("l2", prompt)
-                    : saveSpecializedL2Prompt(prompt)}
-                  onOpenGuide={(currentPrompt) => openGuide("l2", currentPrompt)}
-                />
+                {selectedIndexGroup ? (
+                  <IndexPromptEditor
+                    key={`l2-${selectedBookId}-${selectedIndexGroupKey}-${activeL2Hash}-${activeL2UpdatedAt}`}
+                    type="l2"
+                    title={`事实索引规则 · ${factIndexName(selectedIndexGroup)}`}
+                    value={activeL2Prompt}
+                    hash={activeL2Hash}
+                    updatedAt={activeL2UpdatedAt}
+                    coverage={l2Coverage}
+                    saving={indexSaving.l2}
+                    onSave={(prompt) => saveSpecializedL2Prompt(prompt)}
+                    onOpenGuide={(currentPrompt) => openGuide("l2", currentPrompt)}
+                  />
+                ) : (
+                  <div className="empty-state">先新建事实索引，再编辑对应规则</div>
+                )}
                 <IndexGroupManager
-                  groups={indexGroups}
+                  groups={editableIndexGroups}
                   selectedKey={selectedIndexGroupKey}
                   draft={indexGroupDraft}
                   busy={indexGroupBusy}
                   onSelect={(groupKey) => {
-                    const group = indexGroups.find((entry) => entry.group_key === groupKey);
+                    const group = editableIndexGroups.find((entry) => entry.group_key === groupKey);
                     setSelectedIndexGroupKey(groupKey);
-                    setIndexGroupDraft(groupKey === "base" || !group ? emptyIndexGroupDraft : groupToDraft(group));
+                    setIndexGroupDraft(!group ? emptyIndexGroupDraft : groupToDraft(group));
                   }}
                   onNew={() => {
                     setSelectedIndexGroupKey("");
                     setIndexGroupDraft({
                       ...emptyIndexGroupDraft,
-                      l2_index_prompt: indexPrompts.l2_index_prompt
+                      l2_index_prompt: indexPrompts?.l2_index_prompt || ""
                     });
                   }}
-                  onOpenGuide={() => openGuide("indexgroup", indexPrompts.l2_index_prompt)}
+                  onOpenGuide={() => openGuide("indexgroup", indexPrompts?.l2_index_prompt || "")}
                   onDraftChange={(patch) => setIndexGroupDraft((current) => ({ ...current, ...patch }))}
                   onSave={saveIndexGroup}
                   onDelete={deleteIndexGroup}
@@ -597,7 +605,7 @@ export function PromptLibraryPage({
                   />
                 </label>
                 <IndexGroupBinding
-                  groups={indexGroups}
+                  groups={editableIndexGroups}
                   value={draft.index_group_keys || []}
                   onChange={(indexGroupKeys) => updateDraft({ index_group_keys: indexGroupKeys })}
                 />
@@ -672,7 +680,7 @@ function IndexPromptEditor({ type, title, description, value, hash, updatedAt, c
             <h3>{title}</h3>
             {tipConfig ? <PromptTipPopover tips={tipConfig.tips} title={tipConfig.title} /> : null}
           </div>
-          <small>Hash {shortHash || "-"} · 更新 {formatTime(updatedAt)}</small>
+          <small>更新 {formatTime(updatedAt)}</small>
         </div>
         <button
           className="secondary inline index-lock-button"
@@ -713,56 +721,44 @@ function IndexPromptEditor({ type, title, description, value, hash, updatedAt, c
 }
 
 function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, onOpenGuide, onDraftChange, onSave, onDelete }) {
-  const isBase = selectedKey === "base";
   const isCreating = !selectedKey;
   return (
     <div className="index-group-manager">
       <div className="index-group-head">
         <div>
           <strong>事实索引</strong>
-          <span>默认事实索引用于常规分析；也可按稳定分析方向创建多个事实索引，减少无关事实干扰。</span>
+          <span>每个事实索引只负责一类稳定分析方向</span>
         </div>
-        <button className="secondary inline" type="button" onClick={onNew}>
-          <Plus size={14} />
-          新建事实索引
-        </button>
-        <button className="ghost inline" type="button" onClick={onOpenGuide}>
-          <Sparkles size={14} />
-          创建引导
-        </button>
-      </div>
-      <div className="index-group-tabs">
-        {groups.map((group) => (
-          <button
-            key={group.group_key}
-            type="button"
-            className={group.group_key === selectedKey ? "active" : ""}
-            onClick={() => onSelect(group.group_key)}
-          >
-            <strong>{factIndexName(group)}</strong>
-            <span>{group.group_key === "base" ? "默认" : group.group_key}</span>
+        <div className="index-group-head-actions">
+          <button className="secondary inline index-group-new-button" type="button" onClick={onNew}>
+            <Plus size={14} />
+            新建事实索引
           </button>
-        ))}
+        </div>
       </div>
-      {isCreating || (!isBase && selectedKey) ? (
+      {groups.length ? (
+        <div className="index-group-tabs">
+          {groups.map((group) => (
+            <button
+              key={group.group_key}
+              type="button"
+              className={group.group_key === selectedKey ? "active" : ""}
+              onClick={() => onSelect(group.group_key)}
+            >
+              <strong>{factIndexName(group)}</strong>
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {isCreating || selectedKey ? (
         <div className="index-group-editor">
           <div className="form-grid compact">
-            {isCreating ? (
-              <label>
-                <span>事实索引 Key</span>
-                <input value={draft.group_key} placeholder="cultivation-items" onChange={(event) => onDraftChange({ group_key: event.target.value })} />
-              </label>
-            ) : null}
             <label>
               <span>名称</span>
               <input value={draft.name} placeholder="修炼法宝事实索引" onChange={(event) => onDraftChange({ name: event.target.value })} />
             </label>
-            <label>
-              <span>触发词</span>
-              <input value={draft.trigger_keywords} placeholder="境界、法宝、武器、本命物" onChange={(event) => onDraftChange({ trigger_keywords: event.target.value })} />
-            </label>
           </div>
-          <label className="block-label">
+          <label className="block-label hidden">
             <span>用途说明</span>
             <textarea value={draft.description} placeholder="说明这个事实索引负责哪些内容。" onChange={(event) => onDraftChange({ description: event.target.value })} />
           </label>
@@ -770,17 +766,23 @@ function IndexGroupManager({ groups, selectedKey, draft, busy, onSelect, onNew, 
             <span>事实索引规则</span>
             <textarea value={draft.l2_index_prompt} placeholder="写清楚这个事实索引只提取哪些可复用事实。" onChange={(event) => onDraftChange({ l2_index_prompt: event.target.value })} />
           </label>
-          <div className="action-row wrap">
-            <button className="secondary inline" type="button" onClick={onSave} disabled={busy}>
-              {busy ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
-              保存事实索引
+          <div className="index-group-actions">
+            <button className="ghost inline" type="button" onClick={onOpenGuide}>
+              <Sparkles size={14} />
+              创建引导
             </button>
-            {!isCreating ? (
-              <button className="danger inline" type="button" onClick={onDelete} disabled={busy}>
-                <Trash2 size={15} />
-                删除
+            <div className="action-row wrap">
+              <button className="secondary inline index-group-save-button" type="button" onClick={onSave} disabled={busy}>
+                {busy ? <Loader2 className="spin" size={15} /> : <Save size={15} />}
+                保存事实索引
               </button>
-            ) : null}
+              {!isCreating ? (
+                <button className="danger inline" type="button" onClick={onDelete} disabled={busy}>
+                  <Trash2 size={15} />
+                  删除
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}
@@ -800,13 +802,6 @@ function IndexGroupBinding({ groups, value, onChange }) {
     <div className="index-group-binding">
       <span>使用事实索引</span>
       <div className="index-group-checks">
-        <button
-          type="button"
-          className={!value?.length ? "active" : ""}
-          onClick={() => onChange([])}
-        >
-          自动匹配事实索引
-        </button>
         {groups.map((group) => (
           <button
             key={group.group_key}
@@ -818,7 +813,7 @@ function IndexGroupBinding({ groups, value, onChange }) {
           </button>
         ))}
       </div>
-      <small>{value?.length ? "分析时只召回已绑定事实索引。" : "根据分析模板触发词自动选择，未命中则使用默认事实索引。"}</small>
+      <small>{value?.length ? "分析时只召回已绑定事实索引。" : "请至少选择一个事实索引后再保存模板。"}</small>
     </div>
   );
 }
@@ -1040,23 +1035,6 @@ function slugifyIndexGroupKey(value) {
   return ascii || "custom-index";
 }
 
-function extractTriggerKeywords(suggestion) {
-  const text = [
-    suggestion?.rationale,
-    ...(suggestion?.usage_notes || []),
-    suggestion?.prompt_suggestion
-  ].join("\n");
-  const match = text.match(/触发词(?:包括|为|：|:)?([^\n。；;]+)/);
-  if (!match) return "";
-  return match[1]
-    .replace(/[包括为：:]/g, "")
-    .split(/[、,，/和与及\s]+/)
-    .map((entry) => entry.trim())
-    .filter(Boolean)
-    .slice(0, 12)
-    .join("、");
-}
-
 function PromptTipPopover({ title, tips }) {
   const [pinned, setPinned] = useState(false);
   const text = tips.map((tip, index) => `${index + 1}. ${tip}`).join("\n");
@@ -1156,7 +1134,9 @@ function normalizeGroupDraft(group, bookId) {
     ...group,
     book_id: group?.book_id || bookId || "",
     summary_prompt: group?.summary_prompt || "",
-    index_group_keys: Array.isArray(group?.index_group_keys) ? group.index_group_keys : []
+    index_group_keys: Array.isArray(group?.index_group_keys)
+      ? group.index_group_keys.filter((key) => key !== "base")
+      : []
   };
 }
 
@@ -1180,22 +1160,13 @@ function groupToDraft(group) {
     name: group.name || "",
     description: group.description || "",
     category_scope: group.category_scope || [],
-    trigger_keywords: (group.trigger_keywords || []).join("、"),
     l2_index_prompt: group.l2_index_prompt || ""
   };
 }
 
 function factIndexName(group) {
-  if (!group) return "默认事实索引";
-  if (group.group_key === "base") return "默认事实索引";
+  if (!group) return "事实索引";
   return group.name || group.group_key;
-}
-
-function splitKeywords(value) {
-  return String(value || "")
-    .split(/[,\s，、；;]+/)
-    .map((item) => item.trim())
-    .filter(Boolean);
 }
 
 function bookIdFromUrl() {

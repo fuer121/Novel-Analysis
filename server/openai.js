@@ -672,7 +672,7 @@ export function defaultL1IndexPrompt() {
   return [
     "请为当前小说章节建立轻量 L1 章节路由/信号索引。",
     "定位：L1 只判断本章有哪些可召回信号，服务后续按章节命中后读取 L2 专项事实；不要写长摘要，不要沉淀事实卡，不要替代 L2。",
-    "只依据本章原文，输出稳定主体、别名、关键词、分类信号和置信度；信号要短、准、可检索。",
+    "只依据本章原文，输出稳定主体、别名、关键词和分类信号；信号要短、准、可检索。",
     "分类只能使用：character、relationship、cultivation、force、item、location、event、foreshadowing、other。",
     "如果本章没有明显信号，signals 输出空数组，category_scores 保持低分。"
   ].join("\n");
@@ -772,7 +772,7 @@ export function buildL1WindowInput({ windowStart, windowEnd, chapterIndexes }) {
         {
           type: "input_text",
           text: [
-            "请基于以下逐章 L1 索引，生成 10 章窗口级基础索引。",
+            "请基于以下逐章 L1 索引，生成 10 章窗口级章节线索。",
             "要求：不要补充原文之外的信息；聚合时间线、实体变化、关系变化和伏笔线索；不要输出 Markdown。",
             "",
             `窗口范围：${windowStart}-${windowEnd}`,
@@ -812,7 +812,6 @@ export function l1ChapterIndexSchema() {
     additionalProperties: false,
     properties: {
       route_schema_version: { type: "string" },
-      route_summary: { type: "string" },
       route_entities: {
         type: "array",
         items: {
@@ -874,11 +873,9 @@ export function l1ChapterIndexSchema() {
           other: { type: "number" }
         },
         required: ["character", "relationship", "cultivation", "force", "item", "location", "event", "foreshadowing", "other"]
-      },
-      has_major_signal: { type: "boolean" },
-      confidence: { type: "number" }
+      }
     },
-    required: ["route_schema_version", "route_summary", "route_entities", "route_keywords", "signals", "category_scores", "has_major_signal", "confidence"]
+    required: ["route_schema_version", "route_entities", "route_keywords", "signals", "category_scores"]
   };
 }
 
