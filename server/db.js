@@ -667,26 +667,40 @@ export function createBookIndexGroup(bookId, payload = {}) {
     error.status = 409;
     throw error;
   }
+  let nextGroupKey = group.group_key;
+  if (getBookIndexGroup(id, nextGroupKey)) {
+    nextGroupKey = resolveAvailableBookIndexGroupKey(id, nextGroupKey);
+  }
   const now = nowIso();
-  db.prepare(`
-    INSERT INTO book_index_groups (
-      book_id, group_key, name, description, category_scope, trigger_keywords,
-      l2_index_prompt, enabled, created_at, updated_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    id,
-    group.group_key,
-    group.name,
-    group.description,
-    JSON.stringify(group.category_scope),
-    JSON.stringify(group.trigger_keywords),
-    group.l2_index_prompt,
-    group.enabled ? 1 : 0,
-    now,
-    now
-  );
-  return getBookIndexGroup(id, group.group_key);
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      db.prepare(`
+        INSERT INTO book_index_groups (
+          book_id, group_key, name, description, category_scope, trigger_keywords,
+          l2_index_prompt, enabled, created_at, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        id,
+        nextGroupKey,
+        group.name,
+        group.description,
+        JSON.stringify(group.category_scope),
+        JSON.stringify(group.trigger_keywords),
+        group.l2_index_prompt,
+        group.enabled ? 1 : 0,
+        now,
+        now
+      );
+      return getBookIndexGroup(id, nextGroupKey);
+    } catch (error) {
+      if (!isBookIndexGroupUniqueError(error) || attempt >= 1) throw error;
+      nextGroupKey = resolveAvailableBookIndexGroupKey(id, nextGroupKey);
+    }
+  }
+  const finalError = new Error("创建事实索引失败，请稍后重试。");
+  finalError.status = 500;
+  throw finalError;
 }
 
 export function updateBookIndexGroup(bookId, groupKey, payload = {}) {
@@ -2363,6 +2377,26 @@ export function normalizeIndexGroupKey(value) {
     .replace(/^[-_]+|[-_]+$/g, "")
     .slice(0, 64);
   return key || BASE_INDEX_GROUP_KEY;
+}
+
+function isBookIndexGroupUniqueError(error) {
+  const message = String(error?.message || "");
+  return error?.code === "SQLITE_CONSTRAINT_PRIMARYKEY"
+    || error?.code === "SQLITE_CONSTRAINT_UNIQUE"
+    || message.includes("UNIQUE constraint failed: book_index_groups.book_id, book_index_groups.group_key");
+}
+
+function resolveAvailableBookIndexGroupKey(bookId, rawKey) {
+  const id = normalizeBookId(bookId);
+  const baseKey = normalizeIndexGroupKey(rawKey);
+  const rows = db.prepare("SELECT group_key FROM book_index_groups WHERE book_id = ?").all(id);
+  const used = new Set(rows.map((row) => normalizeIndexGroupKey(row.group_key)));
+  if (!used.has(baseKey)) return baseKey;
+  for (let index = 2; index <= 999; index += 1) {
+    const candidate = normalizeIndexGroupKey(`${baseKey}-${index}`);
+    if (!used.has(candidate)) return candidate;
+  }
+  return normalizeIndexGroupKey(`${baseKey}-${Date.now()}`);
 }
 
 function normalizeIndexGroupKeys(value) {
