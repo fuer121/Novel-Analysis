@@ -92,6 +92,7 @@ const CUSTOM_FIELD_SUMMARY_MAX_OUTPUT_TOKENS = 3000;
 const SUMMARY_STAGE_MAX_ATTEMPTS = 3;
 const SUMMARY_STAGE_RETRY_DELAY_MS = 1200;
 const L2_SCHEMA_VERSION = "l2-facts-v1";
+const FIELD_BATCH_MERGE_STRATEGY_VERSION = "recursive-object-v2";
 
 export function l1IndexExecutionSignature(openaiModel = config.openai.model) {
   if (config.indexing.l1Provider === "dify") return `dify:l1:${config.dify.l1WorkflowVersion}`;
@@ -978,7 +979,11 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
   const summaryExecutionModel = analysisSummaryExecutionSignature(model);
   const selectedIndexes = chapters.map((chapter) => chapter.chapter_index);
   const categories = inferL2CategoriesFromPrompt(settings.summary_prompt);
-  const entityQueries = inferEntityQueriesFromPrompt(settings.summary_prompt, bookId);
+  const targetContext = buildTargetContext({ userPrompt: settings.summary_prompt });
+  const entityQueries = mergeEntityQueries([
+    targetContext.subject ? [targetContext.subject] : [],
+    inferEntityQueriesFromPrompt(settings.summary_prompt, bookId)
+  ]);
   const primaryEntityQuery = entityQueries[0] || "";
   const bookPrompts = getBookIndexPrompts(bookId);
   const l1PromptHash = bookL1IndexPromptHash(bookPrompts);
@@ -1039,7 +1044,19 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
       includeContent: true
     })
     : [];
-  const facts = mergeFacts([...initialFacts, ...fallbackFacts], { chronological: useL1Route })
+  const categoryFallbackFacts = shouldRetryL2RecallWithoutCategories({ initialFacts, categories, entityQueries })
+    ? await listL2Facts({
+      bookId,
+      indexGroupKeys,
+      startChapter,
+      endChapter,
+      chapterIndexes: l1MatchedIndexes,
+      entities: entityQueries,
+      limit: 1000,
+      includeContent: true
+    })
+    : [];
+  const facts = mergeFacts([...initialFacts, ...fallbackFacts, ...categoryFallbackFacts], { chronological: useL1Route })
     .filter((fact) => selectedIndexes.includes(fact.chapter_index));
   const indexedChapters = new Set(facts.map((fact) => fact.chapter_index));
   const unrecalledChapters = selectedIndexes.filter((index) => !indexedChapters.has(index));
@@ -1087,9 +1104,14 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
     l2_coverage: l2Coverages[indexGroupKeys[0]]?.chapters || null,
     l2_coverages: Object.fromEntries(Object.entries(l2Coverages).map(([key, coverage]) => [key, coverage.chapters])),
     categories,
+    category_filter_fallback_used: Boolean(categoryFallbackFacts.length),
     entity_query: primaryEntityQuery,
     entity_queries: entityQueries,
-    recall_fallback_used: Boolean(fallbackFacts.length)
+    recall_fallback_used: Boolean(fallbackFacts.length),
+    target_subject: targetContext.subject,
+    target_recalled_facts: 0,
+    target_recalled_chapters: 0,
+    target_recall_fallback_used: false
   };
 
   const reviewedChapters = [];
@@ -1127,6 +1149,19 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
     });
     sourceStats.source_review_chapters += 1;
   }
+  const targetFacts = targetContext.subject
+    ? facts.filter((fact) => factMatchesAnyEntity(fact, [targetContext.subject]))
+    : [];
+  const targetReviewedFacts = targetContext.subject
+    ? reviewedChapters.flatMap((chapter) => (chapter.facts || [])
+      .map((fact) => ({ ...fact, chapter_index: chapter.chapter_index }))
+      .filter((fact) => factMatchesAnyEntity(fact, [targetContext.subject])))
+    : [];
+  sourceStats.target_recalled_facts = targetFacts.length + targetReviewedFacts.length;
+  sourceStats.target_recalled_chapters = new Set([...targetFacts, ...targetReviewedFacts]
+    .map((fact) => Number(fact.chapter_index || 0))
+    .filter(Boolean)).size;
+  sourceStats.target_recall_fallback_used = Boolean(targetContext.subject && !targetFacts.length && facts.length);
 
   await waitIfPaused(task);
   updateTask(task, {
@@ -1142,7 +1177,8 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
     reviewedChapters,
     missingChapters: unrecalledChapters,
     userPrompt: settings.summary_prompt,
-    sourceStats
+    sourceStats,
+    targetContext
   };
   const finalPrepared = shouldSplitCustomFinalSummary(finalSchema)
     ? null
@@ -1427,6 +1463,12 @@ function shouldFallbackL2Recall(facts, entityQueries, usedL1Route = false) {
   if (usedL1Route) return false;
   if (!entityQueries.length) return false;
   return facts.length < 30 || new Set(facts.map((fact) => fact.chapter_index)).size < 8;
+}
+
+function shouldRetryL2RecallWithoutCategories({ initialFacts, categories, entityQueries }) {
+  if (!Array.isArray(categories) || !categories.length) return false;
+  if (!Array.isArray(entityQueries) || !entityQueries.length) return false;
+  return !Array.isArray(initialFacts) || !initialFacts.length;
 }
 
 function resolveAnalysisIndexGroups({ bookId, settings = {}, promptGroup = null }) {
@@ -1851,6 +1893,10 @@ async function runCustomFieldSummaryCalls({
   const primaryContentFieldCount = fieldNames
     .filter((fieldName) => isPotentialPrimaryContentField(fieldName, properties[fieldName]))
     .length;
+  const targetContext = sourceMaterial?.targetContext || buildTargetContext({
+    userPrompt,
+    schema: schema.schema
+  });
 
   for (const fieldName of fieldNames) {
     const deterministicValue = deterministicFinalFieldValue(fieldName, analysisContext, {
@@ -1892,13 +1938,14 @@ async function runCustomFieldSummaryCalls({
       reasoningEffort,
       analysisProvider,
       userPrompt,
-      sourceMaterial: scopedSourceMaterialForField({ sourceMaterial, fieldName, userPrompt }),
+      sourceMaterial: scopedSourceMaterialForField({ sourceMaterial, fieldName, fieldSchema: properties[fieldName], userPrompt, targetContext }),
       materialLabel,
       fieldName,
       fieldSchema: properties[fieldName],
       wrapperSchema: fieldSchema,
       sourceChapterCount,
-      primaryContentFieldCount
+      primaryContentFieldCount,
+      targetContext
     });
 
     finalValue[fieldName] = fieldResult.value;
@@ -1926,7 +1973,8 @@ async function runCustomFieldSummaryCalls({
       .map((part) => part.trace_summary), {
       partKey: "json.final.merge",
       stage: "json_final_merge",
-      fieldName: "final"
+      fieldName: "final",
+      targetSubject: targetContext.subject
     }),
     result: finalValue
   });
@@ -2036,6 +2084,56 @@ function normalizeAnalysisTargetCandidate(value) {
   return text.slice(0, 80);
 }
 
+function buildTargetContext({ userPrompt, schema, sourceMaterial } = {}) {
+  const template = extractLastJsonObjectTemplate(userPrompt);
+  const candidates = [
+    template?.target_item,
+    template?.target_subject,
+    template?.subject,
+    template?.topic,
+    sourceMaterial?.targetContext?.subject
+  ];
+  for (const candidate of candidates) {
+    const subject = normalizeTargetSubject(candidate);
+    if (subject) {
+      return {
+        subject,
+        aliases: [subject],
+        source: candidate === template?.target_item ? "template.target_item" : "prompt"
+      };
+    }
+  }
+  const schemaFields = schema?.properties ? Object.keys(schema.properties) : [];
+  return { subject: "", aliases: [], source: schemaFields.length ? "schema" : "" };
+}
+
+function normalizeTargetSubject(value) {
+  let text = normalizeAnalysisTargetCandidate(value);
+  if (!text) return "";
+  text = text
+    .replace(/设定集|资料集|分析|专题|topic|target/gi, "")
+    .replace(/^飞剑[·:：\s]*/, "")
+    .replace(/[（）()[\]【】]/g, " ")
+    .trim();
+  if (!text || isTemplatePlaceholderText(text) || isReservedTemplateToken(text)) return "";
+  if (text.length > 24 && /初一/.test(text)) return "初一";
+  return text.slice(0, 24);
+}
+
+function mergeEntityQueries(groups) {
+  const output = [];
+  const seen = new Set();
+  for (const group of groups || []) {
+    for (const value of group || []) {
+      const normalized = normalizeEntityCandidate(value);
+      if (!normalized || seen.has(normalized)) continue;
+      seen.add(normalized);
+      output.push(normalized);
+    }
+  }
+  return output.slice(0, 6);
+}
+
 function stripLastJsonObjectTemplate(value) {
   const text = String(value || "");
   const range = lastJsonObjectTemplateRange(text);
@@ -2092,14 +2190,16 @@ async function runJsonFieldSummaryParts({
   fieldSchema,
   wrapperSchema,
   sourceChapterCount,
-  primaryContentFieldCount = 0
+  primaryContentFieldCount = 0,
+  targetContext = null
 }) {
   const chunks = splitSourceMaterialForField({
     sourceMaterial,
     fieldName,
     fieldSchema,
     userPrompt,
-    materialLabel
+    materialLabel,
+    targetContext
   });
   const batchValues = [];
   const responseIds = [];
@@ -2115,7 +2215,9 @@ async function runJsonFieldSummaryParts({
       parentKey: chunks.length > 1 ? `json.${fieldName}.merge` : "",
       stage: "json_field_batch",
       fieldName,
-      material: chunk.material
+      material: chunk.material,
+      promptOverheadChars: promptOverheadLength({ userPrompt, fieldName, fieldSchema, materialLabel, targetContext }),
+      materialChars: JSON.stringify(chunk.material || {}).length
     });
     const requireNonEmpty = shouldRequireNonEmptyField({
       fieldName,
@@ -2156,7 +2258,8 @@ async function runJsonFieldSummaryParts({
         sourceMaterial: chunk.material,
         materialLabel,
         fieldName,
-        fieldSchema
+        fieldSchema,
+        targetContext
       });
       assertSummaryInputWithinBudget(input, `${fieldName} · ${chunk.label}`);
       const result = await callAnalysisJson({
@@ -2200,7 +2303,11 @@ async function runJsonFieldSummaryParts({
     analysisId,
     partKey: `json.${fieldName}.merge`,
     stage: "json_field_merge",
-    contentHash: summaryContentHash({ fieldName, batchValues: reusableBatchValues.length === chunks.length ? reusableBatchValues : batchValues }),
+    contentHash: summaryContentHash({
+      fieldName,
+      mergeStrategyVersion: FIELD_BATCH_MERGE_STRATEGY_VERSION,
+      batchValues: reusableBatchValues.length === chunks.length ? reusableBatchValues : batchValues
+    }),
     promptHash: shaString(userPrompt || ""),
     schemaHash: shaString(JSON.stringify(fieldSchema || {})),
     model,
@@ -2213,7 +2320,55 @@ async function runJsonFieldSummaryParts({
     };
   }
 
-  const mergedValue = mergeFieldBatchValues(batchValues, fieldSchema, { fieldName, userPrompt });
+  let mergedValue = mergeFieldBatchValues(batchValues, fieldSchema, { fieldName, userPrompt });
+  const mergeDiagnostics = {
+    fieldMergeMode: "recursive",
+    fieldMergeBatchCount: chunks.length,
+    fieldMergeModelUsed: false,
+    fieldMergeFallbackReason: "",
+    mergedValueChars: JSON.stringify(mergedValue || {}).length
+  };
+  if (shouldUseObjectFieldMergePolish({ fieldName, fieldSchema, targetContext, chunks })) {
+    mergeDiagnostics.fieldMergeMode = "model_polish";
+    const recursiveMergedValue = cloneJsonValue(mergedValue);
+    const mergeInput = buildCustomFieldMergeInput({
+      userPrompt,
+      fieldName,
+      fieldSchema,
+      targetContext,
+      batchValues,
+      mergedValue: recursiveMergedValue
+    });
+    if (inputTextLength(mergeInput) <= SUMMARY_PART_INPUT_MAX_CHARS) {
+      try {
+        const polishResult = await callAnalysisJson({
+          provider: analysisProvider,
+          target: "analysis_summary",
+          model: requestModel,
+          reasoningEffort,
+          instructions: "你是严谨的小说设定集分块合并器。只合并既有分块结果，不新增事实；不要用信息不足覆盖已有有效信息；只输出合法 JSON。",
+          input: mergeInput,
+          schema: wrapperSchema,
+          schemaName: safeSchemaName(`custom_field_merge_${fieldName}`),
+          maxOutputTokens: outputTokensForFieldSchema(fieldSchema),
+          strict: false
+        });
+        const polishValue = polishResult.value?.[fieldName];
+        if (isObjectMergePolishUseful(polishValue, recursiveMergedValue)) {
+          mergedValue = polishValue;
+          mergeDiagnostics.fieldMergeModelUsed = true;
+          if (polishResult.responseId) responseIds.push(polishResult.responseId);
+        } else {
+          mergeDiagnostics.fieldMergeFallbackReason = "model_merge_less_useful";
+        }
+      } catch (error) {
+        mergeDiagnostics.fieldMergeFallbackReason = `model_merge_failed:${sanitizeText(error.message).slice(0, 80)}`;
+      }
+    } else {
+      mergeDiagnostics.fieldMergeFallbackReason = "model_merge_input_over_budget";
+    }
+    mergeDiagnostics.mergedValueChars = JSON.stringify(mergedValue || {}).length;
+  }
   assertFieldValueUseful(fieldName, fieldSchema, mergedValue, sourceChapterCount, {
     requireNonEmpty: shouldRequireNonEmptyField({
       fieldName,
@@ -2229,7 +2384,7 @@ async function runJsonFieldSummaryParts({
     partKey: `json.${fieldName}.merge`,
     stage: "json_field_merge",
     status: "completed",
-    contentHash: summaryContentHash({ fieldName, batchValues }),
+    contentHash: summaryContentHash({ fieldName, mergeStrategyVersion: FIELD_BATCH_MERGE_STRATEGY_VERSION, batchValues }),
     promptHash: shaString(userPrompt || ""),
     schemaHash: shaString(JSON.stringify(fieldSchema || {})),
     model,
@@ -2240,11 +2395,15 @@ async function runJsonFieldSummaryParts({
       parentKey: `json.${fieldName}.merge`,
       stage: "json_field_batch",
       fieldName,
-      material: chunk.material
+      material: chunk.material,
+      promptOverheadChars: promptOverheadLength({ userPrompt, fieldName, fieldSchema, materialLabel, targetContext }),
+      materialChars: JSON.stringify(chunk.material || {}).length
     })), {
       partKey: `json.${fieldName}.merge`,
       stage: "json_field_merge",
-      fieldName
+      fieldName,
+      targetSubject: targetContext?.subject || "",
+      ...mergeDiagnostics
     }),
     result: { [fieldName]: mergedValue }
   });
@@ -2254,7 +2413,7 @@ async function runJsonFieldSummaryParts({
   };
 }
 
-function splitSourceMaterialForField({ sourceMaterial, fieldName, fieldSchema, userPrompt, materialLabel }) {
+function splitSourceMaterialForField({ sourceMaterial, fieldName, fieldSchema, userPrompt, materialLabel, targetContext = null }) {
   const base = sourceMaterial && typeof sourceMaterial === "object" ? sourceMaterial : {};
   const prepared = prepareEvidenceSourceMaterial({
     sourceMaterial: base,
@@ -2262,6 +2421,7 @@ function splitSourceMaterialForField({ sourceMaterial, fieldName, fieldSchema, u
     fieldSchema,
     userPrompt,
     materialLabel,
+    targetContext,
     budget: SUMMARY_PART_INPUT_MAX_CHARS
   });
   if (prepared.chunks.length <= 1) {
@@ -2385,9 +2545,116 @@ function mergeFieldBatchValues(values, fieldSchema, options = {}) {
     });
   }
   if (fieldSchema?.type === "object") {
-    return Object.assign({}, ...values.filter((value) => value && typeof value === "object" && !Array.isArray(value)));
+    return mergeObjectBatchValues(values, fieldSchema, options);
   }
   return values.find((value) => value !== undefined && value !== null && value !== "") ?? values[0] ?? "";
+}
+
+function mergeObjectBatchValues(values, fieldSchema, options = {}) {
+  const objects = (values || []).filter(isPlainObject);
+  let output = {};
+  for (const value of objects) {
+    output = mergeObjectValue(output, value, {
+      fieldSchema,
+      fieldKey: options.fieldName || "",
+      subjectKey: normalizeArrayItemKey(value.name || value.title || options.fieldName || "")
+    });
+  }
+  return output;
+}
+
+function mergeObjectValue(left, right, options = {}) {
+  if (isEmptyOrPlaceholderValue(right)) return cloneJsonValue(left);
+  if (isEmptyOrPlaceholderValue(left)) return cloneJsonValue(right);
+  if (Array.isArray(left) || Array.isArray(right)) {
+    const leftArray = Array.isArray(left) ? left : (isEmptyOrPlaceholderValue(left) ? [] : [left]);
+    const rightArray = Array.isArray(right) ? right : (isEmptyOrPlaceholderValue(right) ? [] : [right]);
+    return rightArray.length ? mergeJsonArrays(leftArray, rightArray) : cloneJsonValue(leftArray);
+  }
+  if (isPlainObject(left) && isPlainObject(right)) {
+    const output = cloneJsonValue(left);
+    const schemaProperties = options.fieldSchema?.properties || {};
+    for (const [key, value] of Object.entries(right)) {
+      if (isEmptyOrPlaceholderValue(value)) continue;
+      if (!Object.hasOwn(output, key) || isEmptyOrPlaceholderValue(output[key])) {
+        output[key] = cloneJsonValue(value);
+        continue;
+      }
+      output[key] = mergeObjectValue(output[key], value, {
+        fieldSchema: schemaProperties[key],
+        fieldKey: key,
+        subjectKey: options.subjectKey
+      });
+    }
+    return output;
+  }
+  if (typeof left === "string" || typeof right === "string") {
+    return mergeTextValue(left, right, {
+      fieldKey: options.fieldKey,
+      subjectKey: options.subjectKey
+    });
+  }
+  if (typeof left === "number" && typeof right === "number") return Math.max(left, right);
+  if (typeof left === "boolean" && typeof right === "boolean") return left || right;
+  return cloneJsonValue(left);
+}
+
+function isEmptyOrPlaceholderValue(value) {
+  if (value === undefined || value === null) return true;
+  if (typeof value === "string") return !value.trim() || isMergePlaceholderText(value) || isTemplatePlaceholderText(value);
+  if (Array.isArray(value)) return !value.length;
+  if (isPlainObject(value)) return Object.values(value).every(isEmptyOrPlaceholderValue);
+  return false;
+}
+
+function isMergePlaceholderText(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (!normalized) return true;
+  if (isPlaceholderText(normalized)) return true;
+  return /^(信息不足|不详|未知|未提及|未明确|无明确信息|证据不足|暂无信息)$/.test(normalized);
+}
+
+function scoreObjectValueUsefulness(value) {
+  if (isEmptyOrPlaceholderValue(value)) return 0;
+  if (typeof value === "string") return Math.min(String(value).trim().length, 200);
+  if (typeof value === "number" || typeof value === "boolean") return 8;
+  if (Array.isArray(value)) {
+    return value.reduce((sum, item) => sum + scoreObjectValueUsefulness(item), 0) + value.length * 4;
+  }
+  if (isPlainObject(value)) {
+    return Object.values(value).reduce((sum, item) => sum + scoreObjectValueUsefulness(item), 0)
+      + Object.keys(value).length * 3;
+  }
+  return 0;
+}
+
+function isObjectMergePolishUseful(candidate, fallback) {
+  if (!isPlainObject(candidate)) return false;
+  if (hasObjectPlaceholderRegression(candidate, fallback)) return false;
+  return scoreObjectValueUsefulness(candidate) >= scoreObjectValueUsefulness(fallback);
+}
+
+function hasObjectPlaceholderRegression(candidate, fallback) {
+  if (isEmptyOrPlaceholderValue(fallback)) return false;
+  if (isEmptyOrPlaceholderValue(candidate)) return true;
+  if (Array.isArray(candidate) || Array.isArray(fallback)) {
+    return Array.isArray(fallback) && fallback.length > 0 && (!Array.isArray(candidate) || candidate.length < fallback.length);
+  }
+  if (isPlainObject(candidate) && isPlainObject(fallback)) {
+    return Object.entries(fallback).some(([key, value]) => hasObjectPlaceholderRegression(candidate[key], value));
+  }
+  return false;
+}
+
+function shouldUseObjectFieldMergePolish({ fieldName, fieldSchema, targetContext, chunks }) {
+  return Boolean(
+    targetContext?.subject
+    && Array.isArray(chunks)
+    && chunks.length > 1
+    && fieldSchema?.type === "object"
+    && isLargeFieldSchema(fieldSchema)
+    && (isLargeFieldName(fieldName) || isPotentialPrimaryContentField(fieldName, fieldSchema))
+  );
 }
 
 function arrayItemSubjectKey(item) {
@@ -2799,7 +3066,7 @@ function stableStringify(value) {
   return JSON.stringify(value);
 }
 
-function scopedSourceMaterialForField({ sourceMaterial, fieldName, userPrompt }) {
+function scopedSourceMaterialForField({ sourceMaterial, fieldName, fieldSchema, userPrompt, targetContext = null }) {
   const material = sourceMaterial && typeof sourceMaterial === "object" ? sourceMaterial : {};
   const facts = Array.isArray(material.facts) ? material.facts : [];
   const reviewedChapters = Array.isArray(material.reviewedChapters) ? material.reviewedChapters : [];
@@ -2808,6 +3075,9 @@ function scopedSourceMaterialForField({ sourceMaterial, fieldName, userPrompt })
   const metadataOnly = isMetadataOnlyFieldName(fieldName);
   const categories = summaryFieldCategories(field);
   const entityQueries = field.includes("core") ? inferEntityQueriesFromPrompt(userPrompt || material.userPrompt || "", "") : [];
+  const target = targetContext?.subject || "";
+  const targetQueries = target ? [target] : [];
+  const shouldUseTargetDossier = Boolean(target && !metadataOnly && isLargeFieldSchema(fieldSchema));
   const riskOnly = /uncertain|uncertainties|conflict|风险|不确定/.test(field);
   let scopedFacts = metadataOnly
     ? []
@@ -2820,6 +3090,10 @@ function scopedSourceMaterialForField({ sourceMaterial, fieldName, userPrompt })
   if (entityQueries.length) {
     const matched = scopedFacts.filter((fact) => factMatchesAnyEntity(fact, entityQueries));
     if (matched.length) scopedFacts = matched;
+  }
+  if (shouldUseTargetDossier) {
+    const targetFacts = scopedFacts.filter((fact) => factMatchesAnyEntity(fact, targetQueries));
+    if (targetFacts.length) scopedFacts = targetFacts;
   }
   if (riskOnly) {
     scopedFacts = facts.filter((fact) => {
@@ -2842,12 +3116,14 @@ function scopedSourceMaterialForField({ sourceMaterial, fieldName, userPrompt })
     sourceStats: material.sourceStats,
     failedChapters: Array.isArray(material.failedChapters) ? material.failedChapters.slice(0, 120) : [],
     missingChapters: Array.isArray(material.missingChapters) ? material.missingChapters.slice(0, 120) : [],
+    targetContext: targetContext || material.targetContext || null,
     compressedResults: metadataOnly ? [] : compressedResults,
     reviewedChapters: metadataOnly ? [] : reviewedChapters.map((chapter) => ({
       chapter_index: chapter.chapter_index,
       title: chapter.title,
       facts: (chapter.facts || [])
         .filter((fact) => !categories.length || categories.includes(String(fact.category || "")))
+        .filter((fact) => !shouldUseTargetDossier || factMatchesAnyEntity(fact, targetQueries))
         .slice(0, 20)
         .map(compactFactForFinalSummary)
     })).filter((chapter) => chapter.facts.length),
@@ -2859,13 +3135,15 @@ function isMetadataOnlyFieldName(fieldName) {
   return /^(book_id|book_name|task|title|version|schema_version|metadata|language|locale|format|output_format|analysis_mode|mode|source|source_type|stage|phase|period|era|阶段|时期|时代)$/i.test(String(fieldName || ""));
 }
 
-function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema, userPrompt, materialLabel, budget }) {
+function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema, userPrompt, materialLabel, targetContext = null, budget }) {
   const base = sourceMaterial && typeof sourceMaterial === "object" ? sourceMaterial : {};
+  const resolvedTargetContext = targetContext || base.targetContext || buildTargetContext({ userPrompt, sourceMaterial: base });
   const packets = buildEvidencePacketsForField({
     sourceMaterial: base,
     fieldName,
     fieldSchema,
-    userPrompt
+    userPrompt,
+    targetContext: resolvedTargetContext
   });
   const rankedPackets = rankEvidencePackets({
     packets,
@@ -2873,13 +3151,14 @@ function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema,
     fieldSchema,
     userPrompt
   });
-  const baseMaterial = evidenceBaseMaterial({ sourceMaterial: base, fieldName, materialLabel });
+  const baseMaterial = evidenceBaseMaterial({ sourceMaterial: base, fieldName, materialLabel, targetContext: resolvedTargetContext });
   const fullMaterial = {
     ...baseMaterial,
     sourceStats: {
       ...(baseMaterial.sourceStats || {}),
       evidence_packet_count: rankedPackets.length
     },
+    target_evidence_count: rankedPackets.filter((packet) => packet.target_match).length,
     evidence_packets: rankedPackets
   };
   if (!rankedPackets.length && Array.isArray(base.compressedResults) && base.compressedResults.length) {
@@ -2895,6 +3174,7 @@ function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema,
       fieldName,
       fieldSchema,
       materialLabel,
+      targetContext: resolvedTargetContext,
       budget,
       preserveCoverage: true
     });
@@ -2910,6 +3190,7 @@ function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema,
       fieldName,
       fieldSchema,
       materialLabel,
+      targetContext: resolvedTargetContext,
       budget,
       preserveCoverage: true
     });
@@ -2926,7 +3207,8 @@ function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema,
     sourceMaterial: fullMaterial,
     materialLabel,
     fieldName,
-    fieldSchema
+    fieldSchema,
+    targetContext: resolvedTargetContext
   })) <= budget) {
     return {
       material: fullMaterial,
@@ -2941,6 +3223,7 @@ function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema,
     fieldName,
     fieldSchema,
     materialLabel,
+    targetContext: resolvedTargetContext,
     budget
   });
   return {
@@ -2949,7 +3232,7 @@ function prepareEvidenceSourceMaterial({ sourceMaterial, fieldName, fieldSchema,
   };
 }
 
-function sourceTraceFromMaterial({ partKey, parentKey = "", stage, fieldName, material }) {
+function sourceTraceFromMaterial({ partKey, parentKey = "", stage, fieldName, material, promptOverheadChars = 0, materialChars = 0 }) {
   const safeMaterial = material && typeof material === "object" ? material : {};
   const packets = Array.isArray(safeMaterial.evidence_packets) ? safeMaterial.evidence_packets : [];
   const compressedResults = Array.isArray(safeMaterial.compressedResults) ? safeMaterial.compressedResults : [];
@@ -2979,6 +3262,11 @@ function sourceTraceFromMaterial({ partKey, parentKey = "", stage, fieldName, ma
     fact_types: countValues(packets.map((packet) => packet.fact_type).filter(Boolean)),
     subjects,
     related_subjects: relatedSubjects,
+    target_subject: String(safeMaterial.target_subject || safeMaterial.targetContext?.subject || ""),
+    target_evidence_count: Number(safeMaterial.target_evidence_count || packets.filter((packet) => packet.target_match).length || 0),
+    field_material_mode: String(safeMaterial.split?.mode || "evidence_packets"),
+    prompt_overhead_chars: Number(promptOverheadChars || 0),
+    material_chars: Number(materialChars || JSON.stringify(safeMaterial).length || 0),
     compressed_results_count: compressedResults.length,
     trimmed_by_budget: Boolean(sourceStats.evidence_packets_trimmed_by_budget),
     omitted_by_budget: Number(sourceStats.evidence_packets_omitted_by_budget || 0)
@@ -2997,11 +3285,19 @@ function mergeSourceTraces(traces, overrides = {}) {
   let compressedResultsCount = 0;
   let omittedByBudget = 0;
   let trimmedByBudget = false;
+  let targetSubject = String(overrides.targetSubject || "");
+  let targetEvidenceCount = 0;
+  let promptOverheadChars = 0;
+  let materialChars = 0;
   for (const trace of normalized) {
     packetCount += Number(trace.evidence_packet_count || 0);
     compressedResultsCount += Number(trace.compressed_results_count || 0);
     omittedByBudget += Number(trace.omitted_by_budget || 0);
     trimmedByBudget = trimmedByBudget || Boolean(trace.trimmed_by_budget);
+    if (!targetSubject && trace.target_subject) targetSubject = String(trace.target_subject);
+    targetEvidenceCount += Number(trace.target_evidence_count || 0);
+    promptOverheadChars += Number(trace.prompt_overhead_chars || 0);
+    materialChars += Number(trace.material_chars || 0);
     mergeCountMap(sourceTypes, trace.source_types);
     mergeCountMap(categories, trace.categories);
     mergeCountMap(factTypes, trace.fact_types);
@@ -3034,9 +3330,19 @@ function mergeSourceTraces(traces, overrides = {}) {
     fact_types: Object.fromEntries(factTypes),
     subjects: uniqueCompact(subjects, 12),
     related_subjects: uniqueCompact(relatedSubjects, 8),
+    target_subject: targetSubject,
+    target_evidence_count: targetEvidenceCount,
+    field_material_mode: String(overrides.fieldMaterialMode || ""),
+    prompt_overhead_chars: promptOverheadChars,
+    material_chars: materialChars,
     compressed_results_count: compressedResultsCount,
     trimmed_by_budget: trimmedByBudget,
-    omitted_by_budget: omittedByBudget
+    omitted_by_budget: omittedByBudget,
+    field_merge_mode: String(overrides.fieldMergeMode || ""),
+    field_merge_batch_count: Number(overrides.fieldMergeBatchCount || normalized.length || 1),
+    field_merge_model_used: Boolean(overrides.fieldMergeModelUsed),
+    field_merge_fallback_reason: String(overrides.fieldMergeFallbackReason || ""),
+    merged_value_chars: Number(overrides.mergedValueChars || 0)
   };
 }
 
@@ -3071,22 +3377,26 @@ function compactChapterSample(chapters, limit = 16) {
   return [...values.slice(0, headCount), ...values.slice(-tailCount)];
 }
 
-function evidenceBaseMaterial({ sourceMaterial, fieldName, materialLabel }) {
+function evidenceBaseMaterial({ sourceMaterial, fieldName, materialLabel, targetContext = null }) {
   const base = sourceMaterial && typeof sourceMaterial === "object" ? sourceMaterial : {};
+  const targetSubject = targetContext?.subject || base.targetContext?.subject || "";
   return {
     sourceStats: base.sourceStats || {},
     failedChapters: Array.isArray(base.failedChapters) ? base.failedChapters.slice(0, 120) : [],
     missingChapters: Array.isArray(base.missingChapters) ? base.missingChapters.slice(0, 120) : [],
+    target_subject: targetSubject,
+    targetContext: targetContext || base.targetContext || null,
     split: {
       fieldName,
       materialLabel,
+      mode: targetSubject && isLargeFieldName(fieldName) ? "target_dossier" : "evidence_packets",
       batch: 1,
       total: 1
     }
   };
 }
 
-function splitEvidencePacketsIntoBudgetedChunks({ baseMaterial, packets, userPrompt, fieldName, fieldSchema, materialLabel, budget }) {
+function splitEvidencePacketsIntoBudgetedChunks({ baseMaterial, packets, userPrompt, fieldName, fieldSchema, materialLabel, targetContext = null, budget }) {
   if (!packets.length) {
     const emptyMaterial = { ...baseMaterial, evidence_packets: [] };
     return [ensureEvidenceInputWithinBudget({
@@ -3095,6 +3405,7 @@ function splitEvidencePacketsIntoBudgetedChunks({ baseMaterial, packets, userPro
       fieldName,
       fieldSchema,
       materialLabel,
+      targetContext,
       budget
     })];
   }
@@ -3110,6 +3421,7 @@ function splitEvidencePacketsIntoBudgetedChunks({ baseMaterial, packets, userPro
       fieldName,
       fieldSchema,
       materialLabel,
+      targetContext,
       budget,
       batch: chunks.length + 1,
       total: 1
@@ -3124,7 +3436,8 @@ function splitEvidencePacketsIntoBudgetedChunks({ baseMaterial, packets, userPro
       sourceMaterial: candidateMaterial,
       materialLabel,
       fieldName,
-      fieldSchema
+      fieldSchema,
+      targetContext
     })) > budget) {
       chunks.push(current);
       current = [packet];
@@ -3142,13 +3455,14 @@ function splitEvidencePacketsIntoBudgetedChunks({ baseMaterial, packets, userPro
     fieldName,
     fieldSchema,
     materialLabel,
+    targetContext,
     budget,
     batch: index + 1,
     total
   }));
 }
 
-function budgetEvidenceMaterial({ baseMaterial, packets, userPrompt, fieldName, fieldSchema, materialLabel, budget, batch, total }) {
+function budgetEvidenceMaterial({ baseMaterial, packets, userPrompt, fieldName, fieldSchema, materialLabel, targetContext = null, budget, batch, total }) {
   const material = {
     ...baseMaterial,
     split: {
@@ -3162,6 +3476,7 @@ function budgetEvidenceMaterial({ baseMaterial, packets, userPrompt, fieldName, 
       ...(baseMaterial.sourceStats || {}),
       evidence_packet_count: packets.length
     },
+    target_evidence_count: packets.filter((packet) => packet.target_match).length,
     evidence_packets: packets
   };
   return ensureEvidenceInputWithinBudget({
@@ -3170,11 +3485,12 @@ function budgetEvidenceMaterial({ baseMaterial, packets, userPrompt, fieldName, 
     fieldName,
     fieldSchema,
     materialLabel,
+    targetContext,
     budget
   });
 }
 
-function ensureEvidenceInputWithinBudget({ material, userPrompt, fieldName, fieldSchema, materialLabel, budget, preserveCoverage = false }) {
+function ensureEvidenceInputWithinBudget({ material, userPrompt, fieldName, fieldSchema, materialLabel, targetContext = null, budget, preserveCoverage = false }) {
   let output = material;
   let packets = Array.isArray(output.evidence_packets) ? output.evidence_packets : [];
   if (preserveCoverage && inputTextLength(buildCustomFieldSummaryInput({
@@ -3182,7 +3498,8 @@ function ensureEvidenceInputWithinBudget({ material, userPrompt, fieldName, fiel
     sourceMaterial: output,
     materialLabel,
     fieldName,
-    fieldSchema
+    fieldSchema,
+    targetContext
   })) > budget) {
     const passOnePackets = packets.map((packet) => compactEvidencePacketForBudget(packet, {
       contentChars: 48,
@@ -3207,7 +3524,8 @@ function ensureEvidenceInputWithinBudget({ material, userPrompt, fieldName, fiel
     sourceMaterial: output,
     materialLabel,
     fieldName,
-    fieldSchema
+    fieldSchema,
+    targetContext
   })) > budget) {
     const passTwoPackets = packets.map((packet) => compactEvidencePacketForBudget(packet, {
       contentChars: 16,
@@ -3232,7 +3550,8 @@ function ensureEvidenceInputWithinBudget({ material, userPrompt, fieldName, fiel
     sourceMaterial: output,
     materialLabel,
     fieldName,
-    fieldSchema
+    fieldSchema,
+    targetContext
   })) > budget) {
     packets = packets.slice(0, -1);
     output = {
@@ -3250,7 +3569,8 @@ function ensureEvidenceInputWithinBudget({ material, userPrompt, fieldName, fiel
     sourceMaterial: output,
     materialLabel,
     fieldName,
-    fieldSchema
+    fieldSchema,
+    targetContext
   })) <= budget) {
     return output;
   }
@@ -3274,7 +3594,8 @@ function ensureEvidenceInputWithinBudget({ material, userPrompt, fieldName, fiel
     sourceMaterial: output,
     materialLabel,
     fieldName,
-    fieldSchema
+    fieldSchema,
+    targetContext
   })) > budget) {
     trimmedPackets.pop();
     output = {
@@ -3313,8 +3634,9 @@ function compactEvidencePacketForBudget(packet, { contentChars, evidenceItems, e
   return compacted;
 }
 
-function buildEvidencePacketsForField({ sourceMaterial, fieldName, fieldSchema, userPrompt }) {
+function buildEvidencePacketsForField({ sourceMaterial, fieldName, fieldSchema, userPrompt, targetContext = null }) {
   const material = sourceMaterial && typeof sourceMaterial === "object" ? sourceMaterial : {};
+  const target = targetContext?.subject || material.targetContext?.subject || "";
   const packets = [];
   for (const fact of Array.isArray(material.facts) ? material.facts : []) {
     const packet = factToEvidencePacket(fact);
@@ -3328,10 +3650,17 @@ function buildEvidencePacketsForField({ sourceMaterial, fieldName, fieldSchema, 
     if (packet) packets.push(packet);
   }
   return dedupeEvidencePackets(packets)
-    .map((packet) => ({
-      ...packet,
-      relevance: evidenceRelevanceScore({ packet, fieldName, fieldSchema, userPrompt })
-    }));
+    .map((packet) => {
+      const targetMatch = Boolean(target && evidencePacketMatchesTarget(packet, target));
+      const enrichedPacket = targetMatch && !packet.subject
+        ? { ...packet, subject: target }
+        : packet;
+      return {
+        ...enrichedPacket,
+        target_match: targetMatch,
+        relevance: evidenceRelevanceScore({ packet: enrichedPacket, fieldName, fieldSchema, userPrompt })
+      };
+    });
 }
 
 function materialHasEvidence(sourceMaterial) {
@@ -3415,7 +3744,8 @@ function rankEvidencePackets({ packets, fieldName, fieldSchema, userPrompt }) {
   return [...packets].sort((left, right) => {
     const leftScore = evidenceRelevanceScore({ packet: left, fieldName, fieldSchema, userPrompt });
     const rightScore = evidenceRelevanceScore({ packet: right, fieldName, fieldSchema, userPrompt });
-    return rightScore - leftScore
+    return Number(Boolean(right.target_match)) - Number(Boolean(left.target_match))
+      || rightScore - leftScore
       || Number(left.chapter_index || 0) - Number(right.chapter_index || 0);
   });
 }
@@ -3482,6 +3812,16 @@ const RELEVANCE_STOPWORDS = new Set([
 function numberOrNull(value) {
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function evidencePacketMatchesTarget(packet, target) {
+  const normalizedTarget = normalizeRouteToken(target);
+  if (!normalizedTarget) return false;
+  return evidencePacketSearchText(packet).includes(normalizedTarget);
+}
+
+function isLargeFieldName(fieldName) {
+  return /sword|item|weapon|character|profile|setting|设定|飞剑|物品|角色|人物/i.test(String(fieldName || ""));
 }
 
 function summaryFieldCategories(field) {
@@ -3557,7 +3897,57 @@ function buildEvidenceSummaryInput({ userPrompt, sourceMaterial, materialLabel, 
   ];
 }
 
-function buildCustomFieldSummaryInput({ userPrompt, sourceMaterial, materialLabel, fieldName, fieldSchema }) {
+function compactSummaryPromptForField(userPrompt, fieldName, target) {
+  const text = stripLastJsonObjectTemplate(userPrompt);
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => {
+      if (target && line.includes(target)) return true;
+      if (line.includes(fieldName)) return true;
+      return /依据|原文|证据|不确定|不要|JSON|输出|消费|设定集|字段|目标|范围/.test(line);
+    })
+    .slice(0, 18);
+  const summary = lines.join("\n");
+  return clipText(summary || text, 2400);
+}
+
+function summarizeFieldSchemaForPrompt(schema, fieldName) {
+  const shape = summarizeSchemaShape(schema, 0);
+  return clipText(JSON.stringify({ field: fieldName, shape }), 3200);
+}
+
+function summarizeSchemaShape(schema, depth) {
+  if (!schema || depth > 2) return schema?.type || "value";
+  if (schema.anyOf) return { anyOf: schema.anyOf.map((entry) => summarizeSchemaShape(entry, depth + 1)).slice(0, 4) };
+  if (schema.type === "array") return { type: "array", items: summarizeSchemaShape(schema.items, depth + 1) };
+  if (schema.type === "object") {
+    const properties = schema.properties || {};
+    return {
+      type: "object",
+      fields: Object.fromEntries(Object.entries(properties)
+        .slice(0, 24)
+        .map(([key, value]) => [key, summarizeSchemaShape(value, depth + 1)]))
+    };
+  }
+  return schema.type || "value";
+}
+
+function promptOverheadLength({ userPrompt, fieldName, fieldSchema, materialLabel, targetContext }) {
+  const input = buildCustomFieldSummaryInput({
+    userPrompt,
+    sourceMaterial: {},
+    materialLabel,
+    fieldName,
+    fieldSchema,
+    targetContext
+  });
+  return inputTextLength(input);
+}
+
+function buildCustomFieldSummaryInput({ userPrompt, sourceMaterial, materialLabel, fieldName, fieldSchema, targetContext = null }) {
+  const target = targetContext?.subject || sourceMaterial?.target_subject || sourceMaterial?.targetContext?.subject || "";
   return [
     {
       role: "user",
@@ -3565,11 +3955,12 @@ function buildCustomFieldSummaryInput({ userPrompt, sourceMaterial, materialLabe
         {
           type: "input_text",
           text: [
-            userPrompt,
-            "",
+            "用户任务约束摘要：",
+            compactSummaryPromptForField(userPrompt, fieldName, target),
             `以下是${materialLabel || "汇总素材"}的标准证据包 JSON。请基于这些证据包进行最终汇总。`,
             "注意：证据包已经包含来源类型、章节、主体、事实、证据摘记、重要度和置信度；不要要求重新读取原文。",
             "取舍：优先使用高相关、高重要度、高置信度证据；证据不足时保持不确定，不要补写不存在的信息。",
+            target ? `目标主体：${target}` : "目标主体：未识别",
             "",
             `当前只生成最终 JSON 的一个顶层字段：${fieldName}`,
             "输出要求：",
@@ -3578,8 +3969,8 @@ function buildCustomFieldSummaryInput({ userPrompt, sourceMaterial, materialLabe
             "- 如果该字段确实没有可用信息，输出符合字段类型的空值；不要输出 N/A、暂无、占位说明。",
             "- 不要输出 Markdown，不要输出其他顶层字段。",
             "",
-            "当前字段 Schema JSON：",
-            JSON.stringify(fieldSchema || looseJsonValueSchema()),
+            "当前字段 Schema 摘要：",
+            summarizeFieldSchemaForPrompt(fieldSchema || looseJsonValueSchema(), fieldName),
             "",
             "证据包素材 JSON：",
             JSON.stringify(sourceMaterial || {})
@@ -3588,6 +3979,93 @@ function buildCustomFieldSummaryInput({ userPrompt, sourceMaterial, materialLabe
       ]
     }
   ];
+}
+
+function buildCustomFieldMergeInput({ userPrompt, fieldName, fieldSchema, targetContext = null, batchValues, mergedValue }) {
+  const target = targetContext?.subject || "";
+  const attempts = [
+    { stringLimit: 900, arrayLimit: 12 },
+    { stringLimit: 500, arrayLimit: 10 },
+    { stringLimit: 260, arrayLimit: 8 },
+    { stringLimit: 140, arrayLimit: 6 }
+  ];
+  let lastInput = null;
+  for (const attempt of attempts) {
+    const input = buildCustomFieldMergeInputWithLimits({
+      userPrompt,
+      fieldName,
+      fieldSchema,
+      target,
+      batchValues,
+      mergedValue,
+      ...attempt
+    });
+    lastInput = input;
+    if (inputTextLength(input) <= SUMMARY_PART_INPUT_MAX_CHARS) return input;
+  }
+  return lastInput;
+}
+
+function buildCustomFieldMergeInputWithLimits({
+  userPrompt,
+  fieldName,
+  fieldSchema,
+  target,
+  batchValues,
+  mergedValue,
+  stringLimit,
+  arrayLimit
+}) {
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            "用户任务约束摘要：",
+            compactSummaryPromptForField(userPrompt, fieldName, target),
+            "",
+            `当前任务：合并最终 JSON 顶层字段 ${fieldName} 的多个分块结果。`,
+            target ? `目标主体：${target}` : "目标主体：未识别",
+            "合并要求：",
+            "- 只能使用分块结果和递归合并候选中的信息，不要新增事实。",
+            "- 保留不同分块中的互补字段和证据引用。",
+            "- 不要用“信息不足”“不详”“未知”覆盖已有有效事实。",
+            "- 如果模型综合会变薄，以递归合并候选为准。",
+            "- 只输出一个 JSON 对象，且只包含当前字段。",
+            "",
+            "当前字段 Schema 摘要：",
+            summarizeFieldSchemaForPrompt(fieldSchema || looseJsonValueSchema(), fieldName),
+            "",
+            "递归合并候选 JSON：",
+            JSON.stringify({ [fieldName]: compactValueForMergePrompt(mergedValue, { stringLimit, arrayLimit }) }),
+            "",
+            "分块结果 JSON：",
+            JSON.stringify((batchValues || []).map((value, index) => ({
+              batch: index + 1,
+              value: compactValueForMergePrompt(value, { stringLimit, arrayLimit })
+            })))
+          ].join("\n")
+        }
+      ]
+    }
+  ];
+}
+
+function compactValueForMergePrompt(value, { stringLimit, arrayLimit }) {
+  if (typeof value === "string") return clipText(value, stringLimit);
+  if (Array.isArray(value)) {
+    return value.slice(0, arrayLimit).map((item) => compactValueForMergePrompt(item, { stringLimit, arrayLimit }));
+  }
+  if (isPlainObject(value)) {
+    const output = {};
+    for (const [key, entry] of Object.entries(value)) {
+      output[key] = compactValueForMergePrompt(entry, { stringLimit, arrayLimit });
+    }
+    return output;
+  }
+  return value;
 }
 
 function safeSchemaName(value) {
@@ -4410,7 +4888,8 @@ function sourceTraceFromSummaryParts(parts = []) {
   return parts
     .map((part) => {
       const trace = part.trace_summary || {};
-      if (!trace || typeof trace !== "object" || !Number(trace.evidence_packet_count || 0)) return null;
+      if (!trace || typeof trace !== "object") return null;
+      if (!Number(trace.evidence_packet_count || 0) && !trace.target_subject && !trace.field_material_mode) return null;
       return {
         part_key: part.part_key,
         parent_key: part.parent_key || "",
@@ -4426,8 +4905,18 @@ function sourceTraceFromSummaryParts(parts = []) {
         fact_types: trace.fact_types || {},
         subjects: Array.isArray(trace.subjects) ? trace.subjects : [],
         related_subjects: Array.isArray(trace.related_subjects) ? trace.related_subjects : [],
+        target_subject: String(trace.target_subject || ""),
+        target_evidence_count: Number(trace.target_evidence_count || 0),
+        field_material_mode: String(trace.field_material_mode || ""),
+        prompt_overhead_chars: Number(trace.prompt_overhead_chars || 0),
+        material_chars: Number(trace.material_chars || 0),
         trimmed_by_budget: Boolean(trace.trimmed_by_budget),
-        omitted_by_budget: Number(trace.omitted_by_budget || 0)
+        omitted_by_budget: Number(trace.omitted_by_budget || 0),
+        field_merge_mode: String(trace.field_merge_mode || ""),
+        field_merge_batch_count: Number(trace.field_merge_batch_count || 0),
+        field_merge_model_used: Boolean(trace.field_merge_model_used),
+        field_merge_fallback_reason: String(trace.field_merge_fallback_reason || ""),
+        merged_value_chars: Number(trace.merged_value_chars || 0)
       };
     })
     .filter(Boolean);
@@ -4438,6 +4927,8 @@ function sourceTraceSummary(traces = []) {
   const categories = new Map();
   const chapters = new Set();
   const subjects = [];
+  let targetSubject = "";
+  let targetEvidenceCount = 0;
   const preferred = traces.some((trace) => trace.stage === "json_field_batch")
     ? traces.filter((trace) => trace.stage === "json_field_batch")
     : traces.filter((trace) => trace.part_key !== "json.final.merge" || traces.length === 1);
@@ -4445,6 +4936,8 @@ function sourceTraceSummary(traces = []) {
     mergeCountMap(sourceTypes, trace.source_types);
     mergeCountMap(categories, trace.categories);
     subjects.push(...(trace.subjects || []));
+    if (!targetSubject && trace.target_subject) targetSubject = trace.target_subject;
+    targetEvidenceCount += Number(trace.target_evidence_count || 0);
     for (const chapterIndex of trace.chapters?.sample || []) {
       const number = Number(chapterIndex || 0);
       if (Number.isFinite(number) && number > 0) chapters.add(number);
@@ -4465,6 +4958,8 @@ function sourceTraceSummary(traces = []) {
       sample: compactChapterSample(chapterList)
     },
     subjects: uniqueCompact(subjects, 12),
+    target_subject: targetSubject,
+    target_evidence_count: targetEvidenceCount,
     trimmed_by_budget: preferred.some((trace) => trace.trimmed_by_budget),
     omitted_by_budget: preferred.reduce((sum, trace) => sum + Number(trace.omitted_by_budget || 0), 0)
   };
