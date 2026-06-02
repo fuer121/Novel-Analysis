@@ -107,6 +107,10 @@ export function AnalysisPage({
     () => selectedPromptGroup(bookPromptGroups, selectedPromptGroupId),
     [bookPromptGroups, selectedPromptGroupId]
   );
+  const analysisProvider = config.analysisProvider || "dify";
+  const analysisProviderReady = analysisProvider === "dify"
+    ? Boolean(config.difyAnalysisChapterConfigured && config.difyAnalysisSummaryConfigured)
+    : Boolean(config.openaiConfigured && config.retentionConfirmed);
   const hasBoundIndexGroups = (selectedPromptGroupEntry?.index_group_keys || []).length > 0;
 
   const chaptersInRange = useMemo(
@@ -216,6 +220,12 @@ export function AnalysisPage({
     }
     if (!hasBoundIndexGroups) {
       setError("分析模板必须绑定至少一个事实索引，请先到模板管理中选择并保存。");
+      return;
+    }
+    if (!analysisProviderReady) {
+      setError(analysisProvider === "dify"
+        ? "分析执行器未就绪：请配置 DIFY_ANALYSIS_CHAPTER_WORKFLOW_API_KEY 与 DIFY_ANALYSIS_SUMMARY_WORKFLOW_API_KEY。"
+        : "分析执行器未就绪：请配置 OPENAI_API_KEY 并确认 OPENAI_RETENTION_MODE。");
       return;
     }
 
@@ -422,7 +432,7 @@ export function AnalysisPage({
               className="primary inline command-primary"
               type="button"
               onClick={startAnalysis}
-              disabled={analysisBusy || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId || !hasBoundIndexGroups}
+              disabled={analysisBusy || !analysisProviderReady || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId || !hasBoundIndexGroups}
             >
               {analysisBusy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
               {analysisBusy ? "分析中" : "开始分析"}

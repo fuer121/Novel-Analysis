@@ -1,227 +1,199 @@
 # 小说章节安全分析台：项目基线
 
-最后更新：2026-05-27，Asia/Shanghai
+最后更新：2026-06-02，Asia/Shanghai
 
-本文档是当前项目的唯一真实信息源。后续线程、后续迭代，只要涉及项目目标、架构、安全边界、运行配置、关键决策、路线图或运维方式变化，都必须同步更新本文档。
+本文档是当前项目的唯一真实信息源。后续只要涉及项目目标、架构、安全边界、运行配置、接口面、关键决策或工作区边界变化，都必须同步更新本文档。
 
 ## 1. 项目身份
 
 - 产品名称：Novel Chapter GPT Service / 小说章节安全分析台
-- 本地路径：`/Users/staff/Desktop/Vibe coding/novel-chapter-gpt-service`
-- Git 远程仓库：`git@github.com:fuer121/Dify-Flow.git`
+- 正式工作区：`/Users/staff/Desktop/Vibe coding/novel-chapter-gpt-service`
+- 远程仓库：`git@github.com:fuer121/Dify-Flow.git`
 - 默认分支：`main`
-- 当前项目基线提交：以 `git log -1 --oneline -- docs/PROJECT_CONTROL_BASELINE.md` 为准
-- GitHub CLI：已安装在 `~/.local/bin/gh`，当前登录用户为 `fuer121`
+- 当前工作分支：以 `git branch --show-current` 实时结果为准
+- 当前基线提交：以 `git log -1 --oneline` 实时结果为准
 
-## 2. 项目目标
+## 2. 工作区边界
 
-建设一个本地运行、可在局域网访问的小说长文本分析服务：
+- 唯一正式开发与运行目录是当前工作区。
+- 历史重复工作区 `Dify 工作流模板创建` 不再作为开发、运行或提测目录使用。
+- 旧工作区只允许作为一次性内容回收来源，不能继续承载新的代码或文档真相。
+- 索引存储设计的专题说明统一维护在 `docs/L1_L2_INDEX_STORAGE.md`。
 
-- 通过自托管 Dify 的最小工作流，一次性导入小说章节。
-- 章节正文导入后本地加密保存。
-- 后续不同 Prompt、不同分析任务复用本地章节库，不重复调用 Dify。
-- 前端不展示、不保存整章正文。
-- 日志、Git、普通文件、浏览器存储中不出现章节正文。
-- 逐步通过可复用索引和更安全的重试机制，提高长篇小说分析效率。
+## 3. 产品目标
 
-当前产品定位是本地/内网自用工具，不是公网 SaaS 服务。
+本项目是一个本地运行、可在可信局域网访问的小说章节分析服务，目标如下：
 
-## 3. 当前运行快照
+- 通过自托管 Dify 工作流批量获取小说章节原文，章节只导入一次。
+- 章节正文导入后立即加密落本地 SQLite，不在前端明文展示。
+- 后续不同 Prompt、不同分析任务复用本地章节库，不重复回源拉取正文。
+- 用可复用的 L1/L2 索引缩短长篇小说分析路径。
+- 把版权原文、Prompt 和分析结果尽量限制在本地受控边界内。
 
-截至 2026-05-27 20:12：
+当前产品定位是本地/内网自用工具，不是公网 SaaS。
 
-- 服务进程：Node.js，监听 `*:5184`
-- 本机地址：`http://127.0.0.1:5184/`
-- 当前局域网地址：`http://172.16.77.225:5184/`
-- 当前 Git 分支：`codex/suoyin-redesign`
-- 当前分支基线：`a22d3a4 Merge pull request #10 from fuer121/codex/UI-upgrade`
-- 当前工作区有未提交改动，主要是 L2 索引组、L1 章节路由、Prompt 引导、前端三页和测试。
-- 局域网 IP 可能随 DHCP 变化，重新确认命令：
+## 4. 当前技术基线
+
+### 4.1 运行栈
+
+- Node.js ESM 服务端
+- Express 5
+- React 19 + Vite 8
+- SQLite 本地存储
+- 自托管 Dify Workflow 作为章节导入、L1、L2 和分析的可选执行器
+- OpenAI Responses API 作为 L1/L2/分析的可选执行器
+
+### 4.2 目录责任
+
+- `src/`：前端应用
+- `server/`：服务端接口、任务编排、SQLite、加密与外部调用
+- `test/`：Node 原生测试
+- `dify-workflows/`：需要导入自托管 Dify 的工作流定义
+- `docs/`：项目控制与专题设计文档
+- `data/`：正式环境 SQLite 数据目录
+- `data-preview/`：本机预览环境的数据快照目录
+- `dist/`：正式前端构建产物
+- `dist-preview/`：预览前端构建产物
+
+## 5. 运行配置基线
+
+### 5.1 默认端口与目录
+
+由 `server/config.js` 定义：
+
+- `HOST` 默认 `0.0.0.0`
+- `PORT` 默认 `5174`
+- `DATA_DIR` 默认 `./data`
+- `STATIC_DIR` 默认 `./dist`
+- `APP_ENV` 默认 `production`
+
+### 5.2 必要环境变量
+
+章节导入与 Dify 路径：
+
+- `DIFY_API_BASE`
+- `DIFY_CHAPTER_WORKFLOW_API_KEY`
+- `DIFY_L1_WORKFLOW_API_KEY`
+- `DIFY_L2_WORKFLOW_API_KEY`
+- `DIFY_ANALYSIS_CHAPTER_WORKFLOW_API_KEY`
+- `DIFY_ANALYSIS_SUMMARY_WORKFLOW_API_KEY`
+- `DIFY_L1_WORKFLOW_VERSION`
+- `DIFY_L2_WORKFLOW_VERSION`
+- `DIFY_ANALYSIS_CHAPTER_WORKFLOW_VERSION`
+- `DIFY_ANALYSIS_SUMMARY_WORKFLOW_VERSION`
+- `IMPORT_BATCH_SIZE`
+
+执行器开关：
+
+- `L1_INDEX_PROVIDER`，允许 `dify` 或 `openai`
+- `L2_INDEX_PROVIDER`，允许 `dify` 或 `openai`
+- `ANALYSIS_PROVIDER`，允许 `dify` 或 `openai`
+
+OpenAI 路径：
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `OPENAI_RETENTION_MODE`
+- `OPENAI_API_BASE`
+- `OPENAI_PROXY_URL`
+- `OPENAI_CHAPTER_CONCURRENCY`
+- `OPENAI_REQUEST_TIMEOUT_MS`
+- `OPENAI_MAX_RETRIES`
+
+密钥存储：
+
+- `KEYCHAIN_SERVICE` 默认 `novel-chapter-gpt-service`
+- `KEYCHAIN_ACCOUNT` 默认 `master-key`
+
+### 5.3 环境变量样例源
+
+以 `.env.example` 为准。任何新增配置必须先同步更新 `.env.example`。
+
+## 6. 启动与发布基线
+
+### 6.1 本地开发
 
 ```bash
-ifconfig | rg -n "inet (10|172\\.(1[6-9]|2[0-9]|3[0-1])|192\\.168)\\."
+npm install
+npm run dev
 ```
 
-当前非敏感运行配置：
+行为：
 
-- `HOST=0.0.0.0`
-- `PORT=5184`
-- `DIFY_API_BASE=https://dify.qmniu.com/v1`
-- `L1_INDEX_PROVIDER=dify|openai`（默认 `dify`）
-- `L2_INDEX_PROVIDER=dify|openai`（默认 `dify`）
-- `DIFY_L1_WORKFLOW_VERSION=v1`（人工递增触发 L1 过期重建）
-- `DIFY_L2_WORKFLOW_VERSION=v1`（人工递增触发 L2 过期重建）
-- `OPENAI_API_BASE=https://apitokenzz.xyz/v1`
-- `OPENAI_MODEL=gpt-5.5`
-- `OPENAI_RETENTION_MODE=zdr`
-- `OPENAI_REQUEST_TIMEOUT_MS=600000`
-- `IMPORT_BATCH_SIZE=10`
-- `OPENAI_CHAPTER_CONCURRENCY=1`
-- `OPENAI_PROXY_URL=` 当前为空，OpenAI 兼容调用不走本机代理。
-  - 影响：后端直接访问 `OPENAI_API_BASE`，不改变模型、Prompt、L1/L2、数据库或分析逻辑。
-  - 风险：如果直连网关不稳定，长任务仍可能失败；只有确认本机代理/VPN 稳定时才临时填入代理地址。
+- 前端 Vite 开发服务默认监听 `http://127.0.0.1:5173`
+- 后端 API 默认监听 `http://127.0.0.1:5174`
+- `npm run dev` 会并行启动前后端
 
-本机预览环境：
+### 6.2 正式局域网服务
 
-- 用途：在不提交、不重启线上 `5184` 服务的情况下，查看和验证新版效果。
-- 地址：`http://127.0.0.1:5194/`
-- 绑定：`HOST=127.0.0.1`，只允许本机访问，不开放局域网。
-- 端口：`PORT=5194`
-- 环境标识：`APP_ENV=preview`，`APP_LABEL=本机预览`
-- 数据目录：`DATA_DIR=./data-preview`
-- 静态资源目录：`STATIC_DIR=./dist-preview`
-- 数据来源：通过 `scripts/prepare-preview-data.js` 使用 SQLite 安全备份方式从 `data/novel-chapters.sqlite` 生成一次性快照。
-- 数据边界：预览环境里的导入、L1、分析任务只写入 `data-preview/`，不会写入正式 `data/`。
-- 密钥边界：预览环境复用同一个 macOS Keychain 主密钥，因此可以解密从正式数据复制出来的章节和分析结果。
-- 同步规则：`data-preview/` 是快照，不会自动同步线上新增数据；需要刷新时手动重新运行 `npm run preview:prepare-data`。
-- 覆盖提醒：刷新 `data-preview/` 会丢弃预览环境里临时产生的任务和结果。
+```bash
+npm run build
+npm run start:lan
+```
 
-当前内存任务快照：
+行为：
 
-- `GET /api/tasks` 当前返回 4 个分析任务，`live=0`，其中 2 个完成、2 个失败。
-- 最新完成任务：`飞剑-初一`，`剑来`，章节 `1-500`，`fast_index`，最终汇总分块 `41/41` 完成。
-- 失败任务主要来自占位字段质量闸门：`分字段汇总字段 章节 是占位内容。`、`分字段汇总字段 name 是占位内容。`
+- 后端监听 `0.0.0.0:5174`
+- 同时托管 API 和构建后的前端页面
+- 仅允许在可信局域网或 VPN 中使用，不允许暴露到公网
 
-当前部署验证：
+### 6.3 本机预览环境
 
-- 当前正式服务运行版本：`codex/suoyin-redesign` 工作区未提交版本，已包含 L2 索引组和 L1 章节路由改造。
-- `http://127.0.0.1:5184/api/health` 正常。
-- `http://172.16.77.225:5184/api/health` 正常。
-- `http://127.0.0.1:5184/api/diagnostics` 正常。
-- `http://127.0.0.1:5184/api/openai/test` 正常，返回 `200`。
-- `http://127.0.0.1:5184/api/dify/test` 正常，返回 `200`，工作流变量为 `book_id`、`start_chapter`、`end_chapter`。
+```bash
+npm run preview:local
+```
 
-重要安全说明：
+行为：
 
-- `https://apitokenzz.xyz/v1` 是 OpenAI 兼容网关，不是已确认的官方 OpenAI ZDR/MAM 项目地址。大规模发送真实版权章节前，必须确认该网关的数据保留、转发链路、合规和安全承诺。
+- 预览服务绑定 `127.0.0.1:5194`
+- 使用 `data-preview/` 和 `dist-preview/`
+- `data-preview/` 由 `scripts/prepare-preview-data.js` 从正式库复制快照
+- 预览环境写入不会影响正式 `data/`
+- 预览环境复用同一主密钥，因此能解密从正式库复制过来的密文
 
-## 4. 当前数据快照
+### 6.4 预览数据刷新
 
-SQLite 数据目录：`data/`
+```bash
+npm run preview:prepare-data
+```
 
-当前已导入书籍：
+强制覆盖：
 
-- `215243` / `第一瞳术师`：已导入 1903 章，范围 `1-1903`，导入状态 `completed`
-- `1721648` / `废材那又怎样`：已导入 755 章，范围 `1-755`，导入状态 `completed`
-- `143170` / `剑来`：已导入 1279 章，范围 `1-1279`，导入状态 `completed`
+```bash
+npm run preview:prepare-data -- --force
+```
 
-当前 L1 章节路由/信号索引状态：
+## 7. 当前页面基线
 
-- 全局：2342 条 L1 记录，`completed 1844`，`failed 498`
-- `215243` / `第一瞳术师`：`completed 985`，`failed 15`
-- `1721648` / `废材那又怎样`：`completed 63`
-- `143170` / `剑来`：`completed 796`，`failed 483`
-
-当前 L2 类型化事实索引状态：
-
-- 全局：1000 条 L2 章节状态，`completed 974`，`failed 26`，19385 条 L2 事实
-- `215243` / `第一瞳术师`：`completed 596`，`failed 4`，2 个索引组，13260 条 L2 事实
-- `1721648` / `废材那又怎样`：1 个索引组，0 条 L2 事实
-- `143170` / `剑来`：`completed 378`，`failed 22`，1 个索引组，6125 条 L2 事实
-
-当前分析任务历史状态：
-
-- `completed`：21 个
-- `failed`：4 个
-
-当前书籍级分析 Prompt 库：
-
-- 共 11 条分析 Prompt
-- `143170` / `剑来`：8 条
-- `215243` / `第一瞳术师`：2 条
-- `1721648` / `废材那又怎样`：0 条
-- 分析 Prompt 会按 `prompt_groups.book_id` 归属到具体书籍；无法匹配书名或书籍 ID 的历史 Prompt 会保留为 `book_id=''`，不在按书籍筛选的创建任务流程中展示，后续需要手动迁移。
-
-历史窗口索引数据：
-
-- `l1_window_indexes` 当前保留 128 条早期 10 章窗口索引实验数据。
-- 这些窗口数据只作为历史数据保留，不再参与新构建，也不能自动删除。
-
-## 5. 架构概览
-
-前端：
-
-- React + Vite
-- `src/App.jsx`：应用壳、轻量路由、全局任务状态
-- `src/pages/AnalysisPage.jsx`：分析任务中心
-- `src/pages/LibraryPage.jsx`：书籍导入、章节元数据、L1 索引控制
-- `src/pages/PromptLibraryPage.jsx`：统一 Prompt 管理台
-- `src/ui.jsx`：通用 UI 组件
-- `src/schemaTools.js`：Schema 和结果展示辅助逻辑
-
-后端：
-
-- Express on Node.js
-- `server/index.js`：HTTP 接口
-- `server/workflows.js`：导入、L1、分析任务编排
-- `server/tasks.js`：内存任务生命周期、SSE、暂停/继续/取消、时间估算
-- `server/db.js`：SQLite 表结构、加密落库、元数据接口
-- `server/openai.js`：OpenAI 兼容 Responses API 调用
-- `server/dify.js`：Dify 工作流 API 调用和返回解析
-- `server/crypto.js`：AES-GCM、HMAC、macOS Keychain 主密钥
-
-存储：
-
-- SQLite 位于 `data/`
-- 章节正文使用 AES-256-GCM 加密
-- 分析结果使用 AES-256-GCM 加密
-- 章节内容校验使用 HMAC-SHA256
-- L1 逐章索引当前按内测决策明文存储，但仍视为敏感内容
-- 主密钥默认存储在 macOS Keychain：service 为 `novel-chapter-gpt-service`，account 为 `master-key`
-
-## 6. 已实现页面
+由 `src/App.jsx` 和页面文件定义，当前正式页面为：
 
 - `/`：分析任务中心
-  - 左侧主导航 + 页面级工作区，创建任务以紧凑指令条为主。
-  - 创建分析任务时选择书籍、分析模板、章节范围、分析模式和开始分析。
-  - 分析模式 UI 默认 `fast_index`（快速探索）；后端对非法模式仍回退 `balanced`。
-  - 支持任务级 Prompt/Schema 快照。
-  - 分析模板可绑定一个或多个事实索引；创建任务时展示当前使用的事实索引和覆盖提示。
-  - 任务列表与结果区同屏，形成“选任务 -> 看结果”的主流程。
-  - 来源追踪、分块进度、完整 JSON 默认收起；最终结果优先表格展示，否则回退到 JSON/文本展示。
-
 - `/library`：书籍章节库
-  - 导入书籍章节
-  - 绑定 `book_name` 和 `book_id`，同一 `book_id` 不能绑定两个书名
-  - 只查看章节元数据，不查看整章正文
-  - 删除本地书籍数据
-  - 准备逐章“章节线索”（内部 L1 章节路由/信号索引）
-  - 按当前事实索引准备内部 L2 类型化事实索引
-  - 支持导入任务和 L1 任务的暂停/继续/取消
-  - 支持导入完成后自动启动 L1 构建
-  - 支持 L1 覆盖率卡片、章节表搜索、L1 完成/未完成/缺失/失败筛选
-  - 章节表显示每章 L1 状态；当章节不在当前 L1 查看范围内时显示为“未读取”，避免误判为缺失
-  - 章节线索/事实索引工作区只展示覆盖率、当前范围、准备按钮、首条预览和“规则”跳转，不在书库页编辑 Prompt
-  - 事实索引工作区支持切换多个事实索引；覆盖率、构建、首条预览都按当前索引隔离
-  - 书库页新增“索引准备状态”卡，按章节导入、章节线索、当前事实索引三步提示普通运营是否可以开始分析。
+- `/prompts`：Prompt 与索引规则管理
+- `/diagnostics`：系统诊断页
 
-- `/prompts`：模板与事实索引管理台
-  - 按书籍切换模板工作区
-  - 支持只创建书籍元数据，不导入章节
-  - 维护当前书籍的章节线索规则和事实索引规则
-  - 增加事实索引管理：默认显示“专项事实索引”，支持按需创建多个事实索引并编辑名称/用途/触发词/事实索引规则
-  - 章节线索/事实索引规则默认锁定，解锁后才能编辑；保存后提示用户选择章节范围立即重新准备，也可以稍后处理
-  - 维护当前书籍的分析模板，并支持绑定一个或多个事实索引
-  - 分析模板严格绑定当前书籍；创建分析任务时只能选择当前书籍下的分析模板
-  - 历史逐章 Prompt 数据只做兼容保留，不在 Prompt 管理台作为主字段展示
-  - 创建引导和优化引导使用右侧抽屉；内置规则可查看
-  - 编辑分析模板时提示未保存修改，切换或新建前会二次确认
+页面职责：
 
-## 7. 当前公开接口
+- 分析任务中心：创建、运行、续跑、查看与删除分析任务
+- 书籍章节库：创建书籍、导入章节、查看元数据、删除书籍、启动 L1/L2 准备
+- Prompt 管理：管理书籍级分析模板、L1 规则与 L2 索引组规则
+- 系统诊断：查看运行时配置、任务状态、数据库规模与书籍索引概览
 
-基础接口：
+## 8. 当前 API 基线
 
+### 8.1 运行与诊断
+
+- `GET /api/config`
 - `GET /api/health`
 - `GET /api/diagnostics`
-- `GET /api/config`
-- `GET /api/tasks`
-- `GET /api/dify/test`
 - `GET /api/openai/test`
+- `GET /api/dify/test`
+- `GET /api/tasks`
 
-书籍与导入：
+### 8.2 书籍与导入
 
 - `GET /api/books`
-- `POST /api/books`：只创建或确认书籍元数据，不导入章节；同一 `book_id` 不能绑定两个书名
+- `POST /api/books`
 - `POST /api/books/imports`
 - `GET /api/imports/:id`
 - `GET /api/imports/:id/events`
@@ -231,7 +203,7 @@ SQLite 数据目录：`data/`
 - `GET /api/books/:bookId/chapters`
 - `POST /api/books/:bookId/delete`
 
-L1 索引：
+### 8.3 L1 章节线索索引
 
 - `POST /api/books/:bookId/l1-indexes`
 - `GET /api/l1-indexes/:id`
@@ -241,9 +213,9 @@ L1 索引：
 - `POST /api/l1-indexes/:id/resume`
 - `GET /api/books/:bookId/l1-indexes/coverage`
 - `GET /api/books/:bookId/l1-indexes/chapters`
-- `GET /api/books/:bookId/l1-indexes/windows`：仅用于查看历史窗口索引数据
+- `GET /api/books/:bookId/l1-indexes/windows`
 
-L2 索引组与 L2 索引：
+### 8.4 L2 事实索引
 
 - `GET /api/books/:bookId/index-groups`
 - `POST /api/books/:bookId/index-groups`
@@ -255,31 +227,31 @@ L2 索引组与 L2 索引：
 - `POST /api/l2-indexes/:id/cancel`
 - `POST /api/l2-indexes/:id/pause`
 - `POST /api/l2-indexes/:id/resume`
-- `GET /api/books/:bookId/l2-indexes/coverage`：支持 `index_group_key`
-- `GET /api/books/:bookId/l2-facts`：支持 `index_group_key` / `index_group_keys`
+- `GET /api/books/:bookId/l2-indexes/coverage`
+- `GET /api/books/:bookId/l2-facts`
+- `GET /api/books/:bookId/index-prompts`
+- `PUT /api/books/:bookId/index-prompts`
 
-分析任务：
+### 8.5 分析任务
 
-- `GET /api/analyses`
 - `POST /api/analyses`
+- `GET /api/analyses`
 - `GET /api/analyses/:id`
+- `DELETE /api/analyses/:id`
 - `GET /api/analyses/:id/events`
 - `POST /api/analyses/:id/resume-run`
 - `POST /api/analyses/:id/cancel`
 - `POST /api/analyses/:id/pause`
 - `POST /api/analyses/:id/resume`
-- `DELETE /api/analyses/:id`
 
-Prompt：
+### 8.6 Prompt 与规则
 
 - `GET /api/prompts`
 - `PUT /api/prompts`
-- `GET /api/index-prompts`：兼容旧全局索引 Prompt 模板读取，新前端不再用它编辑 L1/L2
-- `PUT /api/index-prompts`：兼容旧全局索引 Prompt 模板保存，只作为后续新书初始化默认值
-- `GET /api/books/:bookId/index-prompts`
-- `PUT /api/books/:bookId/index-prompts`
-- `GET /api/prompt-groups`：支持 `book_id` 或 `bookId` 查询，只返回指定书籍的分析 Prompt
-- `POST /api/prompt-groups`：保存书籍级分析 Prompt，必须带 `book_id` 才会在任务创建页展示
+- `GET /api/index-prompts`
+- `PUT /api/index-prompts`
+- `GET /api/prompt-groups`
+- `POST /api/prompt-groups`
 - `GET /api/prompt-groups/:id`
 - `PUT /api/prompt-groups/:id`
 - `DELETE /api/prompt-groups/:id`
@@ -287,551 +259,123 @@ Prompt：
 - `POST /api/prompt-guides/generate`
 - `POST /api/prompt-guides/optimize`
 
-说明：`prompt-groups` 路径为历史兼容命名，当前产品语义是“书籍级分析 Prompt”。`book_index_prompts` 存 L1 与 `base` L2 书籍级索引 Prompt；`book_index_groups` 存专项 L2 索引组。
+## 9. 数据与存储基线
 
-## 8. 关键决策
+### 9.1 SQLite 主库
 
-### Dify
+主库文件位置：
 
-- Dify 只负责章节原文获取。
-- Dify 工作流必须保持最小化：输入 `book_id`、`start_chapter`、`end_chapter`，输出章节 JSON。
-- Dify 工作流不接 LLM。
-- 章节导入后存入本地章节库，后续分析不再重复调用 Dify。
-- L1/L2 索引单章执行已支持 Dify 承接，后端仍负责分章调度、断点续跑、覆盖率和索引组隔离。
-- L1/L2 执行签名写入索引 `model` 字段：`dify:l1:<workflow_version>` / `dify:l2:<workflow_version>`；仅提升 workflow version 会触发对应索引过期。
+- `data/novel-chapters.sqlite`
 
-### OpenAI 兼容调用
+核心表：
 
-- 使用 Responses API 形态。
-- 每次请求强制 `store: false`。
-- 不使用 Files、Vector Stores、Assistants、Threads、Batch、background mode。
-- 大型分析任务或 L1 任务前，先通过 `/api/openai/test` 做无正文连通性测试。
-- 当前网关是 OpenAI 兼容地址，不是官方 OpenAI 地址；在确认合规前，视为重要风险点。
+- `books`
+- `chapters`
+- `prompt_settings`
+- `prompt_groups`
+- `book_index_prompts`
+- `book_index_groups`
+- `analysis_runs`
+- `analysis_chapters`
+- `analysis_summary_parts`
+- `l1_chapter_indexes`
+- `l1_window_indexes`
+- `l2_chapter_statuses`
+- `l2_facts`
 
-### L1 索引
+### 9.2 存储责任
 
-- 当前 L1 策略是逐章轻量章节路由/信号索引，不再构建 10 章窗口索引。
-- L1 的定位是按章节提供主体、别名、关键词、分类信号和类别分数，服务所有 L2 索引组的章节命中；L1 不再承担长摘要、深度设定集或事实库职责。
-- L1 route schema 固定使用 `route_schema_version`、`route_entities`、`route_keywords`、`signals`、`category_scores`；新 L1 不再使用摘要类字段和模型自评字段。
-- `category_scores` 分类键固定为 `character`、`relationship`、`cultivation`、`force`、`item`、`location`、`event`、`foreshadowing`、`other`；例如飞剑、法宝、宝物统一走 `item` 类别，不新增中文自定义分类键。
-- 已移除的 10 章窗口方案在大书测试中带来额外成本，窗口成功数为 0，并放大失败面。
-- 历史 L1 窗口数据保留，但新任务不能再生成窗口索引。
-- 已成功的旧版逐章 L1 索引会保留，并在没有新 route 字段时作为兼容兜底路由；不会被自动删除或强制全量重建。
-- L1 Prompt 运行时优先读取当前书籍的 `book_index_prompts.l1_index_prompt`。
-- 新版默认 L1 Prompt Hash 使用 `l1-route-v1`；旧版 `l1-v1-chapter-window-10` 数据继续可读，但覆盖率会按新 Hash 提示需要按需重建，重建后获得轻量路由能力。
-- 如果当前书籍保存了自定义 L1 Prompt，Hash 基于 `book-l1-route-v1` 与书籍级 Prompt 文本计算，并只影响该书覆盖率过期判断和后续构建任务。
-- L1 的 `missing` 表示尚未构建，不等于模型失败。
-- L1 的 `failed` 表示已有失败记录。
-- 出现成本保护、quota、billing、rate-limit 等系统性上游错误时，L1 任务应提前停止，不能继续把后续章节批量打成失败。
+- `chapters`：保存章节元数据和加密正文
+- `analysis_runs`：保存分析任务元数据和最终结果密文
+- `analysis_chapters`：保存逐章分析结果密文
+- `analysis_summary_parts`：保存汇总分块结果密文与追踪摘要
+- `l1_chapter_indexes`：保存章节级线索索引
+- `l2_chapter_statuses` 与 `l2_facts`：保存事实索引状态与事实项
 
-### 事实索引（内部 L2 索引组）
+### 9.3 兼容性原则
 
-- 当前已落地书籍级事实索引，目标是拆散单一 L2 的内容压力，同时避免为每个方向全书重建一套 L1。
-- 产品层不再展示内部兼容 key `base`。历史 L2 状态和事实迁移或读取时统一归到该兼容 key，对外显示为“专项事实索引”。
-- 新增事实索引保存在 `book_index_groups`，字段包含 `group_key`、名称、用途描述、分类范围、触发词、该事实索引规则和启用状态。
-- `l2_chapter_statuses` 和 `l2_facts` 按 `index_group_key` 隔离；覆盖率、构建、预览、事实查询都必须带组语义。
-- P0 不做 L1 多分组；所有 L2 组共用同一套轻量 L1 章节路由。
-- 分析 Prompt 可显式绑定一个或多个事实索引；未绑定时按事实索引触发词和范围自动推断，推断不到则回退内部 `base`，用户侧显示为“专项事实索引”。
-- 多索引组分析时，事实按 `index_group_key + chapter_index + category + entity + fact_type + fact` 去重。
-- 原文复核结果不得覆盖已有专项 L2 事实；只进入当前分析素材，或以后续追加来源方式沉淀。
+- 数据库 schema 演进通过 `server/db.js` 内的建表与补列逻辑兜底。
+- 若新增表、列、索引或迁移步骤，必须同步更新本文件和相关测试。
 
-### 分析任务
+## 10. 安全边界基线
 
-- 分析页 UI 默认 `analysis_mode=fast_index`（快速探索）：只用 L2 索引事实，不读取章节原文，用于快速验证 Prompt 与索引覆盖。
-- 后端对非法或缺失 `analysis_mode` 的兼容回退仍是 `balanced`。
-- `balanced` / `precision` 路径会先按章节顺序扫描 L1 路由，命中目标主体、分类词或路标信号后，再读取命中章节的选中 L2 索引组事实，并按预算复核少量高风险原文章节；L1 未命中时才退回 L2 兜底召回。
-- 分析页选择书籍后，只加载该书下的分析 Prompt。
-- 创建分析任务必须选择当前书籍的分析 Prompt；没有分析 Prompt 时阻止创建，并提示去 `/prompts` 创建。
-- 分析页不支持临时新建或编辑 Prompt 正文；Prompt 正文统一在 `/prompts` 管理。
-- 选择 `/prompts` 中的分析 Prompt 时，只覆盖最终分析/汇总用的 `summary_prompt`，不覆盖逐章 Prompt。
-- 逐章 Prompt 保留为后端兼容字段，主要服务旧任务快照和 `full_text` 路径；当前创建任务页面不再提供主界面编辑入口。
-- 分析模式、复核预算、输出格式仍属于创建分析任务模块，不进入分析 Prompt 库。
-- 主体关键词、分析维度和筛选目标由用户写进分析 Prompt，不做单独下拉字段。
-- `use_l1_context=false` 是默认值。
-- 当 `use_l1_context=true` 时，每章 Prompt 会附加对应章节的 L1 JSON。
-- L1 覆盖缺失只提示，不阻塞分析。
-- 汇总 Prompt 不再附加窗口 L1 上下文。
-- `fast_index` 只用 L2 索引，不读取章节原文；`balanced` 使用少量原文复核；`precision` 使用更高复核预算；`full_text` 保留旧的逐章全文精读模式。
-- `balanced` 默认最多复核 `min(10, max(3, ceil(章节数 * 1%)))` 章，`precision` 默认最多复核 `min(30, max(5, ceil(章节数 * 3%)))` 章；`source_review_budget` 可覆盖默认值。
-- 分析任务逐章结果会写入 `analysis_chapters`，未完成、失败、取消或服务重启后，已完成章节结果仍可在任务详情中查看。
-- 未完成任务不生成临时最终结果；`finalResult` 只有最终汇总成功后才返回。
-- 断点续跑使用 `POST /api/analyses/:id/resume-run`，只允许复用原任务的 Prompt、模型、推理强度、Schema 和章节选择快照。
-- 续跑会跳过 `status=completed`、章节 HMAC 匹配、Prompt Hash 匹配且结果密文存在的章节，只重跑失败、缺失、正文变更或 Prompt Hash 不匹配的章节。
-- 服务重启后不会自动续跑分析任务，必须由用户在任务详情中手动点击“继续分析”。
-- 当最终汇总输入过大时，系统会先把逐章结果分批压缩为结构化中间摘要，再用中间摘要执行最终汇总，避免一次性提交超大 JSON 导致 OpenAI 请求超时。
-- 分批压缩必须带入用户最终汇总 Prompt，让压缩阶段按最终分析目标保留信息，而不是做通用摘要。
-- 分批压缩输出必须包含 `covered_chapters`、主题事实、章节引用、证据备注、必须保留项、冲突项和失败章节；后端会校验每一批是否覆盖本批所有章节。
-- 如果压缩结果漏掉本批章节，或包含非本批章节，任务会失败并提示覆盖异常，不能继续生成可能缺失信息的最终结果。
-- 分批压缩不能保证语义零损失；它的定位是降低超时和网关不稳定风险，同时通过章节覆盖校验和结构化证据字段降低核心信息丢失概率。
-- 由于 `apitokenzz.xyz` 网关在较大压缩请求上仍可能 180 秒 abort，压缩批次上限已降为约 1.8 万字符。
-- 汇总压缩和最终汇总阶段对 abort、网络失败、5xx、429、返回空 JSON 等瞬时错误最多重试 3 次；章节覆盖异常不重试，直接失败。
+### 10.1 明确保护目标
 
-### Prompt 分层
+- 小说章节正文
+- 分析 Prompt 快照
+- 逐章分析结果
+- 汇总结果
 
-- 运营侧 UI 采用业务名优先：`章节线索` 对应内部 L1，`事实索引` 对应内部 L2 索引组，`事实索引规则` 对应 L2 Prompt，`分析模板` 对应分析 Prompt；高级内置规则和接口文档可保留 L1/L2 技术名。
-- 全局默认模板仍保存在 `prompt_settings.l1_index_prompt/l2_index_prompt`，只用于初始化新书籍的索引 Prompt，运行时不再优先生效。
-- 书籍级兼容 Prompt 保存在 `book_index_prompts`，和 `books.book_id` 一一对应；每本书有一套当前生效的 L1 Prompt 和内部 `base` 对应的专项事实索引规则，UI 展示为“专项事实索引”。
-- 自定义事实索引 Prompt 保存在 `book_index_groups.l2_index_prompt`，只影响该事实索引，不影响内部 `base` 或其他索引。
-- `/prompts` 是统一模板与事实索引管理台，管理当前书籍的 L1、专项事实索引、自定义事实索引和分析 Prompt。
-- `/library` 不再编辑 Prompt，只展示索引 Prompt 状态、覆盖率、用途说明、首章预览和跳转入口。
-- L1/L2 Prompt 编辑器默认锁定，解锁后才允许编辑；保存后不会自动删除旧索引，只提示用户选择章节范围、是否强制重建。
-- 默认 L1 Prompt 使用新路由 Hash `l1-route-v1`，L2 专项事实索引规则保持历史兼容 Hash `l2-v1-typed-facts`；旧 L1 数据保留兜底，用户按需重建后切换为轻量 route schema。
-- 保存自定义书籍级 L1/内部 `base` 对应的专项事实索引规则后，Hash 变为基于该书 Prompt 内容计算的 SHA-256；后续构建任务会按新 Hash 跳过、重建或标记过期。
-- 修改某个事实索引的 L2 Prompt 只影响该索引覆盖率和过期判断，不影响内部 `base` 或其他索引。
-- L1/L2 创建引导必须保持轻量：L1 只收集“范围、取舍”，L2 只收集“范围、规则”；内置生成规则需要匹配当前 `L1 章节路由 -> L2 专项事实 -> 分析 Prompt` 架构，不再让用户逐项填写复杂字段设计。
-- 事实索引创建引导只收集“用途、边界”，生成后套用到新建事实索引草稿；事实索引 Prompt 必须只描述该索引负责的 L2 专项事实，不要求重建 L1，也不把多个互不相关的大方向塞进同一个事实索引。
-- 分析 Prompt 保存在 `prompt_groups`，通过 `prompt_groups.book_id` 绑定书籍；创建分析任务时只能选择当前书籍下的分析 Prompt。
-- 历史无法匹配书籍的分析 Prompt 保留为 `book_id=''`，不会自动混入任意书籍。
-- 前端只展示 Prompt 文本本身，不展示章节正文、OpenAI 请求体或索引构建时的完整 Prompt body。
-- 分析 Prompt 创建引导面向小白用户，只保留“用途、输出”两段访谈；用途段合并收集最终用途、分析对象、保留字段、排除项、筛选规则和停止规则，输出段明确 JSON/文本结构。默认填入中文参考回答，用户可直接提交或删除修改。
-- 分析 Prompt 引导的内置生成规则必须主动收窄任务，把口语化诉求翻译成分析目标、对象范围、字段清单、筛选/停止规则和输出结构；不得为轻量任务自动扩写证据数组、关系网、阶段拆分或事件复盘。
-- 已保存或正在编辑的分析 Prompt 支持自然语言优化：用户描述想解决的问题、删减字段、增加限制或调整输出结构，后端携带当前 Prompt 和公开的内置优化规则调用 OpenAI 生成优化参考；生成结果只套用到草稿，仍需手动保存。
-- 分析 Prompt 优化规则必须暴露在抽屉中可查看；优化不得改写成 L1/L2 索引构建 Prompt，不得要求重新构建索引，不得添加用户未要求的重型输出结构。
-- 分析 Prompt 引导必须兼容“单一主体”和“类别主体”，例如重要角色、所有飞剑、宗门势力、修炼体系、本命物等；不得假设每个分析任务都有明确且单一的主体。
+### 10.2 已落实约束
 
-### UI/UX
+- 章节正文使用 AES-256-GCM 加密后再写 SQLite。
+- 分析逐章结果、汇总分块结果和最终结果使用 AES-256-GCM 加密写库。
+- 章节内容校验使用 HMAC-SHA256，不保存正文明文 hash。
+- 主密钥默认存放于 macOS Keychain。
+- 前端只显示元数据，不提供整章正文查看能力。
+- 运行诊断页只展示元数据，不展示正文、密钥、Prompt 密文或 L2 加密事实正文。
+- OpenAI Responses API 调用强制 `store: false`。
 
-- 后台 UI 保持简洁、密集、偏操作台风格。
-- 不做营销页和落地页。
-- 避免嵌套卡片和纯装饰性视觉元素。
-- 长任务切换页面后仍要可见。
-- 服务重启前，已存在的内存任务可以通过 `GET /api/tasks` 在当前进程内找回；Node 进程重启后内存任务会丢失，但分析任务可通过已落库的逐章结果手动续跑。
-- 分析任务中的章节选择默认收起。
-- L1 覆盖信息必须区分“缺失”“失败”和“未读取当前范围”。
+### 10.3 当前有意识接受的边界
 
-## 9. 安全规则
+- `l1_chapter_indexes` 当前按现有实现保存章节线索索引，不等同于正文，但仍应视为敏感派生内容。
+- `l2_facts` 当前是可查询事实索引层，属于可复用分析中间层，需要继续按敏感内容对待。
 
-禁止提交或粘贴：
+### 10.4 禁止项
 
-- `.env`
-- API Key、Bearer Token
-- `data/`
-- SQLite 文件、WAL/SHM 文件
-- 包含加密或明文书籍数据的日志、导出、备份
-- 整章正文
-- 包含章节正文的 Dify 原始输出
-- OpenAI 请求体
-- 包含真实章节内容的 Prompt body
-- 真实版权书籍的 L1 索引内容
+以下能力当前明确不使用：
 
-`.gitignore` 必须持续覆盖：
+- OpenAI Files
+- Vector Stores
+- Assistants
+- Threads
+- Batch
+- background mode
 
-- `.env`
-- `.env.*`，但 `.env.example` 除外
-- `data/*`
-- `data-preview/`
-- `node_modules/`
-- `dist/`
-- `dist-preview/`
-- 日志文件
-- 系统和编辑器临时文件
+### 10.5 合规开关
 
-日志规则：
+- 在分析真实版权章节前，`OPENAI_RETENTION_MODE` 必须明确设置为 `zdr` 或 `mam`。
+- 未设置时，后端必须拒绝真实章节分析请求。
+- 若 `OPENAI_API_BASE` 指向 OpenAI 兼容网关，使用前必须单独确认该网关的保留策略与合规边界。
 
-- 只记录任务 ID、章节编号、数量、状态、状态码和脱敏错误信息。
-- 不记录章节正文、Prompt body、OpenAI 请求体、Dify 原始输出或 L1 索引内容。
+## 11. Dify 工作流基线
 
-运行边界：
+当前仓库内维护的工作流文件：
 
-- 服务只允许本机、局域网或 VPN 使用。
-- 不允许暴露到公网。
-- macOS 防火墙可能需要允许 Node.js，局域网设备才能访问。
-- Dify 和 SQLite 数据卷应放在 FileVault 或等效加密磁盘上。
+- `dify-workflows/minimal-chapter-fetch.workflow.yml`
+- `dify-workflows/l1-route-index.workflow.yml`
+- `dify-workflows/l2-fact-index.workflow.yml`
+- `dify-workflows/analysis-chapter.workflow.yml`
+- `dify-workflows/analysis-summary.workflow.yml`
 
-## 10. 已知问题
+约束：
 
-### 长篇全量分析仍然昂贵
+- 章节导入工作流只负责返回章节原文 JSON，不承担 LLM 分析。
+- L1、L2 和分析工作流由后端动态传入 Prompt，不在 Dify 内固化业务 Prompt。
+- 工作流版本号变化通过对应 `DIFY_*_WORKFLOW_VERSION` 参与执行签名与失效控制。
 
-`fast_index` 已能只用 L2 索引完成快速探索；但 `full_text` 仍会按所选章节读取正文，`balanced/precision` 也会按预算复核少量原文。全书级高保真任务仍然慢且成本高，应优先使用 L1 路由 + L2 索引组召回。
+## 12. 测试与验证基线
 
-### L1 构建仍然偏慢
-
-L1 已改为更轻的章节路由/信号索引，但本质上仍是一章一次模型调用。对于 755、1279、1903 章的书，这仍然是大任务。
-
-### 分析 Prompt 的 JSON 模板仍需约束
-
-最终汇总会从 Prompt 中推导 JSON 字段并做分字段生成。如果 Prompt 中混入独立示例对象，或留下 `目标主体`、`待填写`、`章节`、`name` 等占位式字段，质量闸门会拒绝保存并将任务标记失败。分析 Prompt 必须只保留一个最终 JSON 模板，并把具体对象或可执行类别范围写实。
-
-### 上游稳定性不足
-
-已观察到的失败模式：
-
-- 代理在 TLS 握手前断开
-- OpenAI 兼容网关返回不完整 JSON
-- OpenAI 兼容网关返回非合法 JSON，典型错误为 `Unexpected end of JSON input`
-- 成本保护或额度保护
-- 请求超时
-- 已观察到 100 章逐章结果约 17.5 万字符，最终汇总请求触发 `This operation was aborted` 超时。
-
-当前缓解方案：
-
-- 当前 `OPENAI_PROXY_URL=` 为空，OpenAI 请求直连 `OPENAI_API_BASE`。只有确认本机代理/VPN 稳定时，才临时配置代理。
-- 对系统性上游错误提前停止任务
-- 对大体量最终汇总自动启用后端本地确定性瘦身，保留每章 `chapter_index`、标题、摘要、关键点和证据摘记，降低最终请求体规模。
-- 当前不再调用模型做中间压缩，因为真实任务已证明压缩素材请求本身也会在当前网关上稳定 180 秒 abort。
-- 最终汇总阶段对 abort、网络失败、5xx、429、返回空 JSON 等瞬时错误最多重试 3 次。
-- 正式环境已把 `OPENAI_REQUEST_TIMEOUT_MS` 提高到 `600000`，用于给本地瘦身后的最终汇总更长等待窗口。
-- 最终汇总只在汇总 Prompt 明确要求匹配“给定 JSON Schema”时走默认 `final_analysis` JSON Schema，并设置 `max_output_tokens=4500`。
-- 如果汇总 Prompt 自己定义 JSON 模板，后端会尝试从最后一个合法 JSON 对象模板推导 `custom_final_analysis` Schema，用结构化输出稳定生成，同时保留用户自定义字段结构。
-- 对自定义 JSON 模板汇总，后端会按顶层字段分多次生成，例如先生成 `core_characters`，再生成 `important_characters`，最后在本地合并为完整 JSON。该策略现在同时适用于全文分析的长输入压缩路径和 `balanced/precision` 索引召回分析路径，降低单次请求输入/输出长度，并避免被默认 `title/summary/items/failed_chapters` 格式污染。
-- 如果分析 Prompt 没有给完整 JSON 模板，但明确写了“字段包括：book_id、book_name、task、core_characters...”这类字段列表，后端会将其视为自定义 JSON 顶层字段，并优先于旧任务遗留的默认 `output_schema`。这样可避免旧的 `title/summary/items/failed_chapters` Schema 抢占输出格式。
-- `book_id`、`book_name`、`task` 等元信息字段由后端确定性填充，不再交给模型生成，避免空值或与任务快照不一致。
-- 分字段汇总会按字段类型裁剪输入素材：元信息字段不携带全文事实；人物字段优先携带 `character/relationship` 事实；核心人物字段优先匹配 Prompt 中的核心实体；不确定字段优先携带低置信度或冲突事实。该策略降低单次请求耗时，但也意味着字段生成更依赖 L1/L2 召回和字段名语义。
-- P0 最终汇总已引入持久化分块表 `analysis_summary_parts`：每个最终汇总节点保存 `part_key`、父节点、阶段、状态、内容 Hash、Prompt Hash、Schema Hash、模型、推理强度、输入摘要、来源追踪摘要、错误摘要和加密结果。服务重启或模型请求失败后，续跑会复用 Hash 未变化的 completed 分块，只重跑 failed 分块及依赖它的合并节点。
-- JSON 最终汇总支持字段内二级拆分：顶层字段如果输入素材超过约 18,000 字符，或字段类型是数组/对象且事实量较大，会拆为 `json.<field>.batch.001...`，再本地合并为 `json.<field>.merge`，最后生成 `json.final.merge`。文本最终汇总也使用 `text.final.merge` 分块记录，后续可继续扩展窗口级文本拆分。
-- `GET /api/analyses/:id` 返回 `summaryParts`、`summaryProgress`、`failedSummaryParts` 和 `canResumeSummary`，前端在未完成结果中展示最终汇总分块进度与失败分块。
-- P1 最终汇总输入统一为标准证据包 `evidence_packets`：每包只保留来源类型、章节、分类、主体、相关主体、事实类型、事实短句、证据摘记、重要度、置信度和标签。模型不再直接接收散装 `facts`、`compressedResults` 或原始长素材。
-- 每个最终汇总模型请求都有硬输入预算，当前上限为约 18,000 字符；发送前按真实请求文本长度校验，超限会继续裁剪、分块或失败保留续跑状态，不再依赖素材 JSON 粗略估算。
-- 证据包排序采用通用评分：字段名/Prompt 词命中、主体/分类/标签/证据文本相关度、重要度、置信度和章节顺序。不绑定 `core_characters`、`important_characters` 等特定业务字段；字段名只作为通用相关性信号。
-- 覆盖型最终汇总会优先保留章节覆盖，再压缩每章证据包；字段内数组/对象汇总则优先保留高相关、高重要度、高置信度证据，低优先级证据可能被预算裁剪或进入后续 batch。
-- P2 结构化 JSON 调用已增加一次通用自动修复：任意 `callOpenAIJson` 返回半截 JSON、空白外包裹文本或非法 JSON 时，会使用同一目标 Schema 再发起一次低推理强度修复请求，把破损输出修复为合法 JSON。该能力覆盖 L1、L2、章节分析、原文复核、Prompt 引导和最终汇总分块。
-- JSON 修复请求仍使用 Responses API、`store:false`，不使用 Files、Vector Stores、Assistants、Threads、Batch 或 background。修复只处理模型已返回的短文本，不重新提交章节原文；若修复后仍非法，则保留原失败路径和断点续跑能力。
-- P3 结果来源追踪已落地：每个最终汇总分块会保存基于 `evidence_packets` 派生的 `trace_summary`，记录证据包数量、来源类型（L2、原文复核、章节摘要）、章节覆盖、分类分布、事实类型和主体样本。`GET /api/analyses/:id` 返回 `sourceTrace` 与 `sourceTraceSummary`，结果页以折叠面板展示。追踪只保存检索级元数据，不保存原文、事实正文或证据摘记明文，不改变 `L1 路标 -> L2 类型事实 -> 分析任务二次提炼` 的层级关系。
-- P4 第一阶段已新增只读健康检查与诊断能力：`GET /api/health` 返回服务可用性和脱敏运行配置，`GET /api/diagnostics` 返回配置状态、SQLite 文件大小、全局计数、状态分布、书籍级章节/L1/L2/分析/Prompt 统计和内存任务摘要。前端新增 `/diagnostics` 诊断页。诊断只展示元数据，不读取或展示密钥、章节正文、L1 内容、L2 加密事实正文、证据摘记或 Prompt 密文。
-- 最终汇总数组字段已增加通用跨分块归并：不绑定 `characters` 等具体字段名，而是从条目中自动识别 `name/title/entity/subject/名称/主体` 等主键，跨 batch 合并同主体条目。该能力适用于人物、物品、势力、体系、关系等数组字段，避免分块输出后简单拼接导致重复。
-- 最终汇总合并阶段会解析并执行通用全局约束：例如“最多 N 个/条/项”“某字段控制在 N 字以内”“非核心角色最多 N 个”等。约束在所有 batch 合并后统一生效，不再只依赖单个 batch 自行遵守。
-- 如果无法从 Prompt 提取合法 JSON 模板，则按 Prompt 原格式走文本输出；后端会尝试解析 JSON 保存，但不会改写成默认 `title/summary/items/failed_chapters` 结构。
-- 本地瘦身目标已从约 2.8 万字符降到约 1.8 万字符，优先保障 100 章级任务能续跑完成；代价是最终汇总素材更摘要化。
-- 最终汇总保存前会做基础质量闸门：当 3 章以上任务返回 `N/A`、空摘要、空 `items` 且没有其他有效自定义字段时，任务标记失败并保留断点续跑，不把占位结果写成完成态。
-
-### L1 重试流程太粗
-
-系统可以跳过已完成索引，UI 已经支持按 L1 缺失、失败、未完成筛选章节；但还没有“一键只构建缺失”“一键只重试失败”的独立动作，也没有足够直观的失败原因聚合。
-
-### L1 明文存储只是内测阶段取舍
-
-L1 内容是版权正文的派生信息，仍然敏感。生产化前应迁移为加密存储。
-
-### L2 索引组是当前长篇优化主线
-
-L2 类型化事实索引用于 1000 万字、1000+ 章场景下的重复分析。当前已支持按书籍创建专项索引组，把人物、飞剑/宝物、宗门势力、修炼体系等不同长期分析方向拆开。它把章节内容拆成可检索事实单元，分类、主体、标签、章节号、重要度和置信度明文保存，事实正文、证据摘记和复核结果加密保存。默认快速探索使用 `fast_index`，全文精读仍保留，但应作为小范围或高保真兜底路径。
-
-### 任务状态仍在内存中
-
-当前进程内可以通过 `GET /api/tasks` 找回任务并重新订阅进度。Node 进程重启后，正在运行的任务状态仍会丢失。已写入 SQLite 的章节、索引和结果不会丢失。
-
-## 11. 中期优化计划
-
-优先级 1：让 L1 构建更可靠
-
-- 增加“只构建缺失章节”按钮。
-- 增加“只重试失败章节”按钮。
-- 增加覆盖范围快捷选项：当前范围、导入范围中缺失部分、全书。
-- 在 UI 中聚合展示失败原因。
-- 对临时网络错误增加小间隔自动重试。
-- 对非法 JSON 增加一次 JSON 修复重试。（已作为 P2 通用 JSON 修复落地）
-- 对章节分析任务也增加一次 JSON 修复重试，避免 `Unexpected end of JSON input` 造成大量章节失败。（已由 P2 覆盖）
-- 给单次任务增加硬上限：最大章节数、最大失败数。
-- 任务事件文案明确区分 missing、failed、skipped、completed。
-
-优先级 2：减少模型调用次数
-
-- 对较短章节探索批量 L1 抽取，同时仍按章节保存结果。
-- 为 L1 单独配置模型和推理强度，不必完全沿用分析模型。
-- 增加“低成本 L1”模式，使用更小 Schema 和更低推理强度。
-- 压缩分析任务中附加的 L1 上下文。
-
-优先级 3：提升分析效率
-
-- 继续优化 L2 召回式分析：分类和主体召回规则、索引覆盖不足提醒、复核结果沉淀复用。
-- `fast_index`、`balanced`、`precision`、`full_text` 四档分析模式已可用，后续重点是提高召回质量和降低重复复核。
-- 结果来源追踪已在分块级完成；后续如需提升到“每个 JSON 条目级引用”，需要让模型在输出条目中显式携带证据引用 ID，并增加条目级校验。
-
-优先级 4：安全加固和数据生命周期
-
-- 加密 L1 逐章索引。
-- 增加加密备份、导出和恢复。
-- 增加密钥轮换 UI。
-- 增加任务持久化表，让进行中的任务在进程重启后可恢复或标记为中断。
-- 增加管理诊断页，但不能展示密钥、正文或 L1 内容。（已完成 `/diagnostics` 第一阶段）
-- 增加局域网健康检查页。（已完成 `/api/health` 第一阶段）
-
-优先级 5：大书体验优化
-
-- 章节元数据和 L1 表格虚拟滚动。
-- 继续完善 L1 表格过滤器，增加失败原因筛选和最近失败优先排序。
-- 增加批量选择章节范围。
-- 增加清晰的任务历史和重试入口。
-- 当分析范围 L1 覆盖率低时，运行前给出提示。
-- L1/L2 索引任务启动前增加确认弹窗，明确展示书籍、任务类型、章节范围、构建模式、预计真实调用章节数、已完成跳过数和可能覆盖/重建的影响，避免 L1/L2 范围误操作或把 L1 范围误用于 L2。
-- L1/L2 范围输入状态应更清晰地区分，必要时分别记忆最近一次范围；L2 启动时如果范围超过用户最近确认范围、超过 L1 覆盖范围或超过阈值，应给出强提示。
-
-## 12. 长期方向
-
-长期目标是形成三层架构：
-
-1. 本地章节库
-   - 一次性加密导入
-   - 完整元数据
-   - 内容完整性校验
-
-2. 可复用知识层
-   - 书籍级 L1 章节路由 Prompt
-   - 历史兼容 key `base` 对应的专项事实索引规则和按需创建的专项 L2 索引组 Prompt
-   - 加密或受控保存的 L1/L2 章节事实
-   - 只在被证明有价值时引入更高阶索引
-   - 覆盖率、重试、过期判断可控
-
-3. 查询和分析层
-   - 快速 L1 探索
-   - 定向全文精修
-   - 书籍级分析 Prompt
-   - 任务级 Prompt/Schema 快照
-   - 带来源追踪、可复现的分析结果
-
-核心原则：不要因为每一个新问题都重跑整本书。优先构建轻量 L1 路由，再按稳定分析方向构建专项 L2 索引组，最后让分析 Prompt 做二次提炼。
-
-## 13. 验证命令
-
-重要改动前后执行：
+项目最小验证命令：
 
 ```bash
-npm run lint
 npm test
 npm run build
-curl -s http://127.0.0.1:5184/api/config
-curl -s http://127.0.0.1:5184/api/health
-curl -s http://127.0.0.1:5184/api/diagnostics
-curl -s http://127.0.0.1:5184/api/dify/test
-curl -s http://127.0.0.1:5184/api/openai/test
-curl -s http://127.0.0.1:5184/api/tasks
 ```
 
-本机预览环境验证：
+当前测试重点覆盖：
 
-```bash
-npm run preview:prepare-data
-npm run build:preview
-npm run start:preview
-curl -s http://127.0.0.1:5194/api/config
-curl -s http://127.0.0.1:5184/api/health
-```
+- Dify 批次构建与输出归一化
+- L1/L2 工作流输出归一化
+- AES-GCM 加密与 SQLite 明文扫描
+- 汇总分块密文存储与追踪摘要
+- 诊断接口不泄露正文或敏感索引内容
+- OpenAI 请求满足 `store: false`
+- 书籍绑定约束、任务与数据层核心行为
 
-如果需要非交互式覆盖预览快照：
+## 13. 文档维护规则
 
-```bash
-npm run preview:prepare-data -- --force
-```
-
-局域网检查：
-
-```bash
-curl -s http://172.16.77.225:5184/api/health
-```
-
-当前进程任务检查：
-
-```bash
-curl -s http://127.0.0.1:5184/api/tasks
-```
-
-推送前 Git 和密钥检查：
-
-```bash
-git status --short --branch
-git check-ignore -v .env data/novel-chapters.sqlite dist/index.html node_modules/.package-lock.json .DS_Store
-git grep --cached -n -I -E '(cg_[A-Za-z0-9_-]+|sk-(proj-)?[A-Za-z0-9_-]{12,}|app-[A-Za-z0-9]{12,}|OPENAI_API_KEY=.+|DIFY_CHAPTER_WORKFLOW_API_KEY=.+)' -- . || true
-```
-
-## 14. 运维手册
-
-启动或重启局域网服务：
-
-```bash
-npm run build
-lsof -tiTCP:5184 -sTCP:LISTEN | xargs -r kill
-PORT=5184 HOST=0.0.0.0 nohup npm start > /tmp/novel-chapter-gpt-service.log 2>&1 &
-curl -s http://127.0.0.1:5184/api/config
-curl -s http://127.0.0.1:5184/api/health
-```
-
-无章节正文的 OpenAI 兼容接口连通性测试：
-
-```bash
-curl -s http://127.0.0.1:5184/api/openai/test
-```
-
-如果代理错误再次出现：
-
-- 当前正式环境 `OPENAI_PROXY_URL=` 为空，OpenAI 兼容调用直连。
-- 如果需要临时启用代理，先确认代理软件运行、端口稳定、线路可用；否则 OpenAI 请求会整体失败。
-- 如果启用代理后出现 `ECONNREFUSED 127.0.0.1:7897` 或 TLS 握手前断开，可把 `OPENAI_PROXY_URL=` 清空并重启服务回滚。
-- 长任务前测试代理：
-
-```bash
-curl -I -m 10 -x http://127.0.0.1:7897 https://apitokenzz.xyz/v1/models
-```
-
-启动本机预览环境：
-
-```bash
-npm run preview:local
-```
-
-说明：
-
-- 该命令会先准备 `data-preview/`，再构建 `dist-preview/`，最后启动 `5194` 预览服务。
-- 如果 `data-preview/novel-chapters.sqlite` 已存在，脚本会提示覆盖风险；非交互式环境需要使用 `npm run preview:prepare-data -- --force`。
-- 预览服务可以随时重启，不影响线上 `5184` 正在运行的任务。
-
-## 15. 变更记录
-
-- 2026-05-27：
-  - Checkpoint 当前项目基线：分支为 `codex/suoyin-redesign`，正式服务运行在 `0.0.0.0:5184`，本机地址 `127.0.0.1:5184`，局域网地址 `172.16.77.225:5184`。
-  - 当前 `OPENAI_PROXY_URL=` 为空，OpenAI 兼容调用直连 `https://apitokenzz.xyz/v1`；`/api/openai/test`、`/api/dify/test`、`/api/health` 和 `/api/diagnostics` 均正常。
-  - 数据快照更新：3 本书、3937 章、2342 条 L1、1000 条 L2 章节状态、19385 条 L2 事实、4 个索引组、25 个分析任务、187 个最终汇总分块。
-  - 明确当前 L1 定位为轻量章节路由/信号索引，服务所有 L2 索引组的章节命中。
-  - 明确 L2 索引组为当前长篇优化主线：`base` 兼容旧数据，专项组按 `index_group_key` 隔离覆盖率、构建和事实召回。
-  - 明确分析页 UI 默认 `fast_index`，后端非法模式回退 `balanced`；`fast_index` 只用 L2 索引，不读取原文。
-  - 记录最终汇总占位字段质量闸门：`章节`、`name`、`目标主体`、`待填写` 等占位式字段会导致任务失败并保留续跑状态。
-  - 验证命令已通过：`npm run lint`、`npm test`、`npm run build`。
-
-- 2026-05-21：
-  - 实现 Prompt 管理重构：`/prompts` 升级为统一 Prompt 管理台。
-  - 新增 `book_index_prompts`，每本书拥有一套当前生效的 L1/L2 索引 Prompt。
-  - `prompt_groups` 增加 `book_id`，分析 Prompt 严格按书籍归属；创建分析任务时只加载当前书籍的分析 Prompt。
-  - 新增 `POST /api/books`、`GET /api/books/:bookId/index-prompts`、`PUT /api/books/:bookId/index-prompts`。
-  - L1/L2 构建任务和覆盖率过期判断改为使用书籍级 Prompt Hash；旧 `/api/index-prompts` 仅作为全局默认模板兼容接口保留。
-  - `/library` 不再编辑 L1/L2 Prompt，只展示索引 Prompt 状态、覆盖率、用途说明、首章预览和“管理索引 Prompt”跳转。
-  - 保存书籍级 L1/L2 Prompt 后，前端提示按自定义章节范围立即重建；不默认全书重建，也不删除已构建索引。
-  - 历史分析 Prompt 迁移规则：按 `category` 尽量匹配书名或书籍 ID；无法匹配的保留为 `book_id=''`，不自动混入任意书籍。
-  - 正式服务已重启到当前工作区未提交版本，当前监听进程为 `PID 44594`，`GET /api/tasks` 为空。
-  - 浏览器已验证正式 `5184` 的 `/prompts` 和 `/library`：Prompt 工作台可见，章节库无 Prompt 编辑框，控制台无错误。
-
-- 2026-05-21：
-  - Checkpoint 当前项目基线：本地 `main` 已快进到 `origin/main` 的 `2691f6f Merge pull request #4 from fuer121/codex/upgrade01`。
-  - 已从最新 `main` 切出并切换到新分支 `codex/Prompt-Design`。
-  - 正式服务仍运行在 `0.0.0.0:5184`，当前监听进程为 `PID 64126`。
-  - 当前可访问地址更新为本机 `127.0.0.1:5184`、局域网 `172.16.75.46:5184`、VPN/内网 `10.8.11.58:5184`。
-  - 当前 `GET /api/tasks` 为空，没有导入、L1、L2 或分析任务在当前进程内运行。
-  - OpenAI 无正文连通性测试正常，Dify 测试仍返回 `Access token is invalid`，需要后续重新校验 Dify 工作流凭证。
-
-- 2026-05-20：
-  - 分析任务创建页移除独立“分析 Prompt”编辑面板。
-  - “分析 Prompt”选择移动到创建任务表单内；创建任务只选择已在 Prompt 库维护好的分析 Prompt。
-  - Prompt 正文继续统一在 `/prompts` 维护，任务运行时保存所选 Prompt 快照。
-
-- 2026-05-20：
-  - Checkpoint 当前项目基线：正式服务运行在 `0cb303c Refocus prompt library on analysis prompts`。
-  - 当前 `GET /api/tasks` 为空，没有导入、L1、L2 或分析任务在当前进程内运行。
-  - 当前可访问地址更新为本机 `127.0.0.1:5184`、局域网 `172.16.75.46:5184`、VPN/内网 `10.8.11.29:5184`。
-  - 更新书库、L1 覆盖、L2 覆盖、分析任务和分析 Prompt 库数量快照。
-
-- 2026-05-20：
-  - Prompt 库重定位为“分析 Prompt 库”，只把最终分析/汇总 Prompt 作为主字段。
-  - 创建分析任务选择分析 Prompt 时，只覆盖汇总 Prompt，不覆盖逐章 Prompt。
-  - 逐章 Prompt 降级为分析页高级兼容项，默认收起。
-  - 明确 Prompt 三层边界：`/library` 管索引构建 Prompt，`/prompts` 管分析 Prompt，`/` 管分析模式、复核预算、输出格式和高级逐章 Prompt。
-
-- 2026-05-20：
-  - 正式环境已重启到 `Add editable index prompts` 版本。
-  - 旧版 L1 和 L2 类型化事实模块新增各自独立的构建 Prompt 展示与编辑。
-  - 构建 Prompt 默认只读锁定，手动解锁后才能编辑；保存成功后自动恢复锁定。
-  - 默认 L1/L2 Prompt 继续使用历史兼容 Hash，避免已构建索引被批量误判过期。
-
-- 2026-05-20：
-  - 正式环境已重启到 `16a0fa2 Add resilient staged final summaries`。
-  - 当前本机地址 `http://127.0.0.1:5184/` 正常，当前局域网地址 `http://192.168.1.163:5184/` 正常。
-  - OpenAI 连通性测试正常，`/api/openai/test` 返回 `200`。
-  - Dify 连通性测试返回 `Access token is invalid`，需要重新校验自托管 Dify 工作流 API Key 或对应工作流访问配置。
-
-- 2026-05-20：
-  - 针对任务 `aa9010ea-6a25-40a0-84c5-968951bcba3b` 再次在 `压缩汇总素材 1/4` 阶段 180 秒 abort，进一步降低压缩批次大小。
-  - 汇总压缩和最终汇总阶段新增瞬时错误有限重试，避免网关短时不稳定导致任务直接失败。
-  - 该任务 100 个逐章结果已完成并可复用，后续续跑应跳过逐章分析，只重新执行压缩汇总与最终汇总。
-
-- 2026-05-20：
-  - 任务 `aa9010ea-6a25-40a0-84c5-968951bcba3b` 在 `压缩汇总素材 1/11` 阶段仍连续 180 秒 abort，说明模型中间压缩路径在当前网关上不可用。
-  - 长输入汇总策略改为后端本地确定性瘦身，再只调用一次最终汇总模型。
-  - 本地瘦身保留每章编号，避免中间模型漏章；语义细节会被压缩，后续需要更高精度时应采用分层索引或用户指定维度的二次精修。
-
-- 2026-05-20：
-  - 本地瘦身后，任务 `aa9010ea-6a25-40a0-84c5-968951bcba3b` 仍在最终汇总阶段触发默认 180 秒 abort。
-  - 正式环境新增 `OPENAI_REQUEST_TIMEOUT_MS=600000`，把 OpenAI 请求等待窗口提高到 10 分钟。
-
-- 2026-05-20：
-  - 针对同一任务继续降载：最终汇总优先使用任务级 `output_schema` 作为 `final_analysis` JSON Schema，并限制 `max_output_tokens=4500`。
-  - 后端本地瘦身目标降至约 1.8 万字符，减少最终单次请求输入规模。
-  - 断点续跑仍复用已完成的 100 个逐章结果，只重新执行最终汇总阶段，不重新提交章节正文。
-
-- 2026-05-20：
-  - 续跑验证显示网络中断问题已绕过，任务可跳过 100 个逐章结果并完成最终调用；但兼容网关返回过 `N/A` 占位式 JSON。
-  - 新增最终汇总质量闸门：明显占位结果按失败处理并进入重试，最终仍不合格时保留任务可续跑状态。
-
-- 2026-05-20：
-  - 修正最终汇总格式策略：`Prompt 要 JSON` 不再自动等于 `使用系统 final_analysis Schema`。
-  - 只有明确要求“匹配给定 JSON Schema”的任务才强制 Schema；自定义 JSON、Markdown、表格或纯文本格式按汇总 Prompt 原格式输出。
-  - 保留本地瘦身、`max_output_tokens`、重试和占位结果质量闸门。
-
-- 2026-05-20：
-  - 为自定义 JSON 汇总 Prompt 新增模板推导：当 Prompt 末尾存在合法 JSON 对象模板时，后端自动生成 `custom_final_analysis` Schema。
-  - 该路径既避免默认 `title/summary/items/failed_chapters` 结构污染，也比纯文本 JSON 长生成更稳定。
-  - 空数组模板字段使用宽松 JSON 值数组，避免把 `major_characters: []` 锁死成只能输出空数组或字符串数组。
-
-- 2026-05-20：
-  - 继续优化长输入自定义 JSON 汇总：进入本地瘦身路径后，按用户 JSON 模板的顶层字段逐个调用模型生成，再由后端本地合并完整结果。
-  - 该策略主要解决兼容网关在单次超长最终输出时容易 `fetch failed` 或超时的问题；不会改变短输入任务、默认 `final_analysis` Schema 任务、Markdown 或纯文本汇总任务。
-  - 已完成的逐章分析结果仍可断点复用，续跑时只需要重新执行最终分字段汇总阶段。
-
-- 2026-05-20：
-  - 新增 L2 类型化事实索引第一版：按章节构建人物、关系、境界、势力、物品、地点、事件、伏笔等事实单元。
-  - 新增 L2 构建、覆盖率和事实查询接口；L2 任务支持暂停、继续、取消、跳过已完成、只补缺失、只重试失败。
-  - 分析任务新增 `analysis_mode` 和 `source_review_budget`；默认 `balanced`，`fast_index` 不读取原文，`full_text` 保留旧路径。
-  - L2 事实正文、证据摘记和复核结果加密保存；检索元数据明文保存；继续不记录章节正文、Prompt body、OpenAI 请求体或 L2 事实内容。
-
-- 2026-05-19：
-  - 修复分析任务最终汇总阶段大输入超时问题。
-  - 新增大体量汇总保护：短输入直接汇总，长输入先分批压缩逐章结果，再基于压缩摘要生成最终结果。
-  - 分批压缩升级为最终 Prompt 感知的结构化 JSON 输出，压缩结果必须携带章节覆盖、事实、章节引用、证据备注、必须保留项和冲突项。
-  - 新增压缩覆盖校验：若中间摘要漏掉本批章节或混入非本批章节，任务直接失败，不继续生成最终汇总。
-  - 已定位失败任务 `aa9010ea-6a25-40a0-84c5-968951bcba3b`：100 章逐章结果约 17.5 万字符，最终汇总请求 180 秒超时。
-
-- 2026-05-19：
-  - 新增分析任务断点续跑：`POST /api/analyses/:id/resume-run`。
-  - 分析任务状态提升到前端全局托管，切换到章节库或 Prompt 库时分析任务继续后台运行并显示顶部进度入口。
-  - `GET /api/analyses/:id` 扩展返回逐章部分结果、失败章节、待续跑章节和 `canResume`。
-  - 分析任务运行时写入 `analysis_runs.status=running`，已完成逐章结果继续加密保存在 `analysis_chapters`。
-  - 断点续跑只复用原任务快照，跳过已完成且章节 HMAC 与 Prompt Hash 匹配的章节。
-
-- 2026-05-19：
-  - 新增本机预览环境：`5194` 端口、`data-preview/` 数据副本、`dist-preview/` 静态资源目录。
-  - 后端静态资源目录改为可通过 `STATIC_DIR` 配置，正式环境默认仍使用 `dist/`。
-  - 新增预览数据准备脚本，使用 SQLite 安全备份方式从正式数据库生成预览快照。
-  - 前端在预览环境顶部显示“本机预览 · 数据副本”。
-  - 新增 `preview:prepare-data`、`build:preview`、`start:preview`、`preview:local` 命令。
-
-- 2026-05-19：
-  - 重启服务后启用新版前端与后端任务找回接口。
-  - 新增 `GET /api/tasks`，用于当前 Node 进程内找回导入、L1、分析等内存任务。
-  - 章节库新增 L1 覆盖率卡片、章节表搜索、L1 状态列和 L1 状态筛选。
-  - 分析页章节选择收起态新增 L1 覆盖提示，Prompt 编辑区新增未保存草稿提示。
-  - Prompt 库新增未保存修改提示和切换保护。
-  - 当前运行中分析任务曾出现 `OpenAI 返回不是合法 JSON：Unexpected end of JSON input`；P2 已新增通用 JSON 修复重试，覆盖章节分析和最终汇总等结构化调用。
-  - 更新当前数据快照：`剑来` L1 索引为 482 完成、797 失败；`废材那又怎样` L1 索引为 63 完成。
-
-- 2026-05-18：
-  - 将本文档改为中文项目基线，仅保留必要技术字段英文。
-
-- 2026-05-18：
-  - 清空 `OPENAI_PROXY_URL`，OpenAI 兼容调用改为直连。
-  - 确认 `/api/openai/test` 返回 `200`。
-  - 记录当前数据快照和中长期路线图。
-  - 再次确认本文档为项目唯一真实信息源。
-
-- 2026-05-18：
-  - 移除新的 10 章窗口 L1 构建路径。
-  - 分析任务不再附加窗口 L1 上下文。
-  - 保留历史 `l1_window_indexes` 数据。
-  - L1 覆盖率聚焦逐章覆盖。
-
-- 2026-05-17：
-  - 增加 L1 逐章索引表和任务流程。
-  - 增加 Prompt 库页面。
-  - 拆分分析任务中心和章节库页面。
-  - 增加暂停/继续/取消和任务时间估算。
-
-- 2026-05-15 至 2026-05-16：
-  - 创建本地服务。
-  - 增加加密章节导入和分析流程。
-  - 增加 Dify 最小章节工作流集成。
-  - 增加 `5184` 端口局域网访问。
+- `README.md` 面向使用者，描述安装、运行和页面入口。
+- 本文件面向项目控制，负责记录当前真实边界与关键约束。
+- `docs/L1_L2_INDEX_STORAGE.md` 面向索引存储专题设计。
+- 当三者冲突时，应先修正文档漂移，再以本文件为控制真相源。

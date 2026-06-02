@@ -20,14 +20,19 @@ export const config = {
     apiKey: process.env.DIFY_CHAPTER_WORKFLOW_API_KEY || "",
     l1ApiKey: process.env.DIFY_L1_WORKFLOW_API_KEY || "",
     l2ApiKey: process.env.DIFY_L2_WORKFLOW_API_KEY || "",
+    analysisChapterWorkflowApiKey: process.env.DIFY_ANALYSIS_CHAPTER_WORKFLOW_API_KEY || "",
+    analysisSummaryWorkflowApiKey: process.env.DIFY_ANALYSIS_SUMMARY_WORKFLOW_API_KEY || "",
     l1WorkflowVersion: String(process.env.DIFY_L1_WORKFLOW_VERSION || "v1").trim() || "v1",
     l2WorkflowVersion: String(process.env.DIFY_L2_WORKFLOW_VERSION || "v1").trim() || "v1",
+    analysisChapterWorkflowVersion: String(process.env.DIFY_ANALYSIS_CHAPTER_WORKFLOW_VERSION || "v1").trim() || "v1",
+    analysisSummaryWorkflowVersion: String(process.env.DIFY_ANALYSIS_SUMMARY_WORKFLOW_VERSION || "v1").trim() || "v1",
     user: process.env.DIFY_USER || "local-secure-importer",
     batchSize: clampInteger(process.env.IMPORT_BATCH_SIZE, 1, 50, 10)
   },
   indexing: {
     l1Provider: normalizeIndexProvider(process.env.L1_INDEX_PROVIDER, "dify"),
-    l2Provider: normalizeIndexProvider(process.env.L2_INDEX_PROVIDER, "dify")
+    l2Provider: normalizeIndexProvider(process.env.L2_INDEX_PROVIDER, "dify"),
+    analysisProvider: normalizeIndexProvider(process.env.ANALYSIS_PROVIDER, "dify")
   },
   openai: {
     base: normalizeBase(process.env.OPENAI_API_BASE || "https://api.openai.com/v1"),
@@ -56,6 +61,7 @@ export function publicRuntimeConfig() {
     difyBase: maskUrl(config.dify.base),
     l1IndexProvider: config.indexing.l1Provider,
     l2IndexProvider: config.indexing.l2Provider,
+    analysisProvider: config.indexing.analysisProvider,
     openaiConfigured: Boolean(config.openai.apiKey),
     openaiBase: maskUrl(config.openai.base),
     openaiModel: config.openai.model,
@@ -68,7 +74,9 @@ export function publicRuntimeConfig() {
     isPreview: config.appEnv === "preview",
     importBatchSize: config.dify.batchSize,
     chapterConcurrency: config.openai.chapterConcurrency,
-    openaiMaxRetries: config.openai.maxRetries
+    openaiMaxRetries: config.openai.maxRetries,
+    difyAnalysisChapterConfigured: isDifyTargetConfigured("analysis_chapter"),
+    difyAnalysisSummaryConfigured: isDifyTargetConfigured("analysis_summary")
   };
 }
 
@@ -107,6 +115,8 @@ export function difyApiKeyForTarget(target = "import") {
   const key = String(target || "import").trim().toLowerCase();
   if (key === "l1") return config.dify.l1ApiKey;
   if (key === "l2") return config.dify.l2ApiKey;
+  if (key === "analysis_chapter") return config.dify.analysisChapterWorkflowApiKey;
+  if (key === "analysis_summary") return config.dify.analysisSummaryWorkflowApiKey;
   return config.dify.apiKey;
 }
 
@@ -114,6 +124,8 @@ export function difyApiKeyEnvName(target = "import") {
   const key = String(target || "import").trim().toLowerCase();
   if (key === "l1") return "DIFY_L1_WORKFLOW_API_KEY";
   if (key === "l2") return "DIFY_L2_WORKFLOW_API_KEY";
+  if (key === "analysis_chapter") return "DIFY_ANALYSIS_CHAPTER_WORKFLOW_API_KEY";
+  if (key === "analysis_summary") return "DIFY_ANALYSIS_SUMMARY_WORKFLOW_API_KEY";
   return "DIFY_CHAPTER_WORKFLOW_API_KEY";
 }
 
