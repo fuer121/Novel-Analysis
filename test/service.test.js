@@ -3717,6 +3717,626 @@ test("evidence packet ranking keeps target subject first under budget", async ()
   }
 });
 
+test("single target object field stays within budget even without evidence packets", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-empty-target-budget",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章正文"
+  });
+
+  const previousFetch = global.fetch;
+  const capturedInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const formatName = body.text?.format?.name || "";
+    assert.equal(formatName.startsWith("custom_field_"), true);
+    const text = body.input[0].content[0].text;
+    capturedInputs.push(text);
+    assert.equal(text.length <= 28_000, true);
+    const fieldName = formatName.replace(/^custom_field_/, "");
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_empty_target_${fieldName}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify({
+          [fieldName]: fieldName === "sword"
+            ? { name: "初一", core_profile: "信息不足", evidence_refs: [] }
+            : "信息不足"
+        }) }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "fast_index",
+      source_review_budget: 0,
+      book_id: "book-empty-target-budget",
+      start_chapter: 1,
+      end_chapter: 1,
+      prompt: {
+        summary_prompt: [
+          "输出《剑来》中“初一”的设定集 JSON。",
+          "要求：仅依据已召回事实，不确定处写信息不足。",
+          "额外说明：",
+          "为了复现真实长模板，这里有很多写作要求。".repeat(180),
+          "{",
+          "  \"book_id\": \"book-empty-target-budget\",",
+          "  \"target_item\": \"初一\",",
+          "  \"sword\": {",
+          "    \"name\": \"初一\",",
+          "    \"core_profile\": \"140-220字。概括核心定位。\",",
+          "    \"appearance\": { \"before_refine\": \"说明\", \"after_refine\": \"说明\", \"stage_changes\": [] },",
+          "    \"abilities\": { \"mechanism\": \"说明\", \"combat_records\": [], \"limits\": [] },",
+          "    \"evidence_refs\": []",
+          "  }",
+          "}"
+        ].join("\n")
+      }
+    });
+    await waitForTask(analysis);
+    assert.equal(capturedInputs.some((text) => text.includes("当前字段 Schema JSON：")), false);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.sourceTraceSummary.target_subject, "初一");
+    assert.equal(result.sourceTrace.some((trace) => trace.field_name === "sword"), true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("object field merge keeps prior facts when later batch only has placeholders", async () => {
+  const bookId = "book-object-placeholder-merge";
+  for (let chapterIndex = 1; chapterIndex <= 96; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "item",
+        entity: "初一",
+        tags: ["飞剑"],
+        related_entities: ["陈平安"],
+        fact_type: "appearance",
+        fact: `初一占位覆盖测试事实${chapterIndex}：${"有效事实材料。".repeat(180)}`,
+        evidence: [`初一占位覆盖证据${chapterIndex}`],
+        importance: 0.9,
+        confidence: 0.9
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  let swordBatchCalls = 0;
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const formatName = body.text?.format?.name || "";
+    assert.equal(formatName.startsWith("custom_field_"), true);
+    if (formatName === "custom_field_merge_sword") {
+      return {
+        ok: true,
+        json: async () => ({
+          id: "resp_object_placeholder_merge_polish",
+          output: [{ content: [{ type: "output_text", text: JSON.stringify({
+            sword: {
+              name: "初一",
+              core_profile: "厚核心定位",
+              appearance: { after_refine: "白虹外形" },
+              origin: { text: "早期来源" },
+              classic_records: [{ summary: "记录一" }]
+            }
+          }) }] }]
+        })
+      };
+    }
+    const fieldName = formatName.replace(/^custom_field_/, "");
+    if (fieldName === "sword") swordBatchCalls += 1;
+    const swordValue = swordBatchCalls === 1
+      ? {
+        name: "初一",
+        core_profile: "厚核心定位",
+        appearance: { after_refine: "白虹外形" },
+        origin: { text: "早期来源" },
+        classic_records: [{ summary: "记录一" }]
+      }
+      : {
+        name: "初一",
+        core_profile: "信息不足",
+        appearance: { after_refine: "信息不足" },
+        origin: { text: "信息不足" },
+        classic_records: []
+      };
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_object_placeholder_merge_${fieldName}_${swordBatchCalls}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify({
+          [fieldName]: fieldName === "sword" ? swordValue : "ok"
+        }) }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "fast_index",
+      source_review_budget: 0,
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 96,
+      prompt: {
+        summary_prompt: [
+          "输出《剑来》中“初一”的设定集 JSON。",
+          "{",
+          "  \"target_item\": \"初一\",",
+          "  \"sword\": {",
+          "    \"name\": \"初一\",",
+          "    \"core_profile\": \"\",",
+          "    \"appearance\": { \"after_refine\": \"\" },",
+          "    \"origin\": { \"text\": \"\" },",
+          "    \"classic_records\": []",
+          "  }",
+          "}"
+        ].join("\n")
+      }
+    });
+    await waitForTask(analysis);
+    assert.equal(swordBatchCalls > 1, true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.finalResult.sword.core_profile, "厚核心定位");
+    assert.equal(result.finalResult.sword.appearance.after_refine, "白虹外形");
+    assert.equal(result.finalResult.sword.origin.text, "早期来源");
+    assert.equal(result.finalResult.sword.classic_records.length, 1);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("single target dossier prioritizes target item facts over other swords", async () => {
+  const bookId = "book-target-dossier";
+  for (let chapterIndex = 1; chapterIndex <= 6; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    const isTarget = chapterIndex >= 5;
+    await db.saveL2ChapterFacts({
+      bookId,
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "item",
+        entity: isTarget ? "初一" : `其他飞剑${chapterIndex}`,
+        tags: ["飞剑"],
+        related_entities: isTarget ? ["陈平安"] : [],
+        fact_type: isTarget ? "ability" : "appearance",
+        fact: isTarget ? `初一目标事实${chapterIndex}` : `其他飞剑噪音事实${chapterIndex}${"冗余".repeat(80)}`,
+        evidence: [isTarget ? `初一证据${chapterIndex}` : `其他飞剑证据${chapterIndex}`],
+        importance: isTarget ? 0.95 : 0.9,
+        confidence: isTarget ? 0.95 : 0.9
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  let swordMaterial = null;
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const fieldName = String(body.text?.format?.name || "").replace(/^custom_field_/, "");
+    const material = extractEvidenceMaterial(body.input[0].content[0].text);
+    if (fieldName === "sword" && !swordMaterial) swordMaterial = material;
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_target_dossier_${fieldName}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify({
+          [fieldName]: fieldName === "sword"
+            ? { name: "初一", core_profile: "初一目标事实5；初一目标事实6", evidence_refs: [] }
+            : "ok"
+        }) }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "fast_index",
+      source_review_budget: 0,
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 6,
+      prompt: {
+        summary_prompt: [
+          "输出《剑来》中“初一”的设定集 JSON。",
+          "{",
+          "  \"target_item\": \"初一\",",
+          "  \"sword\": { \"name\": \"初一\", \"core_profile\": \"\", \"evidence_refs\": [] }",
+          "}"
+        ].join("\n")
+      }
+    });
+    await waitForTask(analysis);
+    assert.equal(swordMaterial.target_subject, "初一");
+    assert.equal(swordMaterial.evidence_packets.every((packet) => packet.subject === "初一"), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "初一");
+    assert.equal(result.source_stats.target_recalled_facts, 2);
+    assert.equal(result.sourceTraceSummary.target_subject, "初一");
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("multi-batch target object merge preserves useful nested fields and rejects thin model merge", async () => {
+  const bookId = "book-target-object-merge";
+  for (let chapterIndex = 1; chapterIndex <= 96; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "item",
+        entity: "初一",
+        tags: ["飞剑", "初一"],
+        related_entities: ["陈平安"],
+        fact_type: chapterIndex <= 12 ? "appearance" : chapterIndex <= 24 ? "ability" : "record",
+        fact: `初一分块合并事实${chapterIndex}：${"用于撑开证据包预算的忠实事实材料。".repeat(90)}`,
+        evidence: [`初一证据${chapterIndex}`],
+        importance: 0.9,
+        confidence: 0.9
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  let swordBatchCalls = 0;
+  let mergeInput = "";
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const formatName = body.text?.format?.name || "";
+    if (formatName === "custom_field_merge_sword") {
+      mergeInput = body.input[0].content[0].text;
+      assert.equal(mergeInput.length <= 28_000, true);
+      assert.equal(mergeInput.includes("证据包素材 JSON："), false);
+      assert.equal(mergeInput.includes("分块结果 JSON："), true);
+      return {
+        ok: true,
+        json: async () => ({
+          id: "resp_target_object_merge_polish",
+          output: [{ content: [{ type: "output_text", text: JSON.stringify({
+            sword: {
+              name: "初一",
+              core_profile: "信息不足",
+              appearance: { after_refine: "信息不足" },
+              origin: { text: "信息不足" },
+              classic_records: []
+            }
+          }) }] }]
+        })
+      };
+    }
+    assert.equal(formatName.startsWith("custom_field_"), true);
+    const fieldName = formatName.replace(/^custom_field_/, "");
+    if (fieldName === "sword") swordBatchCalls += 1;
+    const swordValue = swordBatchCalls === 1
+      ? {
+        name: "初一",
+        core_profile: "初一是陈平安飞剑体系中极具辨识度的一把本命飞剑，早期以纤细白虹般的形貌与锋锐气质形成记忆点。",
+        appearance: {
+          after_refine: "炼化后的初一如小小白虹，剑身纤细却锋芒毕露。",
+          field_evidence_refs: ["batch1-appearance"]
+        },
+        origin: {
+          text: "初一与陈平安早期飞剑谱系相关，是后续战斗和剑修身份展开的重要素材。",
+          field_evidence_refs: ["batch1-origin"]
+        },
+        classic_records: [{ chapter: 1, summary: "初一以白虹姿态参与早期战斗。", evidence_refs: ["batch1-record"] }]
+      }
+      : swordBatchCalls === 2
+        ? {
+          name: "初一",
+          core_profile: "信息不足",
+          appearance: { after_refine: "信息不足" },
+          core_abilities: {
+            text: "初一擅长高速突袭和近身牵制，常与陈平安的战斗节奏形成配合。",
+            field_evidence_refs: ["batch2-ability"]
+          },
+          traits: {
+            text: "初一的消费价值在于形象明确、出场辨识度高，并能串联陈平安剑修成长线。",
+            field_evidence_refs: ["batch2-trait"]
+          }
+        }
+        : {
+          name: "初一",
+          core_profile: "信息不足",
+          appearance: { after_refine: "信息不足" },
+          origin: { text: "信息不足" },
+          classic_records: []
+        };
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_target_object_merge_${fieldName}_${swordBatchCalls}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify({
+          [fieldName]: fieldName === "sword" ? swordValue : "ok"
+        }) }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "fast_index",
+      source_review_budget: 0,
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 96,
+      prompt: {
+        summary_prompt: [
+          "输出《剑来》中“初一”的设定集 JSON。",
+          "要求：忠实原文；不同分块中的有效信息都要保留，不能用信息不足覆盖已有事实。",
+          "{",
+          "  \"target_item\": \"初一\",",
+          "  \"sword\": {",
+          "    \"name\": \"初一\",",
+          "    \"core_profile\": \"\",",
+          "    \"appearance\": { \"after_refine\": \"\", \"field_evidence_refs\": [] },",
+          "    \"origin\": { \"text\": \"\", \"field_evidence_refs\": [] },",
+          "    \"traits\": { \"text\": \"\", \"field_evidence_refs\": [] },",
+          "    \"core_abilities\": { \"text\": \"\", \"field_evidence_refs\": [] },",
+          "    \"classic_records\": []",
+          "  }",
+          "}"
+        ].join("\n")
+      }
+    });
+    await waitForTask(analysis);
+    assert.equal(swordBatchCalls > 1, true);
+    assert.equal(mergeInput.includes("递归合并候选 JSON："), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.finalResult.sword.name, "初一");
+    assert.equal(result.finalResult.sword.core_profile.includes("极具辨识度"), true);
+    assert.equal(result.finalResult.sword.appearance.after_refine.includes("小小白虹"), true);
+    assert.equal(result.finalResult.sword.origin.text.includes("早期飞剑谱系"), true);
+    assert.equal(result.finalResult.sword.traits.text.includes("消费价值"), true);
+    assert.equal(result.finalResult.sword.core_abilities.text.includes("高速突袭"), true);
+    assert.equal(result.finalResult.sword.classic_records.length, 1);
+    const mergeTrace = result.sourceTrace.find((trace) => trace.part_key === "json.sword.merge");
+    assert.equal(mergeTrace.field_merge_mode, "model_polish");
+    assert.equal(mergeTrace.field_merge_batch_count > 1, true);
+    assert.equal(mergeTrace.field_merge_model_used, false);
+    assert.equal(mergeTrace.field_merge_fallback_reason, "model_merge_less_useful");
+    assert.equal(mergeTrace.merged_value_chars > 0, true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("single target recall falls back when specialized facts are stored as other category", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-target-category-fallback",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章原文"
+  });
+  const chapter = db.getChapterMetadata("book-target-category-fallback", 1);
+  db.saveL1ChapterIndex({
+    bookId: "book-target-category-fallback",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l1-route-v1",
+    value: {
+      route_schema_version: "l1-route-v1",
+      route_entities: [{ name: "初一", type: "item", aliases: [], role: "目标飞剑", note: "飞剑事实" }],
+      route_keywords: ["初一", "飞剑"],
+      signals: [{ category: "item", strength: 0.9, entities: ["初一"], keywords: ["飞剑"], reason: "目标飞剑" }],
+      category_scores: { item: 0.9, event: 0.3 }
+    }
+  });
+  await db.saveL2ChapterFacts({
+    bookId: "book-target-category-fallback",
+    indexGroupKey: "sword-special",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l2-v1-typed-facts",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "other",
+      entity: "",
+      tags: ["剑类", "飞剑", "初一"],
+      related_entities: ["陈平安"],
+      fact_type: "appearance",
+      fact: "飞剑初一外形如一条小小的白虹，剑身纤细而锋芒毕露。",
+      evidence: [],
+      importance: 0.95,
+      confidence: 0.95
+    }]
+  });
+  db.createBookIndexGroup("book-target-category-fallback", {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+
+  const previousFetch = global.fetch;
+  let swordMaterial = null;
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const fieldName = String(body.text?.format?.name || "").replace(/^custom_field_/, "");
+    const material = extractEvidenceMaterial(body.input[0].content[0].text);
+    if (fieldName === "sword") swordMaterial = material;
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_target_category_fallback_${fieldName}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify({
+          [fieldName]: fieldName === "sword"
+            ? { name: "初一", core_profile: "飞剑初一外形如一条小小的白虹。", evidence_refs: [] }
+            : "ok"
+        }) }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "fast_index",
+      source_review_budget: 0,
+      book_id: "book-target-category-fallback",
+      start_chapter: 1,
+      end_chapter: 1,
+      prompt: {
+        summary_prompt: [
+          "输出《剑来》中“初一”的设定集 JSON。",
+          "要求：武器、物品、事件相关事实都可用于设定集。",
+          "{",
+          "  \"target_item\": \"初一\",",
+          "  \"sword\": { \"name\": \"初一\", \"core_profile\": \"\", \"evidence_refs\": [] }",
+          "}"
+        ].join("\n"),
+        index_group_keys: ["sword-special"]
+      }
+    });
+    await waitForTask(analysis);
+    assert.equal(swordMaterial.target_subject, "初一");
+    assert.equal(swordMaterial.evidence_packets.length, 1);
+    assert.equal(swordMaterial.evidence_packets[0].subject, "初一");
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.l1_route_enabled, true);
+    assert.equal(result.source_stats.target_recalled_facts, 1);
+    assert.equal(result.source_stats.category_filter_fallback_used, true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("single target trace exposes field material diagnostics", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-target-trace",
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章原文"
+  });
+  const chapter = db.getChapterMetadata("book-target-trace", 1);
+  await db.saveL2ChapterFacts({
+    bookId: "book-target-trace",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l2-v1-typed-facts",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "item",
+      entity: "初一",
+      tags: ["飞剑"],
+      related_entities: ["陈平安"],
+      fact_type: "origin",
+      fact: "初一是陈平安相关飞剑事实。",
+      evidence: ["初一证据"],
+      importance: 0.9,
+      confidence: 0.9
+    }]
+  });
+
+  const previousFetch = global.fetch;
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const fieldName = String(body.text?.format?.name || "").replace(/^custom_field_/, "");
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_target_trace_${fieldName}`,
+        output: [{ content: [{ type: "output_text", text: JSON.stringify({
+          [fieldName]: fieldName === "sword"
+            ? { name: "初一", core_profile: "初一是陈平安相关飞剑事实。", evidence_refs: [] }
+            : "ok"
+        }) }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "fast_index",
+      source_review_budget: 0,
+      book_id: "book-target-trace",
+      start_chapter: 1,
+      end_chapter: 1,
+      prompt: {
+        summary_prompt: [
+          "输出《剑来》中“初一”的设定集 JSON。",
+          "{",
+          "  \"target_item\": \"初一\",",
+          "  \"sword\": { \"name\": \"初一\", \"core_profile\": \"\", \"evidence_refs\": [] }",
+          "}"
+        ].join("\n")
+      }
+    });
+    await waitForTask(analysis);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    const swordTrace = result.sourceTrace.find((trace) => trace.field_name === "sword");
+    assert.equal(swordTrace.target_subject, "初一");
+    assert.equal(swordTrace.target_evidence_count, 1);
+    assert.equal(typeof swordTrace.prompt_overhead_chars, "number");
+    assert.equal(typeof swordTrace.material_chars, "number");
+    assert.equal(swordTrace.field_material_mode, "target_dossier");
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("stores plain text final analysis result when summary is not JSON", async () => {
   await db.saveEncryptedChapter({
     bookId: "book-text-result",
