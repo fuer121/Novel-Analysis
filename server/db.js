@@ -147,6 +147,7 @@ db.exec(`
     status TEXT NOT NULL,
     content_hmac TEXT,
     prompt_hash TEXT NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
     ciphertext TEXT,
     iv TEXT,
     tag TEXT,
@@ -1475,18 +1476,19 @@ export function l1WindowSourceHmac(bookId, windowStart, windowEnd, model = "", p
     .join("|");
 }
 
-export async function saveAnalysisChapter({ analysisId, chapterIndex, status, contentHmac, promptHash, result, errorSummary = "" }) {
+export async function saveAnalysisChapter({ analysisId, chapterIndex, status, contentHmac, promptHash, model = "", result, errorSummary = "" }) {
   const encrypted = result === undefined ? null : await encryptText(JSON.stringify(result), analysisChapterAad(analysisId, chapterIndex));
   db.prepare(`
     INSERT INTO analysis_chapters (
-      analysis_id, chapter_index, status, content_hmac, prompt_hash,
+      analysis_id, chapter_index, status, content_hmac, prompt_hash, model,
       ciphertext, iv, tag, algorithm, error_summary, updated_at
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(analysis_id, chapter_index) DO UPDATE SET
       status = excluded.status,
       content_hmac = excluded.content_hmac,
       prompt_hash = excluded.prompt_hash,
+      model = excluded.model,
       ciphertext = excluded.ciphertext,
       iv = excluded.iv,
       tag = excluded.tag,
@@ -1499,6 +1501,7 @@ export async function saveAnalysisChapter({ analysisId, chapterIndex, status, co
     status,
     contentHmac || "",
     promptHash,
+    String(model || ""),
     encrypted?.ciphertext || null,
     encrypted?.iv || null,
     encrypted?.tag || null,
@@ -1516,6 +1519,7 @@ export function listAnalysisChapterMetadata(analysisId) {
       status,
       content_hmac,
       prompt_hash,
+      model,
       error_summary,
       updated_at,
       CASE WHEN ciphertext IS NOT NULL AND ciphertext != '' THEN 1 ELSE 0 END AS has_result
@@ -1533,6 +1537,7 @@ export function getAnalysisChapterMetadata(analysisId, chapterIndex) {
       status,
       content_hmac,
       prompt_hash,
+      model,
       error_summary,
       updated_at,
       CASE WHEN ciphertext IS NOT NULL AND ciphertext != '' THEN 1 ELSE 0 END AS has_result
@@ -1838,6 +1843,7 @@ function migrateSchema() {
   ensureColumn("analysis_runs", "prompt_iv", "prompt_iv TEXT");
   ensureColumn("analysis_runs", "prompt_tag", "prompt_tag TEXT");
   ensureColumn("analysis_runs", "prompt_algorithm", "prompt_algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm'");
+  ensureColumn("analysis_chapters", "model", "model TEXT NOT NULL DEFAULT ''");
   ensureColumn("analysis_summary_parts", "trace_summary", "trace_summary TEXT NOT NULL DEFAULT ''");
   migrateL2IndexGroupColumns();
   migrateBookIndexPrompts();

@@ -146,6 +146,37 @@ export function normalizeDifyL2Output(raw) {
   };
 }
 
+export function normalizeDifyAnalysisJsonOutput(raw, schema = null) {
+  const value = coerceAnalysisJsonBySchema(normalizeDifyOutputEnvelope(raw), schema);
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = coerceAnalysisJsonBySchema(parseJsonMaybe(value), schema);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
+  }
+  const error = new Error("Dify 分析工作流返回的 JSON 无法解析为对象。");
+  error.status = 502;
+  throw error;
+}
+
+export function normalizeDifyAnalysisTextOutput(raw) {
+  const value = normalizeDifyOutputEnvelope(raw);
+  if (typeof value === "string") {
+    const text = value.trim();
+    if (text) return text;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    const candidates = [value.text, value.result, value.output, value.content, value.data]
+      .map((entry) => (typeof entry === "string" ? entry.trim() : ""))
+      .filter(Boolean);
+    if (candidates.length) return candidates[0];
+  }
+  const error = new Error("Dify 分析工作流返回了空文本。");
+  error.status = 502;
+  throw error;
+}
+
 export function normalizeDifyChapterOutput(raw, context = {}) {
   const value = normalizeDifyOutputEnvelope(raw);
   const chapters = extractChapters(value);
@@ -217,6 +248,25 @@ function normalizeDifyOutputEnvelope(raw) {
     if (mapped !== undefined) return parseJsonMaybe(mapped);
   }
   return value;
+}
+
+function coerceAnalysisJsonBySchema(value, schema) {
+  if (!schema || !isPlainObject(schema)) return value;
+  if (isPlainObject(value)) return value;
+  const properties = isPlainObject(schema.properties) ? Object.keys(schema.properties) : [];
+  if (properties.length === 1) {
+    return { [properties[0]]: value };
+  }
+  const required = Array.isArray(schema.required) ? schema.required : [];
+  const matched = required.filter((key) => properties.includes(key));
+  if (matched.length === 1) {
+    return { [matched[0]]: value };
+  }
+  return value;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function normalizeDifyRouteEntities(value) {

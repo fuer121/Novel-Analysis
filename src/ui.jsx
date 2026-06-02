@@ -13,8 +13,12 @@ import { downloadJson, formatTime } from "./api.js";
 export function RuntimeGrid({ config }) {
   const l1Provider = config.l1IndexProvider || "openai";
   const l2Provider = config.l2IndexProvider || "openai";
+  const analysisProvider = config.analysisProvider || "dify";
   const l1Ready = l1Provider === "dify" ? config.difyL1Configured : config.openaiConfigured;
   const l2Ready = l2Provider === "dify" ? config.difyL2Configured : config.openaiConfigured;
+  const analysisReady = analysisProvider === "dify"
+    ? Boolean(config.difyAnalysisChapterConfigured && config.difyAnalysisSummaryConfigured)
+    : Boolean(config.openaiConfigured && config.retentionConfirmed);
   return (
     <div className="runtime-grid">
       {config.isPreview ? (
@@ -43,6 +47,12 @@ export function RuntimeGrid({ config }) {
         label="L2 索引"
         ok={l2Ready}
         value={`${providerLabel(l2Provider)} · ${l2Ready ? "已配置" : "未配置"}`}
+      />
+      <RuntimeItem
+        icon={Database}
+        label="分析执行"
+        ok={analysisReady}
+        value={`${providerLabel(analysisProvider)} · ${analysisReady ? "已配置" : "未配置"}`}
       />
       <RuntimeItem
         icon={KeyRound}

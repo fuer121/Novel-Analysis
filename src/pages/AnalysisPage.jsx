@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { apiDelete, apiGet, formatTime } from "../api.js";
 import { IconButton, Panel, ResultActions, StatusPill, TaskBox } from "../ui.jsx";
+import { analysisIndexCoverageText, factIndexName } from "../analysisCoverage.js";
 import {
   normalizePrompt,
   outputSchemaForPrompt,
@@ -54,7 +55,7 @@ export function AnalysisPage({
   const [indexGroups, setIndexGroups] = useState([]);
   const [selectedPromptGroupId, setSelectedPromptGroupId] = useState("");
   const [selectedIndexes, setSelectedIndexes] = useState([]);
-  const [l2Coverage, setL2Coverage] = useState(null);
+  const [l2CoveragesByGroup, setL2CoveragesByGroup] = useState({});
   const selectionOverrideRef = useRef(null);
   const [selectionOverrideToken, setSelectionOverrideToken] = useState(0);
   const [selectedAnalysis, setSelectedAnalysis] = useState(null);
@@ -107,6 +108,10 @@ export function AnalysisPage({
     () => selectedPromptGroup(bookPromptGroups, selectedPromptGroupId),
     [bookPromptGroups, selectedPromptGroupId]
   );
+  const analysisProvider = config.analysisProvider || "dify";
+  const analysisProviderReady = analysisProvider === "dify"
+    ? Boolean(config.difyAnalysisChapterConfigured && config.difyAnalysisSummaryConfigured)
+    : Boolean(config.openaiConfigured && config.retentionConfirmed);
   const hasBoundIndexGroups = (selectedPromptGroupEntry?.index_group_keys || []).length > 0;
 
   const chaptersInRange = useMemo(
@@ -187,14 +192,17 @@ export function AnalysisPage({
       return;
     }
     try {
-      const groupKey = selectedPromptGroupEntry?.index_group_keys?.[0];
-      if (!groupKey) {
-        setL2Coverage(null);
+      const groupKeys = selectedPromptGroupEntry?.index_group_keys || [];
+      if (!groupKeys.length) {
+        setL2CoveragesByGroup({});
         return;
       }
-      const query = `start_chapter=${encodeURIComponent(analysisForm.start_chapter)}&end_chapter=${encodeURIComponent(analysisForm.end_chapter)}&index_group_key=${encodeURIComponent(groupKey)}`;
-      const l2Data = await apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l2-indexes/coverage?${query}`);
-      setL2Coverage(l2Data.coverage);
+      const entries = await Promise.all(groupKeys.map(async (groupKey) => {
+        const query = `start_chapter=${encodeURIComponent(analysisForm.start_chapter)}&end_chapter=${encodeURIComponent(analysisForm.end_chapter)}&index_group_key=${encodeURIComponent(groupKey)}`;
+        const l2Data = await apiGet(`/api/books/${encodeURIComponent(analysisForm.book_id)}/l2-indexes/coverage?${query}`);
+        return [groupKey, l2Data.coverage];
+      }));
+      setL2CoveragesByGroup(Object.fromEntries(entries));
     } catch (error) {
       setError(error.message);
     }
@@ -216,6 +224,12 @@ export function AnalysisPage({
     }
     if (!hasBoundIndexGroups) {
       setError("分析模板必须绑定至少一个事实索引，请先到模板管理中选择并保存。");
+      return;
+    }
+    if (!analysisProviderReady) {
+      setError(analysisProvider === "dify"
+        ? "分析执行器未就绪：请配置 DIFY_ANALYSIS_CHAPTER_WORKFLOW_API_KEY 与 DIFY_ANALYSIS_SUMMARY_WORKFLOW_API_KEY。"
+        : "分析执行器未就绪：请配置 OPENAI_API_KEY 并确认 OPENAI_RETENTION_MODE。");
       return;
     }
 
@@ -321,7 +335,7 @@ export function AnalysisPage({
   function updateAnalysisForm(patch) {
     setAnalysisForm((form) => ({ ...form, ...patch }));
     if (patch.book_id !== undefined || patch.start_chapter !== undefined || patch.end_chapter !== undefined) {
-      setL2Coverage(null);
+      setL2CoveragesByGroup({});
     }
   }
 
@@ -416,13 +430,13 @@ export function AnalysisPage({
 
           <div className="command-footer">
             <div className="index-route-note">
-              {analysisRouteNote(analysisForm.analysis_mode, l2Coverage, selectedIndexes.length, selectedPromptGroupEntry, indexGroups)}
+              {analysisRouteNote(analysisForm.analysis_mode, l2CoveragesByGroup, selectedIndexes.length, selectedPromptGroupEntry, indexGroups)}
             </div>
             <button
               className="primary inline command-primary"
               type="button"
               onClick={startAnalysis}
-              disabled={analysisBusy || !config.openaiConfigured || !config.retentionConfirmed || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId || !hasBoundIndexGroups}
+              disabled={analysisBusy || !analysisProviderReady || !analysisForm.book_id || !selectedIndexes.length || !selectedPromptGroupId || !hasBoundIndexGroups}
             >
               {analysisBusy ? <Loader2 className="spin" size={18} /> : <Play size={18} />}
               {analysisBusy ? "分析中" : "开始分析"}
@@ -503,31 +517,19 @@ function sanitizeChapterInput(value) {
   return digits.replace(/^0+(?=\d)/, "").replace(/^0$/, "");
 }
 
-function analysisRouteNote(mode, coverage, selectedCount, promptGroup, indexGroups) {
-  const groupText = indexGroupText(promptGroup, indexGroups);
+function analysisRouteNote(mode, coveragesByGroup, selectedCount, promptGroup, indexGroups) {
+  const groupText = analysisIndexCoverageText({ promptGroup, indexGroups, coveragesByGroup });
   if (mode === "full_text") return `全文精读 · 最完整 · 逐章读取原文 · ${groupText}`;
-  if (mode === "fast_index") return `快速探索 · 只用已准备事实索引 · ${groupText} · ${coverageText(coverage)}`;
+  if (mode === "fast_index") return `快速探索 · 只用已准备事实索引 · ${groupText}`;
   const reviewBudget = mode === "precision"
     ? Math.min(30, Math.max(5, Math.ceil(selectedCount * 0.03)))
     : Math.min(10, Math.max(3, Math.ceil(selectedCount * 0.01)));
   const label = mode === "precision" ? "精准复核 · 更稳" : "平衡推荐 · 速度较快";
-  return `${label} · 最多复核 ${reviewBudget} 章 · ${groupText} · ${coverageText(coverage)}`;
-}
-
-function coverageText(coverage) {
-  if (!coverage?.chapters) return "读取中";
-  return `事实索引 ${coverage.chapters.completed}/${coverage.chapters.total} 章，${coverage.chapters.facts || 0} 条`;
+  return `${label} · 最多复核 ${reviewBudget} 章 · ${groupText}`;
 }
 
 function selectedPromptGroup(groups, groupId) {
   return groups.find((group) => group.id === groupId) || null;
-}
-
-function indexGroupText(promptGroup, indexGroups) {
-  const keys = promptGroup?.index_group_keys || [];
-  if (!keys.length) return "未绑定事实索引";
-  const names = keys.map((key) => factIndexName(indexGroups.find((group) => group.group_key === key)) || key);
-  return `事实索引 ${names.join("、")}`;
 }
 
 function AnalysisHistory({ analyses, books, selectedId, onSelect, onCopy, onDelete }) {
@@ -768,12 +770,6 @@ function categoryLabel(value) {
     foreshadowing: "伏笔",
     other: "其他"
   }[value] || value;
-}
-
-function factIndexName(group) {
-  if (!group) return "事实索引";
-  if (group.group_key === "base") return "事实索引";
-  return group.name || group.group_key;
 }
 
 function PartialResultView({ analysis, analysisBusy, onResume }) {

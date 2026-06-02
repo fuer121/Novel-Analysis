@@ -52,6 +52,8 @@ import {
 import {
   buildChapterBatches,
   fetchChapterBatch,
+  normalizeDifyAnalysisJsonOutput,
+  normalizeDifyAnalysisTextOutput,
   normalizeDifyL1Output,
   normalizeDifyL2Output,
   runDifyWorkflow,
@@ -81,8 +83,8 @@ import {
 } from "./tasks.js";
 import { sanitizeText } from "./sanitize.js";
 
-const SUMMARY_COMPACT_TARGET_CHARS = 18_000;
-const SUMMARY_PART_INPUT_MAX_CHARS = 18_000;
+const SUMMARY_COMPACT_TARGET_CHARS = 28_000;
+const SUMMARY_PART_INPUT_MAX_CHARS = 28_000;
 const EVIDENCE_PACKET_CONTENT_CHARS = 260;
 const EVIDENCE_PACKET_EVIDENCE_CHARS = 120;
 const SUMMARY_FINAL_MAX_OUTPUT_TOKENS = 4500;
@@ -98,6 +100,16 @@ export function l1IndexExecutionSignature(openaiModel = config.openai.model) {
 
 export function l2IndexExecutionSignature(openaiModel = config.openai.model) {
   if (config.indexing.l2Provider === "dify") return `dify:l2:${config.dify.l2WorkflowVersion}`;
+  return String(openaiModel || config.openai.model || "");
+}
+
+export function analysisChapterExecutionSignature(openaiModel = config.openai.model) {
+  if (config.indexing.analysisProvider === "dify") return `dify:analysis:chapter:${config.dify.analysisChapterWorkflowVersion}`;
+  return String(openaiModel || config.openai.model || "");
+}
+
+export function analysisSummaryExecutionSignature(openaiModel = config.openai.model) {
+  if (config.indexing.analysisProvider === "dify") return `dify:analysis:summary:${config.dify.analysisSummaryWorkflowVersion}`;
   return String(openaiModel || config.openai.model || "");
 }
 
@@ -668,7 +680,7 @@ async function prepareNewAnalysis(analysisId, { name, bookId, startChapter, endC
       mode: chapterIndexes.length ? "indexes" : "range",
       chapter_indexes: chapters.map((chapter) => chapter.chapter_index)
     },
-    model: settings.model,
+    model: analysisSummaryExecutionSignature(settings.model),
     reasoningEffort: settings.reasoning_effort,
     promptHash: promptHash(settings),
     schemaHash: schemaHash(settings),
@@ -792,8 +804,11 @@ async function executeAnalysisTask(task, prepared) {
   } = prepared;
   const model = settings.model;
   const reasoningEffort = settings.reasoning_effort;
+  const analysisProvider = config.indexing.analysisProvider;
+  const chapterExecutionModel = analysisChapterExecutionSignature(model);
+  const summaryExecutionModel = analysisSummaryExecutionSignature(model);
 
-  await testOpenAIConnection();
+  await ensureAnalysisProviderReady(analysisProvider);
   updateAnalysisRun(analysisId, {
     status: "running",
     error_summary: ""
@@ -841,7 +856,8 @@ async function executeAnalysisTask(task, prepared) {
     const reusable = await reusableAnalysisChapter({
       analysisId,
       chapter,
-      promptHash: chapterPromptHash
+      promptHash: chapterPromptHash,
+      model: chapterExecutionModel
     });
     if (reusable) {
       chapterResults.push(reusable);
@@ -861,7 +877,9 @@ async function executeAnalysisTask(task, prepared) {
     try {
       assertNotCancelled(task);
       const content = await decryptChapterContent(bookId, chapter.chapter_index);
-      const response = await callOpenAIJson({
+      const response = await callAnalysisJson({
+        provider: analysisProvider,
+        target: "analysis_chapter",
         model,
         reasoningEffort,
         instructions: "你是严谨的小说章节理解引擎。只输出符合 Schema 的 JSON。",
@@ -886,6 +904,7 @@ async function executeAnalysisTask(task, prepared) {
         status: "completed",
         contentHmac: chapter.content_hmac,
         promptHash: chapterPromptHash,
+        model: chapterExecutionModel,
         result: value
       });
       task.progress.completed += 1;
@@ -904,6 +923,7 @@ async function executeAnalysisTask(task, prepared) {
         status: "failed",
         contentHmac: chapter.content_hmac,
         promptHash: chapterPromptHash,
+        model: chapterExecutionModel,
         errorSummary: sanitizeText(error.message)
       });
       updateTask(task, {
@@ -924,8 +944,10 @@ async function executeAnalysisTask(task, prepared) {
     analysisId,
     task,
     analysisContext: { bookId, bookName: getBook(bookId)?.book_name || "", taskName: task.payload?.name || settings.name || "" },
-    model,
+    model: summaryExecutionModel,
+    requestModel: model,
     reasoningEffort,
+    analysisProvider,
     chapterResults,
     failedChapters,
     userPrompt: settings.summary_prompt,
@@ -952,6 +974,8 @@ async function executeAnalysisTask(task, prepared) {
 }
 
 async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter, endChapter, chapters, settings, indexGroups = [], model, reasoningEffort, outputSchemaHash, analysisMode, sourceReviewBudget }) {
+  const analysisProvider = config.indexing.analysisProvider;
+  const summaryExecutionModel = analysisSummaryExecutionSignature(model);
   const selectedIndexes = chapters.map((chapter) => chapter.chapter_index);
   const categories = inferL2CategoriesFromPrompt(settings.summary_prompt);
   const entityQueries = inferEntityQueriesFromPrompt(settings.summary_prompt, bookId);
@@ -1079,7 +1103,9 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
       message: `正在按预算复核章节 ${chapter.chapter_index}`
     });
     const content = await decryptChapterContent(bookId, chapter.chapter_index);
-    const response = await callOpenAIJson({
+    const response = await callAnalysisJson({
+      provider: analysisProvider,
+      target: "analysis_chapter",
       model,
       reasoningEffort: "low",
       instructions: "你是小说事实复核引擎。只针对用户汇总目标补充本章关键事实，输出符合 Schema 的 JSON。",
@@ -1129,26 +1155,30 @@ async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter
       budget: SUMMARY_PART_INPUT_MAX_CHARS
     });
   const summary = shouldSplitCustomFinalSummary(finalSchema)
-    ? await runCustomFieldSummaryCalls({
+      ? await runCustomFieldSummaryCalls({
       analysisId,
       task,
       analysisContext: { bookId, bookName: getBook(bookId)?.book_name || "", taskName: task.payload?.name || settings.name || "" },
-      model,
-      reasoningEffort: "low",
-      userPrompt: settings.summary_prompt,
+          model: summaryExecutionModel,
+          requestModel: model,
+          reasoningEffort: "low",
+          analysisProvider,
+          userPrompt: settings.summary_prompt,
       sourceMaterial: indexSummaryPayload,
       materialLabel: "索引召回素材",
       schema: finalSchema,
       sourceChapterCount: Math.max(facts.length, reviewedChapters.length, 1)
     })
-    : await runFinalSummaryCall({
+      : await runFinalSummaryCall({
       analysisId,
       task,
       partKey: "json.final.merge",
       stageLabel: "GPT 索引汇总结果",
-      model,
-      reasoningEffort,
-      userPrompt: settings.summary_prompt,
+          model: summaryExecutionModel,
+          requestModel: model,
+          reasoningEffort,
+          analysisProvider,
+          userPrompt: settings.summary_prompt,
       input: buildEvidenceSummaryInput({
         userPrompt: settings.summary_prompt,
         sourceMaterial: finalPrepared.material,
@@ -1404,7 +1434,12 @@ function resolveAnalysisIndexGroups({ bookId, settings = {}, promptGroup = null 
   const byKey = new Map(groups.map((group) => [group.group_key, group]));
   const explicitKeys = normalizeIndexGroupKeysForWorkflow(promptGroup?.index_group_keys || settings.index_group_keys || [])
     .filter((key) => key !== "base");
-  if (!explicitKeys.length) return [];
+  if (!explicitKeys.length) {
+    const enabledGroups = groups.filter((group) => group.enabled);
+    const nonBaseEnabled = enabledGroups.filter((group) => group.group_key !== "base");
+    if (nonBaseEnabled.length) return nonBaseEnabled;
+    return enabledGroups;
+  }
   const missing = explicitKeys.filter((key) => !byKey.has(key));
   if (missing.length) {
     const error = new Error(`分析模板绑定的事实索引不存在或已禁用：${missing.join("、")}`);
@@ -1432,16 +1467,120 @@ function countBy(items, key) {
   return counts;
 }
 
-async function reusableAnalysisChapter({ analysisId, chapter, promptHash }) {
+async function reusableAnalysisChapter({ analysisId, chapter, promptHash, model }) {
   const existing = getAnalysisChapterMetadata(analysisId, chapter.chapter_index);
   if (!existing || existing.status !== "completed") return null;
   if (!existing.has_result) return null;
   if (existing.content_hmac !== chapter.content_hmac) return null;
   if (existing.prompt_hash !== promptHash) return null;
+  if (existing.model !== model) return null;
   return decryptAnalysisChapterResult(analysisId, chapter.chapter_index);
 }
 
-async function summarizeAnalysisResults({ analysisId, task, analysisContext = {}, model, reasoningEffort, chapterResults, failedChapters, userPrompt, outputSchema, sourceChapterCount }) {
+async function ensureAnalysisProviderReady(provider) {
+  if (provider === "dify") {
+    await testDifyConnection({ target: "analysis_chapter" });
+    await testDifyConnection({ target: "analysis_summary" });
+    return;
+  }
+  await testOpenAIConnection();
+}
+
+async function callAnalysisJson({
+  provider = "openai",
+  target = "analysis_summary",
+  model,
+  reasoningEffort,
+  instructions,
+  input,
+  schema,
+  schemaName = "result",
+  maxOutputTokens,
+  strict = true
+}) {
+  if (provider === "dify") {
+    const outputs = await runDifyWorkflow({
+      target,
+      apiKey: target === "analysis_chapter" ? config.dify.analysisChapterWorkflowApiKey : config.dify.analysisSummaryWorkflowApiKey,
+      inputs: {
+        task_type: target === "analysis_chapter" ? "chapter" : "summary",
+        prompt: String(instructions || ""),
+        model: String(model || ""),
+        reasoning_effort: String(reasoningEffort || ""),
+        schema_name: String(schemaName || "result"),
+        schema_json: JSON.stringify(schema || {}),
+        strict_json_schema: String(Boolean(strict)),
+        max_output_tokens: Number.isFinite(Number(maxOutputTokens)) ? String(Number(maxOutputTokens)) : "",
+        context_json: JSON.stringify(input || [])
+      }
+    });
+    return {
+      value: normalizeDifyAnalysisJsonOutput(outputs, schema || null),
+      responseId: outputs.response_id || outputs.responseId || null
+    };
+  }
+  return callOpenAIJson({
+    model,
+    reasoningEffort,
+    instructions,
+    input,
+    schema,
+    schemaName,
+    maxOutputTokens,
+    strict
+  });
+}
+
+async function callAnalysisText({
+  provider = "openai",
+  target = "analysis_summary",
+  model,
+  reasoningEffort,
+  instructions,
+  input,
+  maxOutputTokens
+}) {
+  if (provider === "dify") {
+    const outputs = await runDifyWorkflow({
+      target,
+      apiKey: target === "analysis_chapter" ? config.dify.analysisChapterWorkflowApiKey : config.dify.analysisSummaryWorkflowApiKey,
+      inputs: {
+        task_type: target === "analysis_chapter" ? "chapter" : "summary",
+        prompt: String(instructions || ""),
+        model: String(model || ""),
+        reasoning_effort: String(reasoningEffort || ""),
+        max_output_tokens: Number.isFinite(Number(maxOutputTokens)) ? String(Number(maxOutputTokens)) : "",
+        context_json: JSON.stringify(input || [])
+      }
+    });
+    return {
+      value: normalizeDifyAnalysisTextOutput(outputs),
+      responseId: outputs.response_id || outputs.responseId || null
+    };
+  }
+  return callOpenAIText({
+    model,
+    reasoningEffort,
+    instructions,
+    input,
+    maxOutputTokens
+  });
+}
+
+async function summarizeAnalysisResults({
+  analysisId,
+  task,
+  analysisContext = {},
+  model,
+  requestModel = model,
+  reasoningEffort,
+  analysisProvider = "openai",
+  chapterResults,
+  failedChapters,
+  userPrompt,
+  outputSchema,
+  sourceChapterCount
+}) {
   const finalSchema = deriveFinalSummarySchema({
     userPrompt,
     configuredSchema: parseOutputSchemaOrNull(outputSchema)
@@ -1465,7 +1604,9 @@ async function summarizeAnalysisResults({ analysisId, task, analysisContext = {}
       task,
       analysisContext,
       model,
+      requestModel,
       reasoningEffort: "low",
+      analysisProvider,
       userPrompt,
       sourceMaterial: {
         compressedResults: compactDirectResults,
@@ -1500,7 +1641,9 @@ async function summarizeAnalysisResults({ analysisId, task, analysisContext = {}
       partKey: finalSchema?.schema ? "json.final.merge" : "text.final.merge",
       stageLabel: "GPT 汇总分析结果",
       model,
+      requestModel,
       reasoningEffort,
+      analysisProvider,
       userPrompt,
       input: directInput,
       schema: finalSchema,
@@ -1537,7 +1680,9 @@ async function summarizeAnalysisResults({ analysisId, task, analysisContext = {}
       task,
       analysisContext,
       model,
+      requestModel,
       reasoningEffort: "low",
+      analysisProvider,
       userPrompt,
       sourceMaterial: {
         compressedResults,
@@ -1571,7 +1716,9 @@ async function summarizeAnalysisResults({ analysisId, task, analysisContext = {}
     partKey: finalSchema?.schema ? "json.final.merge" : "text.final.merge",
     stageLabel: "GPT 汇总压缩结果",
     model,
+    requestModel,
     reasoningEffort: "low",
+    analysisProvider,
     userPrompt,
     input: compressedInput,
     schema: finalSchema,
@@ -1591,7 +1738,21 @@ function summaryRawMaterialLength({ chapterResults, failedChapters, userPrompt }
     + JSON.stringify(failedChapters || []).length;
 }
 
-async function runFinalSummaryCall({ analysisId, task, partKey, stageLabel, model, reasoningEffort, userPrompt = "", input, schema, sourceChapterCount, traceSummary = null }) {
+async function runFinalSummaryCall({
+  analysisId,
+  task,
+  partKey,
+  stageLabel,
+  model,
+  requestModel = model,
+  reasoningEffort,
+  analysisProvider = "openai",
+  userPrompt = "",
+  input,
+  schema,
+  sourceChapterCount,
+  traceSummary = null
+}) {
   assertSummaryInputWithinBudget(input, stageLabel);
   const contentHash = summaryContentHash({ input, schema: schema?.schema || null, userPrompt });
   const basePart = {
@@ -1609,8 +1770,10 @@ async function runFinalSummaryCall({ analysisId, task, partKey, stageLabel, mode
   };
   if (schema?.schema) {
     return runPersistedSummaryNode(task, basePart, async () => {
-      const response = await callOpenAIJson({
-        model,
+      const response = await callAnalysisJson({
+        provider: analysisProvider,
+        target: "analysis_summary",
+        model: requestModel,
         reasoningEffort,
         instructions: [
           "你是严谨的小说多章节汇总引擎。按用户汇总 Prompt 输出最终结果；如果用户要求 JSON，则只输出合法 JSON，否则直接输出文本，不要添加无关解释。",
@@ -1632,8 +1795,10 @@ async function runFinalSummaryCall({ analysisId, task, partKey, stageLabel, mode
     });
   }
   return runPersistedSummaryNode(task, basePart, async () => {
-    const response = await callOpenAIText({
-      model,
+    const response = await callAnalysisText({
+      provider: analysisProvider,
+      target: "analysis_summary",
+      model: requestModel,
       reasoningEffort,
       instructions: "你是严谨的小说多章节汇总引擎。按用户汇总 Prompt 输出最终结果；如果用户要求 JSON，则只输出合法 JSON，否则直接输出文本，不要添加无关解释。",
       input,
@@ -1665,7 +1830,20 @@ function normalizeFinalSchemaValue(value, schemaConfig) {
   return value;
 }
 
-async function runCustomFieldSummaryCalls({ analysisId, task, analysisContext = {}, model, reasoningEffort, userPrompt, sourceMaterial, materialLabel, schema, sourceChapterCount }) {
+async function runCustomFieldSummaryCalls({
+  analysisId,
+  task,
+  analysisContext = {},
+  model,
+  requestModel = model,
+  reasoningEffort,
+  analysisProvider = "openai",
+  userPrompt,
+  sourceMaterial,
+  materialLabel,
+  schema,
+  sourceChapterCount
+}) {
   const properties = schema.schema.properties || {};
   const finalValue = {};
   const responseIds = [];
@@ -1710,7 +1888,9 @@ async function runCustomFieldSummaryCalls({ analysisId, task, analysisContext = 
       analysisId,
       task,
       model,
+      requestModel,
       reasoningEffort,
+      analysisProvider,
       userPrompt,
       sourceMaterial: scopedSourceMaterialForField({ sourceMaterial, fieldName, userPrompt }),
       materialLabel,
@@ -1902,7 +2082,9 @@ async function runJsonFieldSummaryParts({
   analysisId,
   task,
   model,
+  requestModel = model,
   reasoningEffort,
+  analysisProvider = "openai",
   userPrompt,
   sourceMaterial,
   materialLabel,
@@ -1977,8 +2159,10 @@ async function runJsonFieldSummaryParts({
         fieldSchema
       });
       assertSummaryInputWithinBudget(input, `${fieldName} · ${chunk.label}`);
-      const result = await callOpenAIJson({
-        model,
+      const result = await callAnalysisJson({
+        provider: analysisProvider,
+        target: "analysis_summary",
+        model: requestModel,
         reasoningEffort,
         instructions: "你是严谨的小说多章节汇总引擎。当前只生成用户最终 JSON 模板中的一个顶层字段；只输出合法 JSON，不要添加无关解释。",
         input,

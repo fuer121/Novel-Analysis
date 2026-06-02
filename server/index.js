@@ -86,7 +86,11 @@ app.get("/api/openai/test", async (_request, response, next) => {
 app.get("/api/dify/test", async (_request, response, next) => {
   try {
     const target = normalizeDifyTestTarget(_request.query.target);
-    const targets = target === "all" ? ["import", "l1", "l2"] : [target];
+    const targets = target === "all"
+      ? ["import", "l1", "l2", "analysis_chapter", "analysis_summary"]
+      : target === "analysis"
+        ? ["analysis_chapter", "analysis_summary"]
+        : [target];
     const results = {};
     for (const key of targets) {
       try {
@@ -101,7 +105,7 @@ app.get("/api/dify/test", async (_request, response, next) => {
         };
       }
     }
-    if (target === "all") {
+    if (target === "all" || target === "analysis") {
       const allOk = targets.every((key) => Boolean(results[key]?.ok));
       response.json({
         ok: allOk,
@@ -674,8 +678,8 @@ app.listen(config.port, config.host, () => {
 
 function normalizeDifyTestTarget(value) {
   const normalized = String(value || "all").trim().toLowerCase();
-  if (["import", "l1", "l2", "all"].includes(normalized)) return normalized;
-  const error = new Error("target 只支持 import、l1、l2、all。");
+  if (["import", "l1", "l2", "analysis_chapter", "analysis_summary", "analysis", "all"].includes(normalized)) return normalized;
+  const error = new Error("target 只支持 import、l1、l2、analysis_chapter、analysis_summary、analysis、all。");
   error.status = 422;
   throw error;
 }
