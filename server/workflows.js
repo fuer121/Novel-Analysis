@@ -805,6 +805,7 @@ async function executeAnalysisTask(task, prepared) {
   const model = settings.model;
   const reasoningEffort = settings.reasoning_effort;
   const analysisProvider = config.indexing.analysisProvider;
+  const chapterExecutionModel = analysisChapterExecutionSignature(model);
   const summaryExecutionModel = analysisSummaryExecutionSignature(model);
 
   await ensureAnalysisProviderReady(analysisProvider);
@@ -855,7 +856,8 @@ async function executeAnalysisTask(task, prepared) {
     const reusable = await reusableAnalysisChapter({
       analysisId,
       chapter,
-      promptHash: chapterPromptHash
+      promptHash: chapterPromptHash,
+      model: chapterExecutionModel
     });
     if (reusable) {
       chapterResults.push(reusable);
@@ -902,6 +904,7 @@ async function executeAnalysisTask(task, prepared) {
         status: "completed",
         contentHmac: chapter.content_hmac,
         promptHash: chapterPromptHash,
+        model: chapterExecutionModel,
         result: value
       });
       task.progress.completed += 1;
@@ -920,6 +923,7 @@ async function executeAnalysisTask(task, prepared) {
         status: "failed",
         contentHmac: chapter.content_hmac,
         promptHash: chapterPromptHash,
+        model: chapterExecutionModel,
         errorSummary: sanitizeText(error.message)
       });
       updateTask(task, {
@@ -1463,12 +1467,13 @@ function countBy(items, key) {
   return counts;
 }
 
-async function reusableAnalysisChapter({ analysisId, chapter, promptHash }) {
+async function reusableAnalysisChapter({ analysisId, chapter, promptHash, model }) {
   const existing = getAnalysisChapterMetadata(analysisId, chapter.chapter_index);
   if (!existing || existing.status !== "completed") return null;
   if (!existing.has_result) return null;
   if (existing.content_hmac !== chapter.content_hmac) return null;
   if (existing.prompt_hash !== promptHash) return null;
+  if (existing.model !== model) return null;
   return decryptAnalysisChapterResult(analysisId, chapter.chapter_index);
 }
 

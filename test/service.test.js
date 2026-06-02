@@ -65,6 +65,23 @@ test("builds Dify batches and normalizes chapter output", () => {
   assert.equal(chapters[1].content, "正文二");
 });
 
+test("analysis coverage note includes every bound index group", async () => {
+  const { analysisIndexCoverageText } = await import("../src/analysisCoverage.js");
+  const note = analysisIndexCoverageText({
+    promptGroup: { index_group_keys: ["appearance", "items"] },
+    indexGroups: [
+      { group_key: "appearance", name: "人物形象" },
+      { group_key: "items", name: "法宝武器" }
+    ],
+    coveragesByGroup: {
+      appearance: { chapters: { completed: 100, total: 120, facts: 320 } },
+      items: { chapters: { completed: 80, total: 120, facts: 210 } }
+    }
+  });
+
+  assert.equal(note, "事实索引 人物形象 100/120 章，320 条；法宝武器 80/120 章，210 条");
+});
+
 test("normalizes Dify L1/L2 workflow outputs from result/text/output/data envelopes", () => {
   const l1 = dify.normalizeDifyL1Output({
     result: JSON.stringify({
@@ -4034,6 +4051,100 @@ test("resumes summary failure without rerunning completed chapters", async () =>
     assert.equal(result.finalResult.summary, "续跑成功");
   } finally {
     global.fetch = previousFetch;
+  }
+});
+
+test("analysis chapter reuse requires matching execution signature", async () => {
+  for (const chapterIndex of [1, 2]) {
+    await db.saveEncryptedChapter({
+      bookId: "book-analysis-chapter-signature",
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章正文`
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousChapterVersion = appConfig.config.dify.analysisChapterWorkflowVersion;
+  const previousSummaryVersion = appConfig.config.dify.analysisSummaryWorkflowVersion;
+  let chapterWorkflowCalls = 0;
+  let failSummary = true;
+
+  global.fetch = async (url, request = {}) => {
+    if (String(url).includes("/parameters")) {
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ user_input_form: [] })
+      };
+    }
+    if (!String(url).includes("/workflows/run")) {
+      throw new Error(`Unexpected fetch URL: ${url}`);
+    }
+    const body = JSON.parse(request.body || "{}");
+    const auth = String(request.headers?.Authorization || "");
+    if (auth.includes("app-analysis-chapter-test")) {
+      chapterWorkflowCalls += 1;
+      const chapterIndex = Number(body.inputs?.chapter_index || 1);
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          data: {
+            outputs: {
+              result: JSON.stringify({
+                chapter_index: chapterIndex,
+                chapter_title: `第${chapterIndex}章`,
+                summary: `章节${chapterIndex}摘要-${appConfig.config.dify.analysisChapterWorkflowVersion}`,
+                key_points: [],
+                evidence_notes: []
+              })
+            }
+          }
+        })
+      };
+    }
+    if (failSummary) {
+      throw new Error("summary interrupted");
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        data: { outputs: { result: JSON.stringify({ summary: "续跑完成" }) } }
+      })
+    };
+  };
+
+  try {
+    appConfig.config.indexing.analysisProvider = "dify";
+    appConfig.config.dify.analysisChapterWorkflowVersion = "v1";
+    appConfig.config.dify.analysisSummaryWorkflowVersion = "v1";
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "full_text",
+      name: "逐章签名续跑",
+      book_id: "book-analysis-chapter-signature",
+      start_chapter: 1,
+      end_chapter: 2
+    });
+    await assert.rejects(() => waitForTask(analysis), /summary interrupted/);
+    assert.equal(chapterWorkflowCalls, 2);
+
+    failSummary = false;
+    appConfig.config.dify.analysisChapterWorkflowVersion = "v2";
+    const resumed = workflows.resumeAnalysisRunTask(analysis.id);
+    await waitForTask(resumed);
+
+    assert.equal(resumed.status, "completed");
+    assert.equal(resumed.progress.skipped, 0);
+    assert.equal(resumed.progress.completed, 3);
+    assert.equal(chapterWorkflowCalls, 4);
+  } finally {
+    global.fetch = previousFetch;
+    appConfig.config.indexing.analysisProvider = previousProvider;
+    appConfig.config.dify.analysisChapterWorkflowVersion = previousChapterVersion;
+    appConfig.config.dify.analysisSummaryWorkflowVersion = previousSummaryVersion;
   }
 });
 
