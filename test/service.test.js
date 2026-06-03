@@ -725,6 +725,61 @@ test("infers result tables from default and custom JSON result shapes", () => {
   assert.deepEqual(schemaTools.tableViewsFromJson("纯文本结果"), []);
 });
 
+test("infers readable tables from nested dossier JSON result shapes", () => {
+  const tables = schemaTools.tableViewsFromJson({
+    book_name: "剑来",
+    topic: "飞剑初一设定集",
+    target_item: "初一",
+    sword: {
+      name: "初一",
+      core_profile: "初一是陈平安飞剑体系中的重要飞剑。",
+      appearance: {
+        after_refine: "如小小白虹，剑身纤细。",
+        field_evidence_refs: ["json.sword.batch.001"]
+      },
+      origin: {
+        text: "与陈平安早期飞剑谱系相关。"
+      },
+      classic_records: [
+        { chapter: 221, summary: "初一参与关键战斗。" }
+      ]
+    },
+    global_uncertainties: [
+      { value: "来源存在信息不足。" }
+    ]
+  });
+
+  assert.equal(tables.some((table) => table.key === "sword"), true);
+  assert.equal(tables.some((table) => table.key === "global_uncertainties"), true);
+  const swordTable = tables.find((table) => table.key === "sword");
+  assert.deepEqual(swordTable.columns.map((column) => column.key), ["field", "value"]);
+  assert.equal(swordTable.rows.some((row) => row.field === "外形 / 炼化后" && row.value === "如小小白虹，剑身纤细。"), true);
+  assert.equal(swordTable.rows.some((row) => row.field === "来源 / text" && row.value === "与陈平安早期飞剑谱系相关。"), true);
+  assert.equal(swordTable.rows.some((row) => row.field === "经典记录" && row.value.includes("初一参与关键战斗")), true);
+});
+
+test("builds Excel workbook XML from parsed JSON result tables", () => {
+  const xml = schemaTools.excelWorkbookXmlFromJson({
+    target_item: "初一",
+    sword: {
+      name: "初一",
+      core_profile: "初一 & 十五 <本命飞剑>",
+      appearance: {
+        after_refine: "如小小白虹，剑身纤细。"
+      }
+    },
+    global_uncertainties: [
+      { value: "来源信息不足。" }
+    ]
+  }, { title: "飞剑初一" });
+
+  assert.equal(xml.includes('<Worksheet ss:Name="飞剑设定">'), true);
+  assert.equal(xml.includes('<Worksheet ss:Name="整体不确定性">'), true);
+  assert.equal(xml.includes('<Data ss:Type="String">外形 / 炼化后</Data>'), true);
+  assert.equal(xml.includes("初一 &amp; 十五 &lt;本命飞剑&gt;"), true);
+  assert.equal(schemaTools.excelWorkbookXmlFromJson("纯文本结果"), "");
+});
+
 test("builds L1 window ranges and reports coverage with stale indexes", async () => {
   assert.deepEqual(db.buildAlignedWindowRanges(1, 25, 10), [
     { startChapter: 1, endChapter: 10 },

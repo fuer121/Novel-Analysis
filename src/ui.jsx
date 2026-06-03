@@ -8,7 +8,8 @@ import {
   Play
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { downloadJson, formatTime } from "./api.js";
+import { downloadFile, downloadJson, formatTime } from "./api.js";
+import { excelWorkbookXmlFromJson } from "./schemaTools.js";
 
 export function RuntimeGrid({ config }) {
   const l1Provider = config.l1IndexProvider || "openai";
@@ -309,7 +310,7 @@ export function ResultActions({ analysis }) {
         icon={Download}
         label="下载"
         disabled={!canUse}
-        onClick={() => downloadJson(`analysis-${analysis.id}.json`, analysis.finalResult)}
+        onClick={() => downloadAnalysisResult(analysis)}
       />
     </div>
   );
@@ -317,6 +318,27 @@ export function ResultActions({ analysis }) {
 
 function formatResultForClipboard(value) {
   return typeof value === "string" ? value : JSON.stringify(value, null, 2);
+}
+
+function downloadAnalysisResult(analysis) {
+  const workbook = excelWorkbookXmlFromJson(analysis.finalResult, { title: analysis.name || "分析结果" });
+  if (workbook) {
+    downloadFile(
+      `${safeDownloadName(analysis.name || `analysis-${analysis.id}`)}.xls`,
+      workbook,
+      "application/vnd.ms-excel;charset=utf-8"
+    );
+    return;
+  }
+  downloadJson(`analysis-${analysis.id}.json`, analysis.finalResult);
+}
+
+function safeDownloadName(value) {
+  return String(value || "analysis-result")
+    .replace(/[\\/:*?"<>|]/g, "-")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 80) || "analysis-result";
 }
 
 export function LoadingScreen() {

@@ -57,7 +57,11 @@ export function formatTime(value) {
 
 export function downloadJson(filename, value) {
   const text = typeof value === "string" ? value : JSON.stringify(value, null, 2);
-  const blob = new Blob([text], { type: "application/json;charset=utf-8" });
+  downloadFile(filename, text, "application/json;charset=utf-8");
+}
+
+export function downloadFile(filename, content, type = "application/octet-stream") {
+  const blob = new Blob([content], { type });
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;

@@ -858,8 +858,12 @@ function TextPreview({ value }) {
 }
 
 function formatCell(value) {
-  if (Array.isArray(value)) return value.join(", ");
-  if (value && typeof value === "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return value.map((entry) => formatCell(entry)).join("\n");
+  if (value && typeof value === "object") {
+    return Object.entries(value)
+      .map(([key, entry]) => `${key}: ${formatCell(entry)}`)
+      .join("\n");
+  }
   if (value === undefined || value === null || value === "") return "-";
   return String(value);
 }
