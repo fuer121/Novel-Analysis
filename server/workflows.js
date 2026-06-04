@@ -91,6 +91,11 @@ const SUMMARY_FINAL_MAX_OUTPUT_TOKENS = 4500;
 const CUSTOM_FIELD_SUMMARY_MAX_OUTPUT_TOKENS = 3000;
 const SUMMARY_STAGE_MAX_ATTEMPTS = 3;
 const SUMMARY_STAGE_RETRY_DELAY_MS = 1200;
+const L2_QUERY_CANDIDATE_LIMIT = 2000;
+const L2_QUERY_WINDOW_CHAPTERS = 120;
+const L2_QUERY_MAX_FACTS = 160;
+const L2_QUERY_COLLECTION_MAX_FACTS = 1200;
+const L2_QUERY_DIFY_INPUT_MAX_CHARS = 20000;
 const L2_SCHEMA_VERSION = "l2-facts-v1";
 const FIELD_BATCH_MERGE_STRATEGY_VERSION = "recursive-object-v2";
 
@@ -175,13 +180,16 @@ export function startAnalysisTask(payload) {
   const analysisMode = normalizeAnalysisMode(payload.analysis_mode ?? payload.analysisMode);
   const sourceReviewBudget = normalizeOptionalBudget(payload.source_review_budget ?? payload.sourceReviewBudget);
   const promptGroupId = String(payload.prompt_group_id ?? payload.promptGroupId ?? "").trim();
+  const indexGroupKeys = normalizeIndexGroupKeysForWorkflow(payload.index_group_keys ?? payload.indexGroupKeys ?? []);
+  const l2Query = String(payload.query ?? payload.l2_query ?? payload.l2Query ?? "").trim();
   const task = createTask("analysis", {
     name,
     bookId,
     startChapter: range.startChapter,
     endChapter: range.endChapter,
     chapterCount: chapterIndexes.length || range.total,
-    analysisMode
+    analysisMode,
+    query: analysisMode === "l2_query" ? l2Query : ""
   });
 
   void runAnalysisTask(task, {
@@ -193,7 +201,9 @@ export function startAnalysisTask(payload) {
     promptGroupId,
     useL1Context: Boolean(payload.use_l1_context ?? payload.useL1Context),
     analysisMode,
-    sourceReviewBudget
+    sourceReviewBudget,
+    indexGroupKeys,
+    l2Query
   });
   return task;
 }
@@ -654,22 +664,30 @@ async function runAnalysisTask(task, options) {
   }
 }
 
-async function prepareNewAnalysis(analysisId, { name, bookId, startChapter, endChapter, chapterIndexes, promptPatch, promptGroupId, useL1Context, analysisMode, sourceReviewBudget }) {
+async function prepareNewAnalysis(analysisId, { name, bookId, startChapter, endChapter, chapterIndexes, promptPatch, promptGroupId, useL1Context, analysisMode, sourceReviewBudget, indexGroupKeys = [], l2Query = "" }) {
   const settings = normalizePromptSettings({ ...getPromptSettings(), ...promptPatch });
   const promptGroup = promptGroupId ? getPromptGroup(promptGroupId) : null;
-  const indexGroups = resolveAnalysisIndexGroups({ bookId, settings, promptGroup });
-  validateAnalysisPromptBeforeRun({
-    settings,
-    indexGroups,
-    bookId,
-    taskName: name || settings.name || ""
-  });
+  const settingsWithDirectIndexes = indexGroupKeys.length ? { ...settings, index_group_keys: indexGroupKeys } : settings;
+  const indexGroups = resolveAnalysisIndexGroups({ bookId, settings: settingsWithDirectIndexes, promptGroup });
+  if (analysisMode === "l2_query") {
+    validateL2QueryBeforeRun({ query: l2Query, indexGroups });
+  } else {
+    validateAnalysisPromptBeforeRun({
+      settings,
+      indexGroups,
+      bookId,
+      taskName: name || settings.name || ""
+    });
+  }
   const chapters = resolveSelectedChapters({ bookId, startChapter, endChapter, chapterIndexes });
   if (chapters.length === 0) {
     const error = new Error("本地章节库没有可分析的章节，请先导入章节原文。");
     error.status = 422;
     throw error;
   }
+  const storedPromptHash = analysisMode === "l2_query"
+    ? shaString(`${promptHash(settings)}:${l2Query}:${indexGroups.map((group) => group.group_key).join(",")}`)
+    : promptHash(settings);
 
   await createAnalysisRun({
     id: analysisId,
@@ -683,10 +701,10 @@ async function prepareNewAnalysis(analysisId, { name, bookId, startChapter, endC
     },
     model: analysisSummaryExecutionSignature(settings.model),
     reasoningEffort: settings.reasoning_effort,
-    promptHash: promptHash(settings),
+    promptHash: storedPromptHash,
     schemaHash: schemaHash(settings),
     chapterCount: chapters.length,
-    promptSnapshot: { ...settings, index_group_keys: indexGroups.map((group) => group.group_key), use_l1_context: useL1Context, analysis_mode: analysisMode, source_review_budget: sourceReviewBudget }
+    promptSnapshot: { ...settings, index_group_keys: indexGroups.map((group) => group.group_key), use_l1_context: useL1Context, analysis_mode: analysisMode, source_review_budget: sourceReviewBudget, l2_query: l2Query }
   });
 
   return {
@@ -700,7 +718,8 @@ async function prepareNewAnalysis(analysisId, { name, bookId, startChapter, endC
     useL1Context,
     analysisMode,
     sourceReviewBudget,
-    chapterPromptHash: promptHash(settings),
+    l2Query,
+    chapterPromptHash: storedPromptHash,
     outputSchemaHash: schemaHash(settings),
     resume: false
   };
@@ -731,12 +750,18 @@ async function prepareResumedAnalysis(run) {
       index_group_keys: settings.index_group_keys || []
     }
   });
-  validateAnalysisPromptBeforeRun({
-    settings: normalizedSettings,
-    indexGroups,
-    bookId: run.book_id,
-    taskName: run.name || normalizedSettings.name || ""
-  });
+  const analysisMode = normalizeAnalysisMode(settings.analysis_mode || "full_text");
+  const l2Query = String(settings.l2_query || "").trim();
+  if (analysisMode === "l2_query") {
+    validateL2QueryBeforeRun({ query: l2Query, indexGroups });
+  } else {
+    validateAnalysisPromptBeforeRun({
+      settings: normalizedSettings,
+      indexGroups,
+      bookId: run.book_id,
+      taskName: run.name || normalizedSettings.name || ""
+    });
+  }
   const selection = parseChapterSelection(run);
   const chapters = resolveSelectedChapters({
     bookId: run.book_id,
@@ -753,8 +778,9 @@ async function prepareResumedAnalysis(run) {
     settings: normalizedSettings,
     indexGroups,
     useL1Context: Boolean(settings.use_l1_context),
-    analysisMode: normalizeAnalysisMode(settings.analysis_mode || "full_text"),
+    analysisMode,
     sourceReviewBudget: normalizeOptionalBudget(settings.source_review_budget),
+    l2Query,
     chapterPromptHash: run.prompt_hash || promptHash(normalizedSettings),
     outputSchemaHash: run.schema_hash || schemaHash(normalizedSettings),
     resume: true
@@ -787,6 +813,19 @@ function validateAnalysisPromptBeforeRun({ settings, indexGroups = [], bookId, t
   }
 }
 
+function validateL2QueryBeforeRun({ query, indexGroups = [] }) {
+  if (!String(query || "").trim()) {
+    const error = new Error("L2 提问模式必须填写查询问题。");
+    error.status = 422;
+    throw error;
+  }
+  if (!Array.isArray(indexGroups) || !indexGroups.length) {
+    const error = new Error("L2 提问模式必须选择至少一个事实索引。");
+    error.status = 422;
+    throw error;
+  }
+}
+
 async function executeAnalysisTask(task, prepared) {
   const {
     analysisId,
@@ -799,6 +838,7 @@ async function executeAnalysisTask(task, prepared) {
     useL1Context,
     analysisMode,
     sourceReviewBudget,
+    l2Query,
     chapterPromptHash,
     outputSchemaHash,
     resume
@@ -809,7 +849,11 @@ async function executeAnalysisTask(task, prepared) {
   const chapterExecutionModel = analysisChapterExecutionSignature(model);
   const summaryExecutionModel = analysisSummaryExecutionSignature(model);
 
-  await ensureAnalysisProviderReady(analysisProvider);
+  if (analysisMode === "l2_query") {
+    await ensureAnalysisSummaryProviderReady(analysisProvider);
+  } else {
+    await ensureAnalysisProviderReady(analysisProvider);
+  }
   updateAnalysisRun(analysisId, {
     status: "running",
     error_summary: ""
@@ -817,13 +861,29 @@ async function executeAnalysisTask(task, prepared) {
   markTaskRunning(task, {
     result: { analysisId },
     progress: {
-      total: chapters.length + 1,
+      total: analysisMode === "l2_query" ? 1 : chapters.length + 1,
       completed: 0,
       failed: 0,
       skipped: 0,
-      current: resume ? "准备续跑分析" : "准备逐章分析"
+      current: analysisMode === "l2_query"
+        ? "准备 L2 提问"
+        : resume ? "准备续跑分析" : "准备逐章分析"
     }
   });
+
+  if (analysisMode === "l2_query") {
+    return executeL2QueryAnalysisTask(task, {
+      analysisId,
+      bookId,
+      startChapter,
+      endChapter,
+      indexGroups,
+      model,
+      reasoningEffort,
+      outputSchemaHash,
+      query: l2Query
+    });
+  }
 
   if (analysisMode !== "full_text") {
     return executeIndexAnalysisTask(task, {
@@ -972,6 +1032,569 @@ async function executeAnalysisTask(task, prepared) {
     failedChapters,
     schemaHash: outputSchemaHash
   });
+}
+
+async function executeL2QueryAnalysisTask(task, { analysisId, bookId, startChapter, endChapter, indexGroups = [], model, reasoningEffort, outputSchemaHash, query }) {
+  const analysisProvider = config.indexing.analysisProvider;
+  const summaryExecutionModel = analysisSummaryExecutionSignature(model);
+  const inputBudget = l2QuerySummaryInputBudget(analysisProvider);
+  const indexGroupKeys = indexGroups.map((group) => group.group_key);
+  const targetContext = buildTargetContext({ userPrompt: query });
+  const collectionMode = !targetContext.subject && isL2CollectionQuery(query);
+
+  await waitIfPaused(task);
+  updateTask(task, {
+    progress: { ...task.progress, current: "L2 事实检索" },
+    message: "正在从本地 L2 事实库检索问题相关事实"
+  });
+
+  const candidateScan = await collectL2QueryCandidateFacts({
+    bookId,
+    indexGroupKeys,
+    startChapter,
+    endChapter,
+    windowChapters: L2_QUERY_WINDOW_CHAPTERS,
+    perWindowLimit: L2_QUERY_CANDIDATE_LIMIT
+  });
+  const candidateFacts = candidateScan.facts;
+  const recall = recallL2QueryFacts({
+    facts: candidateFacts,
+    query,
+    targetContext,
+    limit: collectionMode ? L2_QUERY_COLLECTION_MAX_FACTS : L2_QUERY_MAX_FACTS,
+    allowExpandedLimit: collectionMode
+  });
+  const recalledChapters = [...new Set(recall.facts.map((fact) => Number(fact.chapter_index || 0)).filter(Boolean))]
+    .sort((left, right) => left - right);
+  const sourceStats = {
+    analysis_mode: "l2_query",
+    query,
+    index_group_keys: indexGroupKeys,
+    index_groups: indexGroups.map((group) => ({ group_key: group.group_key, name: group.name })),
+    candidate_facts: candidateFacts.length,
+    l2_query_candidate_windows: candidateScan.windows,
+    l2_query_candidate_window_chapters: L2_QUERY_WINDOW_CHAPTERS,
+    l2_query_candidate_limit_per_window: L2_QUERY_CANDIDATE_LIMIT,
+    recalled_facts: recall.facts.length,
+    recalled_chapters: recalledChapters.length,
+    recalled_chapter_indexes: recalledChapters,
+    matched_terms: recall.matchedTerms,
+    expanded_terms: recall.expandedTerms,
+    l2_query_scored_facts: recall.scoredFacts,
+    l2_query_dropped_after_recall_limit: recall.droppedAfterRecallLimit,
+    l2_query_collection_mode: collectionMode,
+    l2_query_collection_candidate_facts: collectionMode ? recall.scoredFacts : 0,
+    l2_query_collection_recall_limit: collectionMode ? L2_QUERY_COLLECTION_MAX_FACTS : 0,
+    l2_query_chunk_input_budget: inputBudget,
+    source_review_chapters: 0,
+    source_review_budget: 0,
+    target_subject: targetContext.subject,
+    target_candidate_facts: recall.targetCandidateFacts,
+    target_selected_facts: recall.targetSelectedFacts,
+    target_recalled_facts: targetContext.subject
+      ? recall.facts.filter((fact) => factMatchesAnyEntity(fact, [targetContext.subject])).length
+      : 0,
+    target_recalled_chapters: targetContext.subject
+      ? new Set(recall.facts
+        .filter((fact) => factMatchesAnyEntity(fact, [targetContext.subject]))
+        .map((fact) => Number(fact.chapter_index || 0))
+        .filter(Boolean)).size
+      : 0,
+    target_recall_fallback_used: false
+  };
+
+  if (!recall.facts.length) {
+    Object.assign(sourceStats, {
+      l2_query_material_mode: "direct",
+      l2_query_chunk_count: 0,
+      l2_query_recalled_facts_before_budget: 0,
+      l2_query_recalled_facts_after_budget: 0,
+      l2_query_omitted_by_budget: 0,
+      l2_query_trimmed_by_budget: false
+    });
+    const finalResult = [
+      "## L2 提问结果",
+      "",
+      "未召回相关 L2 事实。",
+      "",
+      `查询：${query}`,
+      `事实索引：${indexGroups.map((group) => group.name || group.group_key).join(" / ") || "未指定"}`,
+      `章节范围：${startChapter}-${endChapter}`
+    ].join("\n");
+    await saveFinalAnalysisResult(analysisId, finalResult);
+    task.progress.completed = task.progress.total;
+    const run = updateAnalysisRun(analysisId, {
+      status: "completed",
+      source_stats: JSON.stringify(sourceStats),
+      error_summary: "未召回相关 L2 事实"
+    });
+    completeTask(task, {
+      analysisId,
+      run: publicAnalysisRun(run),
+      finalResult,
+      failedChapters: [],
+      schemaHash: outputSchemaHash,
+      sourceStats
+    });
+    return;
+  }
+
+  await waitIfPaused(task);
+  updateTask(task, {
+    progress: { ...task.progress, current: "GPT L2 提问汇总" },
+    message: l2QuerySummaryProgressMessage({ recall, candidateFacts: candidateFacts.length, targetSubject: targetContext.subject, collectionMode })
+  });
+  Object.assign(sourceStats, {
+    l2_query_material_mode: collectionMode ? "collection_direct" : "direct",
+    l2_query_chunk_count: 1,
+    l2_query_recalled_facts_before_budget: recall.facts.length,
+    l2_query_recalled_facts_after_budget: recall.facts.length,
+    l2_query_omitted_by_budget: 0,
+    l2_query_trimmed_by_budget: false
+  });
+  const sourceMaterial = {
+    query,
+    targetContext,
+    sourceStats,
+    facts: recall.facts,
+    evidence_packets: recall.facts.map(factToEvidencePacket).filter(Boolean)
+  };
+  const input = buildL2QuerySummaryInput({
+    query,
+    sourceMaterial,
+    sourceStats
+  });
+  if (inputTextLength(input) > inputBudget) {
+    await executeChunkedL2QueryAnalysisTask({
+      task,
+      analysisId,
+      query,
+      targetContext,
+      sourceStats,
+      recallFacts: recall.facts,
+      analysisProvider,
+      summaryExecutionModel,
+      requestModel: model,
+      reasoningEffort,
+      outputSchemaHash,
+      indexGroups,
+      startChapter,
+      endChapter,
+      materialMode: collectionMode ? "collection_chunked" : "chunked",
+      inputBudget
+    });
+    return;
+  }
+  const summary = await runFinalSummaryCall({
+    analysisId,
+    task,
+    partKey: "l2_query.final.merge",
+    stageLabel: "GPT L2 提问汇总",
+    model: summaryExecutionModel,
+    requestModel: model,
+    reasoningEffort,
+    analysisProvider,
+    userPrompt: query,
+    input,
+    schema: null,
+    sourceChapterCount: Math.max(recall.facts.length, 1),
+    errorLabel: "Dify L2 提问汇总",
+    traceSummary: sourceTraceFromMaterial({
+      partKey: "l2_query.final.merge",
+      stage: "text_final_merge",
+      fieldName: "l2_query",
+      material: sourceMaterial
+    })
+  });
+
+  assertNotCancelled(task);
+  const finalResult = parseJsonOrText(summary.value);
+  assertFinalSummaryUseful(finalResult, Math.max(recall.facts.length, 1));
+  await saveFinalAnalysisResult(analysisId, finalResult);
+  task.progress.completed = task.progress.total;
+  const run = updateAnalysisRun(analysisId, {
+    status: "completed",
+    source_stats: JSON.stringify(sourceStats),
+    error_summary: ""
+  });
+  completeTask(task, {
+    analysisId,
+    run: publicAnalysisRun(run),
+    finalResult,
+    failedChapters: [],
+    schemaHash: outputSchemaHash,
+    sourceStats
+  });
+}
+
+async function executeChunkedL2QueryAnalysisTask({
+  task,
+  analysisId,
+  query,
+  targetContext,
+  sourceStats,
+  recallFacts,
+  analysisProvider,
+  summaryExecutionModel,
+  requestModel,
+  reasoningEffort,
+  outputSchemaHash,
+  indexGroups,
+  startChapter,
+  endChapter,
+  materialMode = "chunked",
+  inputBudget = SUMMARY_PART_INPUT_MAX_CHARS
+}) {
+  Object.assign(sourceStats, {
+    l2_query_material_mode: materialMode,
+    l2_query_chunk_count: 0,
+    l2_query_recalled_facts_before_budget: recallFacts.length,
+    l2_query_recalled_facts_after_budget: 0,
+    l2_query_omitted_by_budget: 0,
+    l2_query_trimmed_by_budget: true
+  });
+  let chunks = splitL2QueryFactsIntoBudgetedChunks({
+    query,
+    targetContext,
+    sourceStats,
+    facts: recallFacts,
+    budget: inputBudget
+  });
+  let keptFactCount = chunks.reduce((sum, chunk) => sum + chunk.rawFacts.length, 0);
+  Object.assign(sourceStats, {
+    l2_query_material_mode: materialMode,
+    l2_query_chunk_count: chunks.length,
+    l2_query_recalled_facts_before_budget: recallFacts.length,
+    l2_query_recalled_facts_after_budget: keptFactCount,
+    l2_query_omitted_by_budget: Math.max(0, recallFacts.length - keptFactCount),
+    l2_query_trimmed_by_budget: true
+  });
+  chunks = chunks
+    .map((chunk) => withL2QueryChunkInput({
+      chunk,
+      query,
+      targetContext,
+      sourceStats,
+      budget: inputBudget
+    }))
+    .filter((chunk) => chunk.rawFacts.length);
+  chunks = chunks.map((chunk, index) => ({
+    ...chunk,
+    batch: index + 1,
+    total: chunks.length
+  }));
+  keptFactCount = chunks.reduce((sum, chunk) => sum + chunk.rawFacts.length, 0);
+  Object.assign(sourceStats, {
+    l2_query_chunk_count: chunks.length,
+    l2_query_recalled_facts_after_budget: keptFactCount,
+    l2_query_omitted_by_budget: Math.max(0, recallFacts.length - keptFactCount)
+  });
+
+  if (!chunks.length || !keptFactCount) {
+    const finalResult = [
+      "## L2 提问结果",
+      "",
+      "未召回相关 L2 事实，或相关事实在预算裁剪后不足以生成回答。",
+      "",
+      `查询：${query}`,
+      `事实索引：${indexGroups.map((group) => group.name || group.group_key).join(" / ") || "未指定"}`,
+      `章节范围：${startChapter}-${endChapter}`
+    ].join("\n");
+    await saveFinalAnalysisResult(analysisId, finalResult);
+    task.progress.completed = task.progress.total;
+    const run = updateAnalysisRun(analysisId, {
+      status: "completed",
+      source_stats: JSON.stringify(sourceStats),
+      error_summary: "L2 提问预算裁剪后素材不足"
+    });
+    completeTask(task, {
+      analysisId,
+      run: publicAnalysisRun(run),
+      finalResult,
+      failedChapters: [],
+      schemaHash: outputSchemaHash,
+      sourceStats
+    });
+    return;
+  }
+
+  const batchResults = [];
+  for (const chunk of chunks) {
+    await waitIfPaused(task);
+    updateTask(task, {
+      progress: { ...task.progress, current: `GPT L2 提问分块 ${chunk.batch}/${chunk.total}` },
+      message: `正在生成 L2 提问局部回答 ${chunk.batch}/${chunk.total}`
+    });
+    const partKey = `l2_query.batch.${String(chunk.batch).padStart(3, "0")}`;
+    const traceSummary = sourceTraceFromMaterial({
+      partKey,
+      stage: "text_l2_query_batch",
+      fieldName: "l2_query",
+      material: {
+        sourceStats: {
+          ...sourceStats,
+          evidence_packet_count: chunk.rawFacts.length,
+          evidence_packets_trimmed_by_budget: chunk.trimmedByBudget,
+          evidence_packets_omitted_by_budget: chunk.omittedByBudget
+        },
+        targetContext,
+        target_subject: targetContext?.subject || "",
+        split: {
+          fieldName: "l2_query",
+          materialLabel: "L2 提问事实分块",
+          mode: "l2_query_batch",
+          batch: chunk.batch,
+          total: chunk.total
+        },
+        evidence_packets: chunk.rawFacts.map(factToEvidencePacket).filter(Boolean)
+      }
+    });
+    const summary = await runL2QuerySummaryCallWithFallback({
+      analysisId,
+      task,
+      partKey,
+      stageLabel: `GPT L2 提问分块 ${chunk.batch}/${chunk.total}`,
+      model: summaryExecutionModel,
+      requestModel,
+      reasoningEffort,
+      analysisProvider,
+      userPrompt: query,
+      input: chunk.input,
+      schema: null,
+      sourceChapterCount: Math.max(chunk.rawFacts.length, 1),
+      traceSummary,
+      sourceStats,
+      fallbackMarkdown: () => buildL2QueryBatchFallbackMarkdown({ query, chunk, targetContext })
+    });
+    const value = parseJsonOrText(summary.value);
+    batchResults.push({
+      batch: chunk.batch,
+      total: chunk.total,
+      chapters: chunk.chapters,
+      fact_count: chunk.rawFacts.length,
+      markdown: typeof value === "string" ? value : JSON.stringify(value)
+    });
+  }
+
+  await waitIfPaused(task);
+  updateTask(task, {
+    progress: { ...task.progress, current: "GPT L2 提问分块合并" },
+    message: `正在合并 ${batchResults.length} 个 L2 提问局部回答`
+  });
+  const mergeInput = buildL2QueryMergeInput({
+    query,
+    sourceStats,
+    batchResults,
+    budget: inputBudget
+  });
+  const finalMergeTrace = sourceTraceFromMaterial({
+    partKey: "l2_query.final.merge",
+    stage: "text_l2_query_merge",
+    fieldName: "l2_query",
+    material: {
+      sourceStats,
+      split: {
+        fieldName: "l2_query",
+        materialLabel: "L2 提问局部回答",
+        mode: "l2_query_chunk_merge",
+        batch: 1,
+        total: batchResults.length
+      },
+      compressedResults: batchResults
+    }
+  });
+  const finalSummary = await runL2QuerySummaryCallWithFallback({
+    analysisId,
+    task,
+    partKey: "l2_query.final.merge",
+    stageLabel: "GPT L2 提问分块合并",
+    model: summaryExecutionModel,
+    requestModel,
+    reasoningEffort,
+    analysisProvider,
+    userPrompt: query,
+    input: mergeInput,
+    schema: null,
+    sourceChapterCount: Math.max(keptFactCount, 1),
+    traceSummary: finalMergeTrace,
+    sourceStats,
+    fallbackMarkdown: () => buildL2QueryMergeFallbackMarkdown({ query, batchResults })
+  });
+
+  assertNotCancelled(task);
+  const finalResult = parseJsonOrText(finalSummary.value);
+  assertFinalSummaryUseful(finalResult, Math.max(keptFactCount, 1));
+  await saveFinalAnalysisResult(analysisId, finalResult);
+  task.progress.completed = task.progress.total;
+  const run = updateAnalysisRun(analysisId, {
+    status: "completed",
+    source_stats: JSON.stringify(sourceStats),
+    error_summary: ""
+  });
+  completeTask(task, {
+    analysisId,
+    run: publicAnalysisRun(run),
+    finalResult,
+    failedChapters: [],
+    schemaHash: outputSchemaHash,
+    sourceStats
+  });
+}
+
+async function runL2QuerySummaryCallWithFallback({
+  analysisId,
+  task,
+  partKey,
+  stageLabel,
+  model,
+  requestModel,
+  reasoningEffort,
+  analysisProvider,
+  userPrompt,
+  input,
+  schema,
+  sourceChapterCount,
+  traceSummary,
+  sourceStats,
+  fallbackMarkdown
+}) {
+  try {
+    return await runFinalSummaryCall({
+      analysisId,
+      task,
+      partKey,
+      stageLabel,
+      model,
+      requestModel,
+      reasoningEffort,
+      analysisProvider,
+      userPrompt,
+      input,
+      schema,
+      sourceChapterCount,
+      traceSummary,
+      errorLabel: "Dify L2 提问汇总"
+    });
+  } catch (error) {
+    if (!isDifyEmptyAnalysisTextError(error)) throw error;
+    const markdown = fallbackMarkdown();
+    const isMerge = partKey === "l2_query.final.merge";
+    if (isMerge) {
+      sourceStats.l2_query_merge_fallback_used = true;
+    } else {
+      sourceStats.l2_query_batch_fallback_count = Number(sourceStats.l2_query_batch_fallback_count || 0) + 1;
+    }
+    const fallbackTrace = {
+      ...(traceSummary || {}),
+      fallback_used: true,
+      fallback_reason: "dify_empty_text",
+      field_material_mode: isMerge ? "l2_query_merge_local_fallback" : "l2_query_batch_local_fallback"
+    };
+    await saveAnalysisSummaryPart({
+      analysisId,
+      partKey,
+      parentKey: "",
+      stage: isMerge ? "text_l2_query_merge" : "text_l2_query_batch",
+      status: "completed",
+      contentHash: summaryContentHash({ input, schema: null, userPrompt }),
+      promptHash: shaString(userPrompt || ""),
+      schemaHash: "",
+      model,
+      reasoningEffort,
+      inputSummary: `${stageLabel} · 输入 ${inputTextLength(input)} 字 · Dify 空输出后本地降级`,
+      traceSummary: fallbackTrace,
+      result: { value: markdown, responseId: null },
+      errorSummary: ""
+    });
+    updateTask(task, {
+      progress: {
+        ...task.progress,
+        summary_parts: await summaryProgressForAnalysis(analysisId)
+      },
+      message: `L2 提问分块已本地降级：${partKey}`
+    });
+    return { value: markdown, responseId: null };
+  }
+}
+
+function isDifyEmptyAnalysisTextError(error) {
+  return /Dify (分析工作流|L2 提问汇总)返回了空文本/.test(String(error?.message || ""));
+}
+
+function buildL2QueryBatchFallbackMarkdown({ query, chunk, targetContext }) {
+  const lines = [
+    "## L2 局部事实摘录（系统降级）",
+    "",
+    "Dify 分析汇总返回空文本；以下内容为系统按已召回 L2 facts 生成的保真摘录，未读取章节原文。",
+    "",
+    `查询：${query}`,
+    targetContext?.subject ? `目标主体：${targetContext.subject}` : "",
+    `分块：${chunk.batch}/${chunk.total}`,
+    `事实数：${chunk.rawFacts.length}`,
+    ""
+  ].filter(Boolean);
+  const facts = (chunk.rawFacts || []).map((fact) => compactL2QueryFactForBudget(fact, {
+    factChars: 360,
+    evidenceItems: 1,
+    evidenceChars: 80
+  }));
+  for (const fact of facts) {
+    const chapterLabel = fact.chapter_index ? `第${fact.chapter_index}章` : "章节不明";
+    const typeLabel = fact.fact_type ? ` / ${fact.fact_type}` : "";
+    const entityLabel = fact.entity ? ` / ${fact.entity}` : "";
+    lines.push(`- **${chapterLabel}${typeLabel}${entityLabel}**：${fact.fact || "信息不足"}`);
+    if (fact.evidence?.length) {
+      lines.push(`  证据摘录：${fact.evidence.join("；")}`);
+    }
+  }
+  return lines.join("\n");
+}
+
+function buildL2QueryMergeFallbackMarkdown({ query, batchResults }) {
+  const lines = [
+    "## L2 提问结果（系统降级合并）",
+    "",
+    "Dify 最终合并返回空文本；以下内容按各分块 Markdown 保真拼接，未读取章节原文。",
+    "",
+    `查询：${query}`,
+    ""
+  ];
+  for (const result of batchResults || []) {
+    const chapterRange = compactChapterSample(result.chapters || [], 8).join("、") || "章节不明";
+    lines.push(`### 分块 ${result.batch}/${result.total}（${result.fact_count} 条事实；章节 ${chapterRange}）`);
+    lines.push(clipText(result.markdown || "信息不足", 3000));
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+async function collectL2QueryCandidateFacts({ bookId, indexGroupKeys, startChapter, endChapter, windowChapters, perWindowLimit }) {
+  const rangeStart = Number(startChapter || 0);
+  const rangeEnd = Number(endChapter || 0);
+  const size = Math.max(1, Number(windowChapters || L2_QUERY_WINDOW_CHAPTERS));
+  const facts = [];
+  let windows = 0;
+  for (let currentStart = rangeStart; currentStart <= rangeEnd; currentStart += size) {
+    const currentEnd = Math.min(rangeEnd, currentStart + size - 1);
+    windows += 1;
+    const batch = await listL2Facts({
+      bookId,
+      indexGroupKeys,
+      startChapter: currentStart,
+      endChapter: currentEnd,
+      limit: perWindowLimit,
+      includeContent: true
+    });
+    facts.push(...batch);
+  }
+  return {
+    facts: dedupeFactsById(facts),
+    windows
+  };
+}
+
+function l2QuerySummaryInputBudget(provider) {
+  return provider === "dify" ? L2_QUERY_DIFY_INPUT_MAX_CHARS : SUMMARY_PART_INPUT_MAX_CHARS;
 }
 
 async function executeIndexAnalysisTask(task, { analysisId, bookId, startChapter, endChapter, chapters, settings, indexGroups = [], model, reasoningEffort, outputSchemaHash, analysisMode, sourceReviewBudget }) {
@@ -1459,6 +2082,299 @@ function mergeFacts(facts, { chronological = false } = {}) {
   return sorted.slice(0, 1200);
 }
 
+function recallL2QueryFacts({ facts, query, targetContext = null, limit = L2_QUERY_MAX_FACTS, allowExpandedLimit = false }) {
+  const baseTerms = extractL2QueryTerms(query, targetContext?.subject);
+  const firstPass = scoreL2QueryFacts(facts, baseTerms)
+    .filter((entry) => entry.score > 0)
+    .sort(compareL2QueryScores);
+  const expandedTerms = expandL2QueryTerms(firstPass.slice(0, 80).map((entry) => entry.fact), baseTerms);
+  const terms = uniqueCompact([...baseTerms, ...expandedTerms], 80);
+  const scored = dedupeL2QueryScoreEntries(scoreL2QueryFacts(facts, terms)
+    .filter((entry) => entry.score > 0)
+    .sort(compareL2QueryScores));
+  const requestedLimit = Number(limit) || L2_QUERY_MAX_FACTS;
+  const maxFacts = allowExpandedLimit
+    ? Math.max(1, requestedLimit)
+    : Math.max(1, Math.min(L2_QUERY_MAX_FACTS, requestedLimit));
+  const targetTerms = l2QueryTargetTerms(targetContext, baseTerms);
+  const targetEntries = targetTerms.length
+    ? scored.filter((entry) => factMatchesAnyEntity(entry.fact, targetTerms))
+    : [];
+  const selectionLimit = targetEntries.length ? Math.max(maxFacts, targetEntries.length) : maxFacts;
+  const selectedEntries = selectL2QueryRecallEntries({
+    scored,
+    targetEntries,
+    limit: selectionLimit
+  });
+  const selected = selectedEntries.map((entry) => entry.fact)
+    .sort((left, right) => Number(left.chapter_index || 0) - Number(right.chapter_index || 0)
+      || Number(right.importance || 0) - Number(left.importance || 0));
+  return {
+    facts: selected,
+    matchedTerms: terms.filter((term) => selected.some((fact) => l2QueryFactSearchText(fact).includes(normalizeRouteToken(term)))).slice(0, 40),
+    expandedTerms,
+    scoredFacts: scored.length,
+    targetCandidateFacts: targetEntries.length,
+    targetSelectedFacts: selectedEntries.filter((entry) => targetEntries.includes(entry)).length,
+    droppedAfterRecallLimit: Math.max(0, scored.length - selectedEntries.length)
+  };
+}
+
+function l2QuerySummaryProgressMessage({ recall, candidateFacts, targetSubject, collectionMode = false }) {
+  const recalled = Number(recall?.facts?.length || 0);
+  const targetCandidates = Number(recall?.targetCandidateFacts || 0);
+  if (targetSubject && targetCandidates) {
+    return `正在基于 ${recalled}/${targetCandidates} 条目标 L2 事实生成回答（全库候选 ${candidateFacts} 条）`;
+  }
+  if (collectionMode) {
+    return `正在基于 ${recalled} 条集合候选 L2 事实分块提取（全库候选 ${candidateFacts} 条）`;
+  }
+  return `正在基于 ${recalled}/${candidateFacts} 条 L2 事实生成回答`;
+}
+
+function dedupeL2QueryScoreEntries(entries) {
+  const seen = new Set();
+  const output = [];
+  for (const entry of entries || []) {
+    const fact = entry?.fact;
+    const key = fact?.id || [
+      fact?.book_id,
+      fact?.index_group_key,
+      fact?.chapter_index,
+      fact?.category,
+      fact?.entity,
+      fact?.fact_type,
+      fact?.fact
+    ].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(entry);
+  }
+  return output;
+}
+
+function selectL2QueryRecallEntries({ scored, targetEntries, limit }) {
+  const selected = [];
+  const seen = new Set();
+  const addEntry = (entry) => {
+    const key = l2QueryScoreEntryKey(entry);
+    if (!key || seen.has(key) || selected.length >= limit) return false;
+    seen.add(key);
+    selected.push(entry);
+    return true;
+  };
+
+  const targetSelection = selectCoveragePreservingL2QueryEntries(targetEntries, Math.min(limit, targetEntries.length));
+  for (const entry of targetSelection) addEntry(entry);
+  for (const entry of scored || []) addEntry(entry);
+  return selected;
+}
+
+function selectCoveragePreservingL2QueryEntries(entries, limit) {
+  const input = Array.isArray(entries) ? entries : [];
+  if (!limit || input.length <= limit) return input.slice(0, limit);
+
+  const selected = [];
+  const seen = new Set();
+  const addEntry = (entry) => {
+    const key = l2QueryScoreEntryKey(entry);
+    if (!key || seen.has(key) || selected.length >= limit) return false;
+    seen.add(key);
+    selected.push(entry);
+    return true;
+  };
+
+  const topCount = Math.max(1, Math.floor(limit * 0.6));
+  for (const entry of input.slice(0, topCount)) addEntry(entry);
+
+  const bestByChapter = new Map();
+  for (const entry of input) {
+    const chapter = Number(entry?.fact?.chapter_index || 0);
+    if (!chapter || bestByChapter.has(chapter)) continue;
+    bestByChapter.set(chapter, entry);
+  }
+  const coverageEntries = [...bestByChapter.values()]
+    .sort((left, right) => Number(left.fact?.chapter_index || 0) - Number(right.fact?.chapter_index || 0));
+  for (const entry of evenlySampleL2QueryEntries(coverageEntries, limit - selected.length)) addEntry(entry);
+  for (const entry of input) addEntry(entry);
+  return selected;
+}
+
+function evenlySampleL2QueryEntries(entries, count) {
+  const input = Array.isArray(entries) ? entries : [];
+  if (count <= 0) return [];
+  if (input.length <= count) return input;
+  if (count === 1) return [input[input.length - 1]];
+  const output = [];
+  const seen = new Set();
+  for (let index = 0; index < count; index += 1) {
+    const sourceIndex = Math.round((index * (input.length - 1)) / (count - 1));
+    const entry = input[sourceIndex];
+    const key = l2QueryScoreEntryKey(entry);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(entry);
+  }
+  return output;
+}
+
+function l2QueryScoreEntryKey(entry) {
+  const fact = entry?.fact;
+  if (!fact) return "";
+  return fact.id || [
+    fact.book_id,
+    fact.index_group_key,
+    fact.chapter_index,
+    fact.category,
+    fact.entity,
+    fact.fact_type,
+    fact.fact
+  ].join("|");
+}
+
+function l2QueryTargetTerms(targetContext, baseTerms = []) {
+  const target = targetContext?.subject || "";
+  if (!target) return [];
+  return uniqueCompact([
+    target,
+    ...(Array.isArray(targetContext?.aliases) ? targetContext.aliases : []),
+    ...baseTerms.filter(isLikelyL2TargetAliasTerm)
+  ], 12);
+}
+
+function isLikelyL2TargetAliasTerm(value) {
+  const text = normalizeRouteToken(value);
+  if (!text || text.length < 2 || text.length > 12) return false;
+  if (/以及|对应|章节|事实|内容|结果|要求|时间线|演化/.test(text)) return false;
+  if (/^(飞剑|剑类|陈平安|养剑葫|战绩|能力|来源|外形|形态|性格|本命飞剑|other|appearance|ability|trait|ownership|combat_record)$/.test(text)) return false;
+  return true;
+}
+
+function scoreL2QueryFacts(facts, terms) {
+  const normalizedTerms = uniqueCompact(terms.map(normalizeRouteToken).filter((term) => term.length >= 2), 80);
+  return (Array.isArray(facts) ? facts : []).map((fact) => {
+    const haystack = l2QueryFactSearchText(fact);
+    const contentText = normalizeRouteToken(fact?.fact || "");
+    const entityText = normalizeRouteToken(fact?.entity || "");
+    let score = Number(fact?.importance || 0) * 2 + Number(fact?.confidence || 0);
+    let matched = 0;
+    for (const term of normalizedTerms) {
+      if (!haystack.includes(term)) continue;
+      matched += 1;
+      score += 2;
+      if (contentText.includes(term)) score += 2.5;
+      if (entityText === term) score += 4;
+      if (term.length >= 3) score += 0.8;
+    }
+    return { fact, score: matched ? score : 0, matched };
+  });
+}
+
+function compareL2QueryScores(left, right) {
+  return right.score - left.score
+    || right.matched - left.matched
+    || Number(right.fact?.importance || 0) - Number(left.fact?.importance || 0)
+    || Number(left.fact?.chapter_index || 0) - Number(right.fact?.chapter_index || 0);
+}
+
+function dedupeFactsById(facts) {
+  const seen = new Set();
+  const output = [];
+  for (const fact of facts || []) {
+    const key = fact?.id || [
+      fact?.book_id,
+      fact?.index_group_key,
+      fact?.chapter_index,
+      fact?.category,
+      fact?.entity,
+      fact?.fact_type,
+      fact?.fact
+    ].join("|");
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(fact);
+  }
+  return output;
+}
+
+function extractL2QueryTerms(query, target = "") {
+  const text = String(query || "");
+  const terms = [];
+  if (target) terms.push(target);
+  terms.push(...inferEntityQueriesFromPrompt(text));
+  for (const match of text.matchAll(/[《“「『‘（(]([^》”」』’）)]{1,24})[》”」』’）)]/g)) {
+    terms.push(match[1]);
+  }
+  for (const segment of text.split(/[，。；;、\s\n\r:：/｜|]+/)) {
+    const cleaned = cleanupL2QueryTerm(segment);
+    if (cleaned) terms.push(cleaned);
+    for (const token of l2QuerySubTerms(cleaned)) terms.push(token);
+  }
+  return uniqueCompact(terms.map(cleanupL2QueryTerm).filter(Boolean), 48);
+}
+
+function cleanupL2QueryTerm(value) {
+  let text = String(value || "").trim();
+  text = text.replace(/^(帮我|请|查询|查找|整理|总结|输出|关于|围绕|直接|内容|结果|相关|事实|章节|原文中?|称之为|称为|早期|后期)+/g, "");
+  text = text.replace(/(内容|结果|相关事实|事实清单|时间线|设定集|对应章节|输出要求|模式)$/g, "");
+  text = text.trim();
+  if (!text || text.length < 2 || text.length > 18) return "";
+  if (/^(剑来|l2|json|markdown|事实|章节|内容|整理|总结|查询|查找|时间线|外形演化|输出)$|^\d+$/.test(text.toLowerCase())) return "";
+  return text;
+}
+
+function l2QuerySubTerms(value) {
+  const text = String(value || "");
+  const terms = new Set();
+  for (const match of text.matchAll(/[\u4e00-\u9fa5A-Za-z0-9]{2,8}/g)) {
+    const word = match[0];
+    if (/初一|十五|小酆都|银锭|白虹|剑胚|飞剑|外形|形态|炼化|来历|战绩|神通|持有|名字|别名|称呼/.test(word)) {
+      terms.add(word);
+    }
+  }
+  for (const keyword of ["初一", "十五", "小酆都", "银锭", "小银锭", "白虹", "小小白虹", "剑胚", "飞剑", "外形", "形态"]) {
+    if (text.includes(keyword)) terms.add(keyword);
+  }
+  return [...terms];
+}
+
+function expandL2QueryTerms(facts, baseTerms) {
+  const base = new Set(baseTerms.map(normalizeRouteToken));
+  const terms = [];
+  for (const fact of facts || []) {
+    terms.push(
+      fact?.entity,
+      fact?.fact_type,
+      ...(Array.isArray(fact?.aliases) ? fact.aliases : []),
+      ...(Array.isArray(fact?.tags) ? fact.tags : []),
+      ...(Array.isArray(fact?.related_entities) ? fact.related_entities : [])
+    );
+    const text = [fact?.fact, ...(Array.isArray(fact?.evidence) ? fact.evidence : [])].join(" ");
+    for (const match of text.matchAll(/[“「『‘]([^”」』’]{1,12})[”」』’]/g)) {
+      terms.push(match[1]);
+    }
+    for (const keyword of ["小酆都", "银锭", "小银锭", "银块", "剑胚", "白虹", "小小的白虹", "晶莹剔透", "纤小"]) {
+      if (text.includes(keyword)) terms.push(keyword);
+    }
+  }
+  return uniqueCompact(terms
+    .map(cleanupL2QueryTerm)
+    .filter((term) => term && !base.has(normalizeRouteToken(term))), 32);
+}
+
+function l2QueryFactSearchText(fact) {
+  return [
+    fact?.category,
+    fact?.entity,
+    fact?.fact_type,
+    fact?.fact,
+    ...(Array.isArray(fact?.aliases) ? fact.aliases : []),
+    ...(Array.isArray(fact?.tags) ? fact.tags : []),
+    ...(Array.isArray(fact?.related_entities) ? fact.related_entities : []),
+    ...(Array.isArray(fact?.evidence) ? fact.evidence : [])
+  ].map(normalizeRouteToken).join(" ");
+}
+
 function shouldFallbackL2Recall(facts, entityQueries, usedL1Route = false) {
   if (usedL1Route) return false;
   if (!entityQueries.length) return false;
@@ -1528,6 +2444,14 @@ async function ensureAnalysisProviderReady(provider) {
   await testOpenAIConnection();
 }
 
+async function ensureAnalysisSummaryProviderReady(provider) {
+  if (provider === "dify") {
+    await testDifyConnection({ target: "analysis_summary" });
+    return;
+  }
+  await testOpenAIConnection();
+}
+
 async function callAnalysisJson({
   provider = "openai",
   target = "analysis_summary",
@@ -1538,7 +2462,8 @@ async function callAnalysisJson({
   schema,
   schemaName = "result",
   maxOutputTokens,
-  strict = true
+  strict = true,
+  errorLabel = "Dify 分析工作流"
 }) {
   if (provider === "dify") {
     const outputs = await runDifyWorkflow({
@@ -1557,7 +2482,7 @@ async function callAnalysisJson({
       }
     });
     return {
-      value: normalizeDifyAnalysisJsonOutput(outputs, schema || null),
+      value: normalizeDifyAnalysisJsonOutput(outputs, schema || null, { errorLabel }),
       responseId: outputs.response_id || outputs.responseId || null
     };
   }
@@ -1580,7 +2505,8 @@ async function callAnalysisText({
   reasoningEffort,
   instructions,
   input,
-  maxOutputTokens
+  maxOutputTokens,
+  errorLabel = "Dify 分析工作流"
 }) {
   if (provider === "dify") {
     const outputs = await runDifyWorkflow({
@@ -1596,7 +2522,7 @@ async function callAnalysisText({
       }
     });
     return {
-      value: normalizeDifyAnalysisTextOutput(outputs),
+      value: normalizeDifyAnalysisTextOutput(outputs, { errorLabel }),
       responseId: outputs.response_id || outputs.responseId || null
     };
   }
@@ -1793,7 +2719,8 @@ async function runFinalSummaryCall({
   input,
   schema,
   sourceChapterCount,
-  traceSummary = null
+  traceSummary = null,
+  errorLabel = "Dify 分析工作流"
 }) {
   assertSummaryInputWithinBudget(input, stageLabel);
   const contentHash = summaryContentHash({ input, schema: schema?.schema || null, userPrompt });
@@ -1825,7 +2752,8 @@ async function runFinalSummaryCall({
         schema: schema.schema,
         schemaName: schema.schemaName,
         maxOutputTokens: SUMMARY_FINAL_MAX_OUTPUT_TOKENS,
-        strict: schema.strict
+        strict: schema.strict,
+        errorLabel
       });
       const finalValue = normalizeFinalSchemaValue(response.value, schema);
       assertFinalSummaryUseful(parseJsonOrText(finalValue), sourceChapterCount, {
@@ -1844,7 +2772,8 @@ async function runFinalSummaryCall({
       reasoningEffort,
       instructions: "你是严谨的小说多章节汇总引擎。按用户汇总 Prompt 输出最终结果；如果用户要求 JSON，则只输出合法 JSON，否则直接输出文本，不要添加无关解释。",
       input,
-      maxOutputTokens: SUMMARY_FINAL_MAX_OUTPUT_TOKENS
+      maxOutputTokens: SUMMARY_FINAL_MAX_OUTPUT_TOKENS,
+      errorLabel
     });
     assertFinalSummaryUseful(parseJsonOrText(response.value), sourceChapterCount, {
       schema: schema?.schema || null,
@@ -2091,6 +3020,7 @@ function buildTargetContext({ userPrompt, schema, sourceMaterial } = {}) {
     template?.target_subject,
     template?.subject,
     template?.topic,
+    inferL2QueryTargetSubject(userPrompt),
     sourceMaterial?.targetContext?.subject
   ];
   for (const candidate of candidates) {
@@ -2105,6 +3035,39 @@ function buildTargetContext({ userPrompt, schema, sourceMaterial } = {}) {
   }
   const schemaFields = schema?.properties ? Object.keys(schema.properties) : [];
   return { subject: "", aliases: [], source: schemaFields.length ? "schema" : "" };
+}
+
+function inferL2QueryTargetSubject(prompt) {
+  const text = String(prompt || "");
+  const patternMatch = text.match(/(?:查询|查找|关于|围绕|聚焦|只看)\s*([^\s，。；;、（）()]{2,12}?)(?:相关|这把|这件|的|事实|内容|外形|形态|时间线)/);
+  const candidates = [
+    patternMatch?.[1],
+    ...extractL2QueryTerms(text).filter(isLikelyL2TargetSubjectTerm)
+  ];
+  for (const candidate of candidates) {
+    const subject = normalizeTargetSubject(candidate);
+    if (subject && isLikelyL2TargetSubjectTerm(subject)) return subject;
+  }
+  return "";
+}
+
+function isL2CollectionQuery(prompt) {
+  const text = normalizeRouteToken(prompt);
+  if (!text) return false;
+  const asksForCollection = /提取|整理|汇总|列出|输出|清单|列表|排名|排行|top\s*\d+|前\s*\d+|最重要|重要程度/.test(text);
+  const asksForManyItems = /所有|全部|多把|一批|前\s*\d+|top\s*\d+|清单|列表|排名|排行/.test(text);
+  const hasCollectionSubject = /飞剑|剑胚|剑匣|剑气|剑意|武器|法宝|道具|人物|角色|地点|势力/.test(text);
+  return asksForCollection && asksForManyItems && hasCollectionSubject;
+}
+
+function isLikelyL2TargetSubjectTerm(value) {
+  const text = normalizeRouteToken(value);
+  if (!text || text.length < 2 || text.length > 12) return false;
+  if (/提取|输出|总结|整理|包含|涉及|所有|清单|列表|名称|持有者|重要程度|前\d+|多少/.test(text)) return false;
+  if (/^(把|个|条|项|类)/.test(text)) return false;
+  if (/以及|对应|章节|事实|内容|结果|要求|时间线|演化|外形|形态|来源|能力|战绩|设定|信息/.test(text)) return false;
+  if (/^(l2|json|markdown|剑来|飞剑|本命飞剑|剑类|道具|重要道具|陈平安|章节)$/.test(text)) return false;
+  return true;
 }
 
 function normalizeTargetSubject(value) {
@@ -3243,6 +4206,10 @@ function sourceTraceFromMaterial({ partKey, parentKey = "", stage, fieldName, ma
   const subjects = uniqueCompact(packets.map((packet) => packet.subject), 12);
   const relatedSubjects = uniqueCompact(packets.flatMap((packet) => packet.related_subjects || []), 8);
   const sourceStats = safeMaterial.sourceStats && typeof safeMaterial.sourceStats === "object" ? safeMaterial.sourceStats : {};
+  const targetSubject = String(safeMaterial.target_subject || safeMaterial.targetContext?.subject || "");
+  const targetEvidenceCount = targetSubject
+    ? packets.filter((packet) => packet.target_match || evidencePacketMatchesTarget(packet, targetSubject)).length
+    : packets.filter((packet) => packet.target_match).length;
   return {
     part_key: String(partKey || ""),
     parent_key: String(parentKey || ""),
@@ -3262,8 +4229,8 @@ function sourceTraceFromMaterial({ partKey, parentKey = "", stage, fieldName, ma
     fact_types: countValues(packets.map((packet) => packet.fact_type).filter(Boolean)),
     subjects,
     related_subjects: relatedSubjects,
-    target_subject: String(safeMaterial.target_subject || safeMaterial.targetContext?.subject || ""),
-    target_evidence_count: Number(safeMaterial.target_evidence_count || packets.filter((packet) => packet.target_match).length || 0),
+    target_subject: targetSubject,
+    target_evidence_count: Number(safeMaterial.target_evidence_count || targetEvidenceCount || 0),
     field_material_mode: String(safeMaterial.split?.mode || "evidence_packets"),
     prompt_overhead_chars: Number(promptOverheadChars || 0),
     material_chars: Number(materialChars || JSON.stringify(safeMaterial).length || 0),
@@ -3890,6 +4857,285 @@ function buildEvidenceSummaryInput({ userPrompt, sourceMaterial, materialLabel, 
             "",
             "证据包素材 JSON：",
             JSON.stringify(sourceMaterial || {})
+          ].join("\n")
+        }
+      ]
+    }
+  ];
+}
+
+function buildL2QuerySummaryInput({ query, sourceMaterial, sourceStats }) {
+  const collectionMode = Boolean(sourceStats?.l2_query_collection_mode);
+  const collectionInstructions = collectionMode ? [
+    "- 这是集合型提取/排名任务：当前输入可能只是全库候选的一部分，请先提取本批次候选项，不要假装已经完成全库最终排名。",
+    "- 每个候选项尽量保留名称、持有者/关联主体、重要性理由、章节线索和依据事实；信息不足的字段写“信息不足”。",
+    "- 如果用户要求前 N/最重要，当前批次只给出本批次候选和局部重要性判断，最终排序由合并阶段完成。"
+  ] : [];
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            "你是小说 L2 事实库问答与设定小模块整理助手。",
+            "",
+            "用户查询：",
+            query,
+            "",
+            "任务边界：",
+            "- 只依据下方 L2 facts，不读取原文，不使用索引外资料。",
+            "- 每个关键结论尽量标明章节。",
+            "- 如果用户要求时间线，优先按章节顺序组织。",
+            "- 如果某个称谓或描述只是近义表述、事实整理表述或推断，请和“直接事实表述”区分，不要写成原文逐字。",
+            "- 证据不足时明确写出缺口，不要补写不存在的信息。",
+            "- 默认输出 Markdown 正文，内容要适合阅读和消费，不要输出 JSON。",
+            ...collectionInstructions,
+            "",
+            "召回统计 JSON：",
+            JSON.stringify(sourceStats || {}),
+            "",
+            "L2 facts JSON：",
+            JSON.stringify((sourceMaterial?.facts || []).map((fact) => ({
+              chapter_index: fact.chapter_index,
+              category: fact.category,
+              entity: fact.entity,
+              aliases: fact.aliases || [],
+              tags: fact.tags || [],
+              related_entities: fact.related_entities || [],
+              fact_type: fact.fact_type,
+              fact: fact.fact,
+              evidence: fact.evidence || [],
+              importance: fact.importance,
+              confidence: fact.confidence,
+              index_group_key: fact.index_group_key
+            })))
+          ].join("\n")
+        }
+      ]
+    }
+  ];
+}
+
+function splitL2QueryFactsIntoBudgetedChunks({ query, targetContext = null, sourceStats = {}, facts, budget }) {
+  const rawFacts = Array.isArray(facts) ? facts : [];
+  const chunks = [];
+  let currentRawFacts = [];
+  let currentFacts = [];
+  let omittedByBudget = 0;
+  for (const fact of rawFacts) {
+    const compactFact = compactL2QueryFactForBudget(fact, {
+      factChars: 420,
+      evidenceItems: 1,
+      evidenceChars: 80
+    });
+    const candidateFacts = [...currentFacts, compactFact];
+    const candidateInput = buildL2QuerySummaryInput({
+      query,
+      sourceMaterial: {
+        query,
+        targetContext,
+        sourceStats: {
+          ...sourceStats,
+          evidence_packet_count: candidateFacts.length
+        },
+        facts: candidateFacts
+      },
+      sourceStats
+    });
+    if (currentFacts.length && inputTextLength(candidateInput) > budget) {
+      chunks.push({
+        rawFacts: currentRawFacts,
+        facts: currentFacts,
+        omittedByBudget,
+        trimmedByBudget: true
+      });
+      currentRawFacts = [];
+      currentFacts = [];
+    }
+
+    const nextFact = currentFacts.length
+      ? compactFact
+      : fitSingleL2QueryFactWithinBudget({
+        fact,
+        query,
+        targetContext,
+        sourceStats,
+        budget
+      });
+    if (!nextFact) {
+      omittedByBudget += 1;
+      continue;
+    }
+    currentRawFacts.push(fact);
+    currentFacts.push(nextFact);
+  }
+  if (currentFacts.length) {
+    chunks.push({
+      rawFacts: currentRawFacts,
+      facts: currentFacts,
+      omittedByBudget,
+      trimmedByBudget: true
+    });
+  }
+  const total = chunks.length || 1;
+  return chunks.map((chunk, index) => withL2QueryChunkInput({
+    chunk: {
+      ...chunk,
+      batch: index + 1,
+      total
+    },
+    query,
+    targetContext,
+    sourceStats,
+    budget
+  }));
+}
+
+function withL2QueryChunkInput({ chunk, query, targetContext = null, sourceStats = {}, budget }) {
+  let facts = Array.isArray(chunk.facts) ? chunk.facts : [];
+  let input = buildL2QuerySummaryInput({
+    query,
+    sourceMaterial: {
+      query,
+      targetContext,
+      sourceStats: {
+        ...sourceStats,
+        evidence_packet_count: facts.length
+      },
+      facts
+    },
+    sourceStats
+  });
+  while (facts.length && inputTextLength(input) > budget) {
+    facts = facts.slice(0, -1);
+    input = buildL2QuerySummaryInput({
+      query,
+      sourceMaterial: {
+        query,
+        targetContext,
+        sourceStats: {
+          ...sourceStats,
+          evidence_packet_count: facts.length
+        },
+        facts
+      },
+      sourceStats
+    });
+  }
+  const rawFacts = (chunk.rawFacts || []).slice(0, facts.length);
+  return {
+    ...chunk,
+    facts,
+    rawFacts,
+    input,
+    omittedByBudget: Number(chunk.omittedByBudget || 0) + Math.max(0, (chunk.facts || []).length - facts.length),
+    trimmedByBudget: true,
+    chapters: [...new Set(rawFacts.map((fact) => Number(fact.chapter_index || 0)).filter(Boolean))]
+      .sort((left, right) => left - right)
+  };
+}
+
+function fitSingleL2QueryFactWithinBudget({ fact, query, targetContext = null, sourceStats = {}, budget }) {
+  const attempts = [
+    { factChars: 420, evidenceItems: 1, evidenceChars: 80 },
+    { factChars: 220, evidenceItems: 1, evidenceChars: 48 },
+    { factChars: 120, evidenceItems: 0, evidenceChars: 0 },
+    { factChars: 60, evidenceItems: 0, evidenceChars: 0 }
+  ];
+  for (const attempt of attempts) {
+    const compactFact = compactL2QueryFactForBudget(fact, attempt);
+    const input = buildL2QuerySummaryInput({
+      query,
+      sourceMaterial: {
+        query,
+        targetContext,
+        sourceStats: {
+          ...sourceStats,
+          evidence_packet_count: 1
+        },
+        facts: [compactFact]
+      },
+      sourceStats
+    });
+    if (inputTextLength(input) <= budget) return compactFact;
+  }
+  return null;
+}
+
+function compactL2QueryFactForBudget(fact, { factChars, evidenceItems, evidenceChars }) {
+  return {
+    chapter_index: fact?.chapter_index,
+    category: fact?.category,
+    entity: fact?.entity,
+    aliases: compactStringArray(fact?.aliases, 4, 24),
+    tags: compactStringArray(fact?.tags, 4, 24),
+    related_entities: compactStringArray(fact?.related_entities, 4, 24),
+    fact_type: fact?.fact_type,
+    fact: clipText(fact?.fact || "", factChars),
+    evidence: compactStringArray(fact?.evidence, evidenceItems, evidenceChars),
+    importance: fact?.importance,
+    confidence: fact?.confidence,
+    index_group_key: fact?.index_group_key
+  };
+}
+
+function buildL2QueryMergeInput({ query, sourceStats, batchResults, budget = SUMMARY_PART_INPUT_MAX_CHARS }) {
+  const attempts = [3200, 1800, 1000, 560, 280, 140, 70, 40];
+  let lastInput = null;
+  for (const markdownChars of attempts) {
+    const input = buildL2QueryMergeInputWithLimit({
+      query,
+      sourceStats,
+      batchResults,
+      markdownChars
+    });
+    lastInput = input;
+    if (inputTextLength(input) <= budget) return input;
+  }
+  return lastInput;
+}
+
+function buildL2QueryMergeInputWithLimit({ query, sourceStats, batchResults, markdownChars }) {
+  const collectionMode = Boolean(sourceStats?.l2_query_collection_mode);
+  const collectionInstructions = collectionMode ? [
+    "- 这是集合型提取/排名任务：请把各批候选按名称/别名去重，合并持有者、章节线索、重要性理由和证据缺口。",
+    "- 如果用户要求“前 N”或“最重要”，请基于各批候选的重要性理由、章节跨度、事实密度和叙事关键性做最终排序。",
+    "- 输出应优先是可读清单或表格；每项尽量包含名称、持有者/关联主体、重要程度、为什么重要、章节线索。"
+  ] : [];
+  const compactResults = (batchResults || []).map((result) => ({
+    batch: result.batch,
+    total: result.total,
+    chapters: compactChapterSample(result.chapters || [], 10),
+    fact_count: result.fact_count,
+    markdown: clipText(result.markdown || "", markdownChars)
+  }));
+  return [
+    {
+      role: "user",
+      content: [
+        {
+          type: "input_text",
+          text: [
+            "你是小说 L2 事实库问答与设定小模块整理助手。",
+            "",
+            "用户查询：",
+            query,
+            "",
+            "任务：合并多个 L2 提问局部回答，输出最终 Markdown 正文。",
+            "合并边界：",
+            "- 只依据下方局部回答 Markdown，不读取原文，不使用索引外资料。",
+            "- 保留章节线索；时间线类问题按章节顺序组织。",
+            "- 去重同义表述；如果局部回答有冲突，优先保留章节更明确、表述更保守的结论。",
+            "- 区分事实直接表述与整理推断，不要写成原文逐字。",
+            "- 输出 Markdown 正文，不要输出 JSON。",
+            ...collectionInstructions,
+            "",
+            "召回统计 JSON：",
+            JSON.stringify(sourceStats || {}),
+            "",
+            "局部回答 Markdown JSON：",
+            JSON.stringify(compactResults)
           ].join("\n")
         }
       ]
@@ -4740,7 +5986,7 @@ function normalizeChapterIndexes(value) {
 }
 
 function normalizeAnalysisMode(value) {
-  return ["fast_index", "balanced", "precision", "full_text"].includes(value) ? value : "balanced";
+  return ["l2_query", "fast_index", "balanced", "precision", "full_text"].includes(value) ? value : "balanced";
 }
 
 function normalizeL2BuildMode(value) {
@@ -4916,7 +6162,9 @@ function sourceTraceFromSummaryParts(parts = []) {
         field_merge_batch_count: Number(trace.field_merge_batch_count || 0),
         field_merge_model_used: Boolean(trace.field_merge_model_used),
         field_merge_fallback_reason: String(trace.field_merge_fallback_reason || ""),
-        merged_value_chars: Number(trace.merged_value_chars || 0)
+        merged_value_chars: Number(trace.merged_value_chars || 0),
+        fallback_used: Boolean(trace.fallback_used),
+        fallback_reason: String(trace.fallback_reason || "")
       };
     })
     .filter(Boolean);

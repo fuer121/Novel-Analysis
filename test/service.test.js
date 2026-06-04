@@ -1800,6 +1800,77 @@ test("tests Dify connection with target-specific API keys", async () => {
   }
 });
 
+test("retries transient Dify connection failures with a target label", async () => {
+  const previousFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts += 1;
+    if (attempts < 3) {
+      throw new Error("fetch failed");
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ user_input_form: [] })
+    };
+  };
+
+  try {
+    const result = await dify.testDifyConnection({ target: "analysis_summary" });
+    assert.equal(result.ok, true);
+    assert.equal(attempts, 3);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("labels Dify connection failures after short retry exhaustion", async () => {
+  const previousFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts += 1;
+    throw new Error("fetch failed");
+  };
+
+  try {
+    await assert.rejects(
+      () => dify.testDifyConnection({ target: "analysis_chapter" }),
+      /无法连接 Dify API：analysis_chapter parameters @ .*fetch failed.*已重试 3\/3/
+    );
+    assert.equal(attempts, 3);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("retries transient Dify workflow failures with a target label", async () => {
+  const previousFetch = global.fetch;
+  let attempts = 0;
+  global.fetch = async () => {
+    attempts += 1;
+    if (attempts < 2) {
+      throw new Error("fetch failed");
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ data: { outputs: { result: "ok" } } })
+    };
+  };
+
+  try {
+    const outputs = await dify.runDifyWorkflow({
+      apiKey: "app-analysis-summary-test",
+      inputs: {},
+      target: "analysis_summary"
+    });
+    assert.deepEqual(outputs, { result: "ok" });
+    assert.equal(attempts, 2);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("analyzes selected non-contiguous chapters, preserves prompt snapshot, and deletes run", async () => {
   await db.saveEncryptedChapter({
     bookId: "book-selected",
@@ -2094,6 +2165,950 @@ test("fast index analysis uses L2 facts without decrypting chapter text", async 
     assert.equal(result.finalResult.summary, "完成");
     assert.equal(result.finalResult.source_stats, undefined);
     assert.equal(result.source_stats.source_review_chapters, 0);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query analysis runs without a prompt group and recalls fact body keywords", async () => {
+  const bookId = "book-l2-query";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  for (const [chapterIndex, fact] of [
+    [156, "剑胚外形为拳头大小、银块模样的东西，悬浮在空中。"],
+    [162, "老秀才赠予陈平安一块名为“小酆都”的剑胚，外形似银锭，品秩很高。"],
+    [191, "这口飞剑不再是一颗银锭的粗俗模样，极其纤小，晶莹剔透。"],
+    [221, "飞剑初一如一条小小的白虹，剑身纤细，锋芒毕露。"]
+  ]) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: "",
+        fact_type: "appearance",
+        fact,
+        evidence: [fact.slice(0, 20)],
+        importance: 0.9,
+        confidence: 0.9
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  let summaryCalls = 0;
+  let summaryInput = "";
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const text = body.input[0].content[0].text;
+    assert.equal(text.includes("章节原文："), false);
+    assert.equal(text.includes("第156章原文不应被读取"), false);
+    assert.equal(body.text?.format?.name || "", "");
+    summaryCalls += 1;
+    summaryInput = text;
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_summary",
+        output: [{ content: [{ type: "output_text", text: "## 初一外形演化时间线\n第156章为银块模样，第162章似银锭，第191章脱离银锭，第221章如白虹。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 300,
+      index_group_keys: ["sword-special"],
+      query: "帮我查找剑来飞剑专项 L2 中关于初一（早期外形是银锭，原文中称之为小银锭）的内容，并整理成初一外形演化时间线"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryCalls, 1);
+    assert.equal(summaryInput.includes("小酆都"), true);
+    assert.equal(summaryInput.includes("外形似银锭"), true);
+    assert.equal(summaryInput.includes("小小的白虹"), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(typeof result.finalResult, "string");
+    assert.equal(result.finalResult.includes("初一外形演化时间线"), true);
+    assert.equal(result.source_stats.analysis_mode, "l2_query");
+    assert.equal(result.source_stats.recalled_facts, 4);
+    assert.equal(result.source_stats.source_review_chapters, 0);
+    assert.equal(result.source_stats.l2_query_material_mode, "direct");
+    assert.equal(result.source_stats.l2_query_chunk_count, 1);
+    assert.deepEqual(result.source_stats.index_group_keys, ["sword-special"]);
+    assert.equal(result.prompt.l2_query.includes("小银锭"), true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query analysis completes with a local Markdown result when no facts match", async () => {
+  const bookId = "book-l2-query-empty";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  await db.saveEncryptedChapter({
+    bookId,
+    chapterIndex: 1,
+    title: "第一章",
+    content: "第一章原文不应被读取"
+  });
+  const chapter = db.getChapterMetadata(bookId, 1);
+  await db.saveL2ChapterFacts({
+    bookId,
+    indexGroupKey: "sword-special",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l2-v1-typed-facts",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "location",
+      entity: "小镇",
+      fact_type: "location",
+      fact: "小镇是故事早期地点。",
+      evidence: ["小镇"],
+      importance: 0.4,
+      confidence: 0.8
+    }]
+  });
+
+  const previousFetch = global.fetch;
+  let responseCalls = 0;
+  global.fetch = async (url) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    responseCalls += 1;
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1,
+      index_group_keys: ["sword-special"],
+      query: "查询初一小银锭外形演化时间线"
+    });
+    await waitForTask(analysis);
+    assert.equal(responseCalls, 0);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.finalResult.includes("未召回相关 L2 事实"), true);
+    assert.equal(result.source_stats.analysis_mode, "l2_query");
+    assert.equal(result.source_stats.candidate_facts, 1);
+    assert.equal(result.source_stats.recalled_facts, 0);
+    assert.equal(result.source_stats.l2_query_material_mode, "direct");
+    assert.equal(result.source_stats.l2_query_chunk_count, 0);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query analysis splits large fact sets into budgeted summary batches", async () => {
+  const bookId = "book-l2-query-large-budget";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  const anchors = new Map([
+    [12, "剑胚早期像银锭，也被整理为小银锭阶段，仍与初一外形演化相关。"],
+    [48, "老秀才赠予的小酆都剑胚与初一早期形态相关，事实正文明确出现小酆都。"],
+    [96, "初一后来脱离银锭粗俗模样，剑身更纤细晶莹。"],
+    [144, "飞剑初一如一条小小白虹，形成白虹阶段的外形线索。"]
+  ]);
+  for (let chapterIndex = 1; chapterIndex <= 180; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    const anchor = anchors.get(chapterIndex) || "初一外形演化事实：本章围绕初一、飞剑、剑胚、银锭、小银锭、白虹等称谓建立长事实素材。";
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: chapterIndex % 3 === 0 ? "初一" : "",
+        aliases: ["小银锭", "剑胚"],
+        tags: ["飞剑", "外形演化"],
+        related_entities: ["陈平安"],
+        fact_type: "appearance",
+        fact: `${anchor} ${"补充上下文用于制造预算压力，但仍然只应作为 L2 fact 输入。".repeat(10)}`,
+        evidence: [`第${chapterIndex}章证据摘录：${anchor}`],
+        importance: anchors.has(chapterIndex) ? 0.98 : 0.72,
+        confidence: 0.9
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const responseInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const text = body.input[0].content[0].text;
+    assert.equal(text.includes("章节原文："), false);
+    assert.equal(text.includes("原文不应被 L2 提问读取"), false);
+    assert.ok(text.length <= 28000, `summary input exceeded budget: ${text.length}`);
+    responseInputs.push(text);
+    const isFinalMerge = text.includes("局部回答 Markdown");
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_l2_query_${responseInputs.length}`,
+        output: [{
+          content: [{
+            type: "output_text",
+            text: isFinalMerge
+              ? "## 初一外形演化时间线\n第12章：银锭/小银锭阶段。\n第48章：小酆都剑胚线索。\n第96章：脱离银锭粗俗模样。\n第144章：如小小白虹。"
+              : "## 局部事实\n本批次保留初一、银锭、小酆都、剑胚、白虹等 L2 事实线索。"
+          }]
+        }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 180,
+      index_group_keys: ["sword-special"],
+      query: "查询初一外形演化时间线，重点关注银锭、小酆都、剑胚、白虹"
+    });
+    await waitForTask(analysis);
+    assert.ok(responseInputs.length > 1, "large L2 query should call summary in batches plus final merge");
+    assert.equal(responseInputs.some((text) => text.includes("L2 facts JSON：")), true);
+    assert.equal(responseInputs.some((text) => text.includes("局部回答 Markdown")), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(typeof result.finalResult, "string");
+    assert.equal(result.finalResult.includes("初一外形演化时间线"), true);
+    assert.equal(result.finalResult.includes("小酆都"), true);
+    assert.equal(result.source_stats.analysis_mode, "l2_query");
+    assert.equal(result.source_stats.l2_query_material_mode, "chunked");
+    assert.ok(result.source_stats.l2_query_chunk_count > 1);
+    assert.ok(result.source_stats.l2_query_recalled_facts_before_budget >= result.source_stats.l2_query_recalled_facts_after_budget);
+    assert.equal(typeof result.source_stats.l2_query_omitted_by_budget, "number");
+    assert.equal(typeof result.source_stats.l2_query_trimmed_by_budget, "boolean");
+    const batchParts = result.summaryParts.filter((part) => part.part_key.startsWith("l2_query.batch."));
+    assert.ok(batchParts.length > 1);
+    assert.equal(result.summaryParts.some((part) => part.part_key === "l2_query.final.merge"), true);
+    const finalTrace = result.sourceTrace.find((trace) => trace.part_key === "l2_query.final.merge");
+    assert.equal(finalTrace.field_material_mode, "l2_query_chunk_merge");
+    assert.equal(finalTrace.total_batches, batchParts.length);
+    for (const part of result.summaryParts) {
+      const match = /输入 (\d+) 字/.exec(part.input_summary);
+      assert.ok(match, `missing input length for ${part.part_key}`);
+      assert.ok(Number(match[1]) <= 28000, `${part.part_key} exceeded budget`);
+    }
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query analysis scans later chapter windows instead of stopping at the first candidate limit", async () => {
+  const bookId = "book-l2-query-late-window";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  for (let chapterIndex = 1; chapterIndex <= 2200; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: chapterIndex >= 2100 ? "初一" : "无关高权重事实",
+        aliases: chapterIndex >= 2100 ? ["晚期白虹"] : [],
+        tags: chapterIndex >= 2100 ? ["飞剑", "后期"] : ["无关"],
+        related_entities: [],
+        fact_type: chapterIndex >= 2100 ? "appearance" : "background",
+        fact: chapterIndex >= 2100
+          ? `第${chapterIndex}章后期初一事实：初一在后段仍有晚期白虹形态线索。`
+          : `第${chapterIndex}章无关高权重事实：只用于填满前置候选，不应回答初一后期问题。`,
+        evidence: [`第${chapterIndex}章证据`],
+        importance: chapterIndex >= 2100 ? 0.2 : 1,
+        confidence: chapterIndex >= 2100 ? 0.6 : 1
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const summaryInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.input[0].content[0].text;
+    summaryInputs.push(summaryInput);
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_late_window",
+        output: [{ content: [{ type: "output_text", text: "## 初一后期线索\n第2100章以后出现晚期白虹形态线索。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 2200,
+      index_group_keys: ["sword-special"],
+      query: "查询初一后期晚期白虹形态线索"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryInputs.some((input) => input.includes("第2100章后期初一事实")), true);
+    assert.equal(summaryInputs.some((input) => input.includes("晚期白虹形态线索")), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.analysis_mode, "l2_query");
+    assert.ok(result.source_stats.candidate_facts > 2000);
+    assert.ok(result.source_stats.l2_query_candidate_windows > 1);
+    assert.ok(result.source_stats.recalled_chapter_indexes.some((chapterIndex) => chapterIndex >= 2100));
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query analysis preserves target-subject facts before broad related facts", async () => {
+  const bookId = "book-l2-query-target-first";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  const targetChapters = [20, 80, 160, 240, 1227];
+  const broadChapters = Array.from({ length: 180 }, (_, index) => index + 300);
+  for (const chapterIndex of [...targetChapters, ...broadChapters]) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    const isTarget = targetChapters.includes(chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: "",
+        aliases: isTarget ? ["小酆都"] : ["十五"],
+        tags: isTarget ? ["初一"] : ["飞剑", "十五", "养剑葫", "陈平安", "战绩"],
+        related_entities: isTarget ? ["陈平安"] : ["飞剑十五", "养剑葫"],
+        fact_type: isTarget ? "ability" : "combat_record",
+        fact: isTarget
+          ? `第${chapterIndex}章目标事实：本章明确提到初一；${chapterIndex === 1227 ? "夜游剑和浮萍各有一部分剑意自行去了本命飞剑初一当中。" : "这是初一主体事实。"}`
+          : `第${chapterIndex}章泛相关事实：陈平安、飞剑、十五、养剑葫、战绩、combat_record 等宽泛词高度命中，但不是目标主体事实。`,
+        evidence: [`第${chapterIndex}章证据`],
+        importance: isTarget ? 0.2 : 1,
+        confidence: isTarget ? 0.6 : 1
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const summaryInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.input[0].content[0].text;
+    summaryInputs.push(summaryInput);
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_target_first",
+        output: [{ content: [{ type: "output_text", text: "## 初一事实\n第1227章：夜游剑和浮萍剑意进入初一。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1300,
+      index_group_keys: ["sword-special"],
+      query: "查询初一相关事实，以及对应的章节"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryInputs.some((input) => input.includes("第1227章目标事实")), true);
+    assert.equal(summaryInputs.some((input) => input.includes("夜游剑和浮萍各有一部分剑意")), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "初一");
+    assert.equal(result.source_stats.target_recalled_facts, 5);
+    assert.equal(result.source_stats.target_candidate_facts, 5);
+    assert.equal(result.source_stats.l2_query_dropped_after_recall_limit > 0, true);
+    assert.ok(result.source_stats.recalled_chapter_indexes.includes(1227));
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query analysis covers all target-subject facts across budgeted chunks", async () => {
+  const bookId = "book-l2-query-target-full-coverage";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  for (let chapterIndex = 1; chapterIndex <= 220; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: "",
+        aliases: ["小酆都"],
+        tags: ["初一", "飞剑"],
+        related_entities: ["陈平安"],
+        fact_type: "ability",
+        fact: `第${chapterIndex}章目标事实：初一专项事实 ${chapterIndex}，用于验证目标主体 facts 不被 160 上限截断。${"补充材料。".repeat(8)}`,
+        evidence: [`第${chapterIndex}章证据`],
+        importance: 0.5,
+        confidence: 0.8
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const summaryInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.input[0].content[0].text;
+    summaryInputs.push(summaryInput);
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    assert.ok(summaryInput.length <= 28000, `summary input exceeded budget: ${summaryInput.length}`);
+    const isFinalMerge = summaryInput.includes("局部回答 Markdown");
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_l2_query_target_full_${summaryInputs.length}`,
+        output: [{ content: [{ type: "output_text", text: isFinalMerge ? "## 初一事实全集\n覆盖 220 条目标事实。" : "## 局部初一事实\n本批次保留目标主体事实。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 220,
+      index_group_keys: ["sword-special"],
+      query: "查询初一相关事实，以及对应的章节"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryInputs.some((input) => input.includes("第220章目标事实")), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "初一");
+    assert.equal(result.source_stats.target_candidate_facts, 220);
+    assert.equal(result.source_stats.target_selected_facts, 220);
+    assert.equal(result.source_stats.target_recalled_facts, 220);
+    assert.equal(result.source_stats.recalled_facts, 220);
+    assert.equal(result.source_stats.l2_query_dropped_after_recall_limit, 0);
+    assert.ok(result.source_stats.l2_query_chunk_count > 1);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query target dossier uses conservative Dify chunk inputs", async () => {
+  const bookId = "book-l2-query-target-dify-budget";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  for (let chapterIndex = 1; chapterIndex <= 180; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: "笼中雀",
+        aliases: ["本命飞剑笼中雀"],
+        tags: ["飞剑", "笼中雀", "设定"],
+        related_entities: ["宁姚"],
+        fact_type: chapterIndex % 5 === 0 ? "combat_record" : "ability",
+        fact: `第${chapterIndex}章笼中雀事实：笼中雀是目标飞剑，记录持有者、能力、神通、战斗记录和来源线索。${"补充设定材料用于制造 Dify 输入压力。".repeat(12)}`,
+        evidence: [`第${chapterIndex}章证据：笼中雀相关事实。`],
+        importance: 0.8,
+        confidence: 0.85
+      }]
+    });
+  }
+
+  const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousFetch = global.fetch;
+  const summaryInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("/parameters")) {
+      return { ok: true, status: 200, json: async () => ({ user_input_form: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.inputs.context_json;
+    summaryInputs.push(summaryInput);
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    assert.ok(summaryInput.length <= 22000, `Dify L2 query chunk exceeded conservative budget: ${summaryInput.length}`);
+    const isFinalMerge = summaryInput.includes("局部回答 Markdown");
+    return {
+      ok: true,
+      json: async () => ({
+        data: {
+          outputs: {
+            text: isFinalMerge ? "## 笼中雀设定\n已合并全部分块。" : "## 局部笼中雀事实\n本批次保留笼中雀目标事实。"
+          }
+        }
+      })
+    };
+  };
+
+  try {
+    appConfig.config.indexing.analysisProvider = "dify";
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 180,
+      index_group_keys: ["sword-special"],
+      query: "帮我总结飞剑“笼中雀”的全部相关事实，包含：持有者、首次出场时间和地点、飞剑外观、来历起源、战斗能力和特性、核心神通、战斗记录"
+    });
+    await waitForTask(analysis);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "笼中雀");
+    assert.equal(result.source_stats.l2_query_chunk_input_budget, 20000);
+    assert.ok(result.source_stats.l2_query_chunk_count > 1);
+    assert.equal(result.source_stats.target_recalled_facts, 180);
+  } finally {
+    appConfig.config.indexing.analysisProvider = previousProvider;
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query falls back to local fact markdown when a Dify batch returns empty text", async () => {
+  const bookId = "book-l2-query-dify-empty-batch-fallback";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  for (let chapterIndex = 1; chapterIndex <= 140; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    const marker = chapterIndex === 80 ? "DIFY_EMPTY_MARKER" : "";
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: "笼中雀",
+        aliases: ["本命飞剑笼中雀"],
+        tags: ["飞剑", "笼中雀"],
+        related_entities: ["宁姚"],
+        fact_type: chapterIndex % 3 === 0 ? "combat_record" : "ability",
+        fact: `第${chapterIndex}章笼中雀事实：${marker} 笼中雀相关 L2 事实，用于验证 Dify 分块空输出不会拖垮整次查询。${"补充材料。".repeat(12)}`,
+        evidence: [`第${chapterIndex}章证据：笼中雀相关事实。`],
+        importance: 0.8,
+        confidence: 0.85
+      }]
+    });
+  }
+
+  const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousFetch = global.fetch;
+  const emptyInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("/parameters")) {
+      return { ok: true, status: 200, json: async () => ({ user_input_form: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.inputs.context_json;
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    if (summaryInput.includes("DIFY_EMPTY_MARKER")) {
+      emptyInputs.push(summaryInput);
+      return { ok: true, json: async () => ({ data: { outputs: { text: "" } } }) };
+    }
+    const isFinalMerge = summaryInput.includes("局部回答 Markdown");
+    return {
+      ok: true,
+      json: async () => ({
+        data: {
+          outputs: {
+            text: isFinalMerge ? "## 笼中雀设定\n合并完成。" : "## 局部笼中雀事实\n本批次正常完成。"
+          }
+        }
+      })
+    };
+  };
+
+  try {
+    appConfig.config.indexing.analysisProvider = "dify";
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 140,
+      index_group_keys: ["sword-special"],
+      query: "帮我总结飞剑“笼中雀”的全部相关事实，包含：持有者、首次出场时间和地点、飞剑外观、来历起源、战斗能力和特性、核心神通、战斗记录"
+    });
+    await waitForTask(analysis);
+    assert.ok(emptyInputs.length >= 3, "Dify empty batch should exhaust short retries before fallback");
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.status, "completed");
+    assert.equal(result.source_stats.l2_query_batch_fallback_count, 1);
+    assert.equal(result.summaryParts.some((part) => part.status === "failed"), false);
+    const fallbackTrace = result.sourceTrace.find((trace) => trace.fallback_reason === "dify_empty_text");
+    assert.ok(fallbackTrace, "fallback trace should expose Dify empty text reason");
+  } finally {
+    appConfig.config.indexing.analysisProvider = previousProvider;
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query Dify direct summary errors are labeled as L2 query", async () => {
+  const bookId = "book-l2-query-dify-direct-label";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  await db.saveEncryptedChapter({
+    bookId,
+    chapterIndex: 1,
+    title: "第1章",
+    content: "第1章原文不应被 L2 提问读取"
+  });
+  const chapter = db.getChapterMetadata(bookId, 1);
+  await db.saveL2ChapterFacts({
+    bookId,
+    indexGroupKey: "sword-special",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l2-v1-typed-facts",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "other",
+      entity: "笼中雀",
+      aliases: ["本命飞剑笼中雀"],
+      tags: ["飞剑", "笼中雀"],
+      related_entities: ["宁姚"],
+      fact_type: "ability",
+      fact: "第1章笼中雀事实：笼中雀相关 L2 事实，用于验证 L2 提问错误标签。",
+      evidence: ["第1章证据：笼中雀相关事实。"],
+      importance: 0.8,
+      confidence: 0.85
+    }]
+  });
+
+  const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousFetch = global.fetch;
+  global.fetch = async (url) => {
+    if (String(url).includes("/parameters")) {
+      return { ok: true, status: 200, json: async () => ({ user_input_form: [] }) };
+    }
+    return { ok: true, json: async () => ({ data: { outputs: { text: "" } } }) };
+  };
+
+  try {
+    appConfig.config.indexing.analysisProvider = "dify";
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1,
+      index_group_keys: ["sword-special"],
+      query: "帮我总结飞剑“笼中雀”的相关事实"
+    });
+    await assert.rejects(
+      () => waitForTask(analysis),
+      (error) => {
+        assert.equal(String(error.message).includes("Dify L2 提问汇总返回了空文本"), true);
+        assert.equal(String(error.message).includes("Dify 分析工作流返回了空文本"), false);
+        return true;
+      }
+    );
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.status, "failed");
+    assert.equal(result.error_summary.includes("Dify L2 提问汇总返回了空文本"), true);
+  } finally {
+    appConfig.config.indexing.analysisProvider = previousProvider;
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query analysis does not treat broad collection queries as a single target subject", async () => {
+  const bookId = "book-l2-query-broad-collection";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  for (let chapterIndex = 1; chapterIndex <= 220; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: `飞剑${chapterIndex}`,
+        aliases: ["飞剑"],
+        tags: ["飞剑", "剑类"],
+        related_entities: [`持有者${chapterIndex}`],
+        fact_type: "ownership",
+        fact: `第${chapterIndex}章飞剑事实：飞剑${chapterIndex}由持有者${chapterIndex}持有，用于集合型飞剑清单召回。`,
+        evidence: [`第${chapterIndex}章证据`],
+        importance: 0.5,
+        confidence: 0.8
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const summaryInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.input[0].content[0].text;
+    summaryInputs.push(summaryInput);
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    assert.ok(summaryInput.length <= 28000, `summary input exceeded budget: ${summaryInput.length}`);
+    const isFinalMerge = summaryInput.includes("局部回答 Markdown");
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_l2_query_broad_collection_${summaryInputs.length}`,
+        output: [{ content: [{ type: "output_text", text: isFinalMerge ? "## 飞剑清单\n已按重要程度提取前 50 把飞剑，覆盖到第220章。" : "## 局部飞剑候选\n本批次提取飞剑名称、持有者和重要程度候选。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 220,
+      index_group_keys: ["sword-special"],
+      query: "提取飞剑信息，包含飞剑名称、持有者、重要程度以及描述下为什么重要。\n提取你总结的最重要的前 50 把飞剑"
+    });
+    await waitForTask(analysis);
+    assert.ok(summaryInputs.length > 1, "collection query should run in chunks instead of a single capped summary");
+    assert.equal(summaryInputs.some((input) => input.includes("第220章飞剑事实")), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "");
+    assert.equal(result.source_stats.target_candidate_facts, 0);
+    assert.equal(result.source_stats.target_selected_facts, 0);
+    assert.equal(result.source_stats.recalled_facts, 220);
+    assert.equal(result.source_stats.l2_query_collection_mode, true);
+    assert.equal(result.source_stats.l2_query_material_mode, "collection_chunked");
+    assert.equal(result.source_stats.l2_query_dropped_after_recall_limit, 0);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query collection analysis caps full-library candidates with chapter coverage", async () => {
+  const bookId = "book-l2-query-collection-cap";
+  db.createBookIndexGroup(bookId, {
+    group_key: "sword-special",
+    name: "飞剑专项",
+    l2_index_prompt: "飞剑专项事实"
+  });
+  for (let chapterIndex = 1; chapterIndex <= 1600; chapterIndex += 1) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex,
+      title: `第${chapterIndex}章`,
+      content: `第${chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "sword-special",
+      chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "other",
+        entity: `飞剑${chapterIndex}`,
+        aliases: ["飞剑"],
+        tags: ["飞剑", "剑类"],
+        related_entities: [`持有者${chapterIndex}`],
+        fact_type: "ownership",
+        fact: `第${chapterIndex}章飞剑事实：飞剑${chapterIndex}由持有者${chapterIndex}持有，用于集合型飞剑清单召回。${"重要性说明。".repeat(4)}`,
+        evidence: [`第${chapterIndex}章证据`],
+        importance: chapterIndex % 10 === 0 ? 0.95 : 0.55,
+        confidence: 0.8
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  const summaryInputs = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.input[0].content[0].text;
+    summaryInputs.push(summaryInput);
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    assert.ok(summaryInput.length <= 28000, `summary input exceeded budget: ${summaryInput.length}`);
+    const isFinalMerge = summaryInput.includes("局部回答 Markdown");
+    return {
+      ok: true,
+      json: async () => ({
+        id: `resp_l2_query_collection_cap_${summaryInputs.length}`,
+        output: [{ content: [{ type: "output_text", text: isFinalMerge ? "## 飞剑清单\n已从覆盖采样候选中提取前 50 把飞剑。" : "## 局部飞剑候选\n本批次提取飞剑候选。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1600,
+      index_group_keys: ["sword-special"],
+      query: "提取飞剑信息，包含飞剑名称、持有者、重要程度以及描述下为什么重要。\n提取你总结的最重要的前 50 把飞剑"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryInputs.some((input) => input.includes("第1600章飞剑事实")), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.l2_query_collection_mode, true);
+    assert.equal(result.source_stats.l2_query_collection_candidate_facts, 1600);
+    assert.equal(result.source_stats.recalled_facts, 1200);
+    assert.equal(result.source_stats.l2_query_collection_recall_limit, 1200);
+    assert.equal(result.source_stats.l2_query_dropped_after_recall_limit, 400);
+    assert.ok(result.source_stats.l2_query_chunk_count < 30);
   } finally {
     global.fetch = previousFetch;
   }

@@ -321,6 +321,14 @@ function formatResultForClipboard(value) {
 }
 
 function downloadAnalysisResult(analysis) {
+  if (typeof analysis.finalResult === "string") {
+    downloadFile(
+      `${safeDownloadName(analysis.name || `analysis-${analysis.id}`)}.md`,
+      analysis.finalResult,
+      "text/markdown;charset=utf-8"
+    );
+    return;
+  }
   const workbook = excelWorkbookXmlFromJson(analysis.finalResult, { title: analysis.name || "分析结果" });
   if (workbook) {
     downloadFile(

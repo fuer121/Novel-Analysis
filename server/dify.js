@@ -1,6 +1,9 @@
 import { config, difyApiKeyEnvName, difyApiKeyForTarget } from "./config.js";
 import { sanitizeDetails, sanitizeText } from "./sanitize.js";
 
+const DIFY_FETCH_MAX_ATTEMPTS = 3;
+const DIFY_FETCH_RETRY_DELAYS_MS = process.env.NODE_ENV === "test" ? [1, 1] : [300, 900];
+
 export function buildChapterBatches(startChapter, endChapter, batchSize = config.dify.batchSize) {
   const batches = [];
   for (let start = startChapter; start <= endChapter; start += batchSize) {
@@ -38,25 +41,18 @@ export async function runDifyWorkflow({ apiKey, inputs = {}, user = config.dify.
     throw error;
   }
 
-  let response;
-  try {
-    response = await fetch(`${config.dify.base}/workflows/run`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        inputs,
-        response_mode: "blocking",
-        user
-      })
-    });
-  } catch (error) {
-    const wrapped = new Error(`无法连接 Dify API：${config.dify.base}（${error.message}）`);
-    wrapped.status = 502;
-    throw wrapped;
-  }
+  const response = await fetchDifyWithRetry(`${config.dify.base}/workflows/run`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      inputs,
+      response_mode: "blocking",
+      user
+    })
+  }, { target, phase: "workflow" });
 
   const { data, text } = await readDifyResponse(response);
   if (!response.ok) {
@@ -86,18 +82,11 @@ export async function testDifyConnection({ apiKey, target = "import" } = {}) {
     error.status = 500;
     throw error;
   }
-  let response;
-  try {
-    response = await fetch(`${config.dify.base}/parameters`, {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    });
-  } catch (error) {
-    const wrapped = new Error(`无法连接 Dify API：${config.dify.base}（${error.message}）`);
-    wrapped.status = 502;
-    throw wrapped;
-  }
+  const response = await fetchDifyWithRetry(`${config.dify.base}/parameters`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  }, { target, phase: "parameters" });
 
   const { data, text } = await readDifyResponse(response);
   if (!response.ok) {
@@ -146,7 +135,7 @@ export function normalizeDifyL2Output(raw) {
   };
 }
 
-export function normalizeDifyAnalysisJsonOutput(raw, schema = null) {
+export function normalizeDifyAnalysisJsonOutput(raw, schema = null, { errorLabel = "Dify 分析工作流" } = {}) {
   const value = coerceAnalysisJsonBySchema(normalizeDifyOutputEnvelope(raw), schema);
   if (value && typeof value === "object" && !Array.isArray(value)) {
     return value;
@@ -155,12 +144,12 @@ export function normalizeDifyAnalysisJsonOutput(raw, schema = null) {
     const parsed = coerceAnalysisJsonBySchema(parseJsonMaybe(value), schema);
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) return parsed;
   }
-  const error = new Error("Dify 分析工作流返回的 JSON 无法解析为对象。");
+  const error = new Error(`${errorLabel}返回的 JSON 无法解析为对象。`);
   error.status = 502;
   throw error;
 }
 
-export function normalizeDifyAnalysisTextOutput(raw) {
+export function normalizeDifyAnalysisTextOutput(raw, { errorLabel = "Dify 分析工作流" } = {}) {
   const value = normalizeDifyOutputEnvelope(raw);
   if (typeof value === "string") {
     const text = value.trim();
@@ -172,7 +161,7 @@ export function normalizeDifyAnalysisTextOutput(raw) {
       .filter(Boolean);
     if (candidates.length) return candidates[0];
   }
-  const error = new Error("Dify 分析工作流返回了空文本。");
+  const error = new Error(`${errorLabel}返回了空文本。`);
   error.status = 502;
   throw error;
 }
@@ -196,6 +185,50 @@ export function normalizeDifyChapterOutput(raw, context = {}) {
       fetch_status: String(chapter.fetch_status ?? chapter.status ?? "ok")
     };
   });
+}
+
+async function fetchDifyWithRetry(url, request, { target = "workflow", phase = "workflow" } = {}) {
+  let lastError = null;
+  for (let attempt = 1; attempt <= DIFY_FETCH_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      return await fetch(url, request);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= DIFY_FETCH_MAX_ATTEMPTS || !isRetryableDifyFetchError(error)) {
+        throw buildDifyConnectionError({ target, phase, error, attempts: attempt });
+      }
+      await sleep(DIFY_FETCH_RETRY_DELAYS_MS[attempt - 1] ?? DIFY_FETCH_RETRY_DELAYS_MS.at(-1) ?? 0);
+    }
+  }
+  throw buildDifyConnectionError({ target, phase, error: lastError, attempts: DIFY_FETCH_MAX_ATTEMPTS });
+}
+
+function isRetryableDifyFetchError(error) {
+  const message = String(error?.message || "").toLowerCase();
+  const code = String(error?.code || error?.cause?.code || "").toLowerCase();
+  return [
+    "fetch failed",
+    "network",
+    "timeout",
+    "timed out",
+    "econnreset",
+    "etimedout",
+    "eai_again",
+    "enotfound",
+    "socket"
+  ].some((keyword) => message.includes(keyword) || code.includes(keyword));
+}
+
+function buildDifyConnectionError({ target, phase, error, attempts }) {
+  const safeMessage = sanitizeText(error?.message || "fetch failed");
+  const retryText = attempts > 1 ? `；已重试 ${attempts}/${DIFY_FETCH_MAX_ATTEMPTS}` : "";
+  const wrapped = new Error(`无法连接 Dify API：${target} ${phase} @ ${config.dify.base}（${safeMessage}${retryText}）`);
+  wrapped.status = 502;
+  return wrapped;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function parseJsonMaybe(raw) {
