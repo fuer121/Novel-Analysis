@@ -131,6 +131,8 @@ export function normalizeDifyL2Output(raw) {
       ? record.items
       : [];
   return {
+    chapter_index: normalizeInteger(record.chapter_index ?? record.chapterIndex),
+    chapter_title: normalizeString(record.chapter_title ?? record.chapterTitle ?? record.title),
     facts: facts.map(normalizeDifyFact).filter(Boolean)
   };
 }
@@ -376,6 +378,11 @@ function normalizeNumber(value) {
   if (number < 0) return 0;
   if (number > 1) return 1;
   return number;
+}
+
+function normalizeInteger(value) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) ? number : 0;
 }
 
 function extractChapters(value) {

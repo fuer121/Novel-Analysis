@@ -99,6 +99,8 @@ test("normalizes Dify L1/L2 workflow outputs from result/text/output/data envelo
 
   const l2 = dify.normalizeDifyL2Output({
     output: {
+      chapter_index: 221,
+      chapter_title: "剑仙来此",
       facts: [{
         category: "item",
         entity: "初一",
@@ -113,9 +115,18 @@ test("normalizes Dify L1/L2 workflow outputs from result/text/output/data envelo
       }]
     }
   });
+  assert.equal(l2.chapter_index, 221);
+  assert.equal(l2.chapter_title, "剑仙来此");
   assert.equal(l2.facts.length, 1);
   assert.equal(l2.facts[0].entity, "初一");
   assert.equal(l2.facts[0].category, "item");
+});
+
+test("l2 schema accepts optional chapter metadata", () => {
+  const schema = openai.l2ChapterFactsSchema();
+  assert.equal(schema.properties.chapter_index.type, "integer");
+  assert.equal(schema.properties.chapter_title.type, "string");
+  assert.equal(schema.required.includes("facts"), true);
 });
 
 test("encrypts chapter content and stores only metadata in plain SQLite rows", async () => {
@@ -415,6 +426,80 @@ test("OpenAI text request uses Responses API with store false and no schema form
     assert.equal(Object.hasOwn(capturedBody, "background"), false);
     assert.equal(Object.hasOwn(capturedBody, "text"), false);
     assert.equal(Object.hasOwn(capturedBody, "max_output_tokens"), false);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("OpenAI caller retries without max_output_tokens when upstream rejects it", async () => {
+  const previousFetch = global.fetch;
+  const capturedBodies = [];
+  global.fetch = async (_url, request) => {
+    const body = JSON.parse(request.body);
+    capturedBodies.push(body);
+    if (capturedBodies.length === 1) {
+      return {
+        ok: false,
+        status: 400,
+        text: async () => [
+          JSON.stringify({ detail: "Unsupported parameter: max_output_tokens" }),
+          "event: response.failed",
+          "data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"upstream_error\",\"message\":\"Upstream request failed\"}}}",
+          ""
+        ].join("\n")
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        id: "resp_without_max_tokens",
+        output: [{ content: [{ type: "output_text", text: "兼容成功" }] }]
+      })
+    };
+  };
+
+  try {
+    const result = await openai.callOpenAIText({
+      model: "gpt-5.4",
+      reasoningEffort: "low",
+      instructions: "test",
+      input: [{ role: "user", content: [{ type: "input_text", text: "test" }] }],
+      maxOutputTokens: 32
+    });
+    assert.equal(result.value, "兼容成功");
+    assert.equal(capturedBodies.length, 2);
+    assert.equal(capturedBodies[0].max_output_tokens, 32);
+    assert.equal(Object.hasOwn(capturedBodies[1], "max_output_tokens"), false);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("OpenAI caller parses Responses API event stream output text", async () => {
+  const previousFetch = global.fetch;
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => [
+      "event: response.output_item.done",
+      "data: {\"id\":\"resp_sse\",\"item\":{\"content\":[{\"type\":\"output_text\",\"text\":\"SSE 汇总成功\"}]}}",
+      "",
+      "event: response.completed",
+      "data: {\"id\":\"resp_sse\"}",
+      ""
+    ].join("\n")
+  });
+
+  try {
+    const result = await openai.callOpenAIText({
+      model: "gpt-5.4",
+      reasoningEffort: "low",
+      instructions: "test",
+      input: [{ role: "user", content: [{ type: "input_text", text: "test" }] }]
+    });
+    assert.equal(result.value, "SSE 汇总成功");
+    assert.equal(result.responseId, "resp_sse");
   } finally {
     global.fetch = previousFetch;
   }
@@ -1115,6 +1200,27 @@ test("L2 index groups isolate statuses, facts, and prompt bindings", async () =>
 
   assert.equal(db.disableBookIndexGroup("book-l2-groups", "items-forces").disabled, true);
   assert.equal(db.listBookIndexGroups("book-l2-groups").some((entry) => entry.group_key === "items-forces"), false);
+});
+
+test("L2 index coverage errors include the invalid index group key", () => {
+  const bookId = "book-l2-coverage-disabled";
+  db.ensureBook(bookId, "覆盖率错误");
+  db.createBookIndexGroup(bookId, {
+    group_key: "items-old",
+    name: "旧道具索引",
+    l2_index_prompt: "旧道具事实"
+  });
+  db.disableBookIndexGroup(bookId, "items-old");
+
+  assert.throws(
+    () => workflows.getL2IndexCoverageForBook({
+      bookId,
+      indexGroupKey: "items-old",
+      startChapter: 1,
+      endChapter: 20
+    }),
+    /索引组不存在或已禁用：items-old/
+  );
 });
 
 test("builds L2 indexes, skips fresh facts, and keeps requests ZDR-shaped", async () => {
@@ -2263,6 +2369,82 @@ test("L2 query analysis runs without a prompt group and recalls fact body keywor
   }
 });
 
+test("L2 query analysis strips appearance suffix from target subject", async () => {
+  const bookId = "book-l2-query-character-appearance";
+  db.createBookIndexGroup(bookId, {
+    group_key: "characters-relationships",
+    name: "人物形象/关系",
+    l2_index_prompt: "人物形象与人物关系事实"
+  });
+  await db.saveEncryptedChapter({
+    bookId,
+    chapterIndex: 96,
+    title: "第九十六章",
+    content: "第96章原文不应被 L2 提问读取"
+  });
+  const chapter = db.getChapterMetadata(bookId, 96);
+  await db.saveL2ChapterFacts({
+    bookId,
+    indexGroupKey: "characters-relationships",
+    chapterIndex: 96,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l2-character-appearance",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "character",
+      entity: "陆征",
+      aliases: [],
+      tags: ["形象"],
+      related_entities: [],
+      fact_type: "appearance_explicit",
+      fact: "陆征被描述为中年，脸上有褶皱，整体形象油腻。",
+      evidence: ["陆征被描述为中年，脸上有褶皱。"],
+      importance: 0.8,
+      confidence: 0.9
+    }]
+  });
+
+  const previousFetch = global.fetch;
+  let summaryInput = "";
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    summaryInput = body.input[0].content[0].text;
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_character_appearance",
+        output: [{ content: [{ type: "output_text", text: "## 陆征形象\n陆征呈现中年、油腻、有褶皱的形象。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 100,
+      index_group_keys: ["characters-relationships"],
+      query: "输出陆征的形象"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryInput.includes("陆征被描述为中年"), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "陆征");
+    assert.equal(result.source_stats.recalled_facts, 1);
+    assert.equal(result.source_stats.target_candidate_facts, 1);
+    assert.equal(result.finalResult.includes("陆征形象"), true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("L2 query analysis completes with a local Markdown result when no facts match", async () => {
   const bookId = "book-l2-query-empty";
   db.createBookIndexGroup(bookId, {
@@ -2696,6 +2878,493 @@ test("L2 query analysis covers all target-subject facts across budgeted chunks",
   }
 });
 
+test("L2 query possessive target narrows recall to owner plus object facts", async () => {
+  const bookId = "book-l2-query-possessive-target";
+  db.createBookIndexGroup(bookId, {
+    group_key: "item-special",
+    name: "物件专项",
+    l2_index_prompt: "物件专项事实"
+  });
+  const rows = [
+    {
+      chapterIndex: 23,
+      entity: "祖荫槐叶",
+      related_entities: ["陈平安", "老槐树"],
+      fact_type: "origin",
+      fact: "祖荫槐叶来自老槐树，最终落入陈平安手中。",
+      evidence: ["老槐树 / 陈平安 / 槐叶"],
+      importance: 0.95,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 259,
+      entity: "老龙袍",
+      related_entities: ["苻南华"],
+      fact_type: "classification",
+      fact: "老龙袍是一件半仙兵法袍。",
+      evidence: ["老龙袍 / 法袍"],
+      importance: 0.95,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 286,
+      entity: "金醴",
+      aliases: ["法袍金醴"],
+      tags: ["道具", "护甲", "法袍", "陈平安"],
+      related_entities: ["陈平安"],
+      fact_type: "origin",
+      fact: "金醴是一件品秩极高的法袍，陈平安请人对其施展障眼法。",
+      evidence: ["陈平安 / 法袍金醴"],
+      importance: 0.95,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 295,
+      entity: "金醴",
+      aliases: ["法袍金醴", "法袍"],
+      tags: ["道具", "护甲", "法袍", "陈平安"],
+      related_entities: ["陈平安"],
+      fact_type: "restriction",
+      fact: "陈平安动用法袍金醴的法相时会消耗大量真气。",
+      evidence: ["陈平安 / 金醴 / 法相"],
+      importance: 0.95,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 928,
+      entity: "陈平安的鲜红法袍",
+      aliases: [],
+      tags: ["道具", "护甲", "法袍", "陈平安"],
+      related_entities: ["陈平安"],
+      fact_type: "appearance",
+      fact: "陈平安变成身穿一袭鲜红法袍的模样，身躯如丝线交织。",
+      evidence: ["陈平安 / 鲜红法袍"],
+      importance: 0.95,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 1096,
+      entity: "鲜红法袍",
+      aliases: ["仙蜕法袍"],
+      tags: ["道具", "护甲", "法袍", "陈平安"],
+      related_entities: ["陈平安"],
+      fact_type: "ownership",
+      fact: "陈平安在与马苦玄对峙时穿上鲜红法袍，此袍好似仙蜕。",
+      evidence: ["陈平安 / 鲜红法袍 / 仙蜕"],
+      importance: 0.95,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 1102,
+      entity: "法袍（陈平安所穿）",
+      aliases: ["鲜红法袍"],
+      tags: ["道具", "护甲", "法袍", "陈平安"],
+      related_entities: ["陈平安"],
+      fact_type: "appearance",
+      fact: "陈平安换了一身鲜红颜色的法袍，在雪景中显得火红异常。",
+      evidence: ["陈平安 / 法袍 / 鲜红颜色"],
+      importance: 0.95,
+      confidence: 0.95
+    }
+  ];
+
+  for (const row of rows) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex: row.chapterIndex,
+      title: `第${row.chapterIndex}章`,
+      content: `第${row.chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, row.chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "item-special",
+      chapterIndex: row.chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "item",
+        entity: row.entity,
+        aliases: row.aliases || [],
+        tags: row.tags || [],
+        related_entities: row.related_entities,
+        fact_type: row.fact_type,
+        fact: row.fact,
+        evidence: row.evidence,
+        importance: row.importance,
+        confidence: row.confidence
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  let recalledFacts = [];
+  let summaryInput = "";
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    summaryInput = body.input[0].content[0].text;
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    recalledFacts = extractL2QueryFacts(summaryInput);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_possessive_target",
+        output: [{ content: [{ type: "output_text", text: "## 法袍事实\n保留目标主体相关法袍事实。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1200,
+      index_group_keys: ["item-special"],
+      query: "帮我总结“陈平安的鲜红法袍”的信息，包含：首次出场时间和地点、防御力"
+    });
+    await waitForTask(analysis);
+    assert.deepEqual(recalledFacts.map((fact) => fact.entity), ["陈平安的鲜红法袍", "鲜红法袍", "法袍（陈平安所穿）"]);
+    assert.equal(summaryInput.includes("金醴"), false);
+    assert.equal(summaryInput.includes("法袍金醴"), false);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "陈平安的鲜红法袍");
+    assert.equal(result.source_stats.target_candidate_facts, 3);
+    assert.equal(result.source_stats.target_selected_facts, 3);
+    assert.equal(result.source_stats.target_recalled_facts, 3);
+    assert.equal(result.source_stats.target_recalled_chapters, 3);
+    assert.equal(result.source_stats.recalled_facts, 3);
+
+    const genericAnalysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1200,
+      index_group_keys: ["item-special"],
+      query: "帮我总结“陈平安的法袍”的信息，包含：持有者"
+    });
+    await waitForTask(genericAnalysis);
+    assert.deepEqual(recalledFacts.map((fact) => fact.entity).sort(), ["法袍（陈平安所穿）", "金醴", "金醴", "陈平安的鲜红法袍", "鲜红法袍"].sort());
+    assert.equal(recalledFacts.some((fact) => fact.entity === "老龙袍"), false);
+    const genericResult = await workflows.publicAnalysisRunWithResult(genericAnalysis.id);
+    assert.equal(genericResult.source_stats.target_subject, "陈平安的法袍");
+    assert.equal(genericResult.source_stats.target_candidate_facts, 5);
+    assert.equal(genericResult.source_stats.target_selected_facts, 5);
+    assert.equal(genericResult.source_stats.target_recalled_facts, 5);
+    assert.equal(genericResult.source_stats.target_recalled_chapters, 5);
+    assert.equal(genericResult.source_stats.recalled_facts, 5);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query slash aliases narrow single target recall instead of scanning all items", async () => {
+  const bookId = "book-l2-query-slash-alias-target";
+  db.createBookIndexGroup(bookId, {
+    group_key: "item-special",
+    name: "物件专项",
+    l2_index_prompt: "物件专项事实"
+  });
+  const rows = [
+    ...Array.from({ length: 80 }, (_, index) => ({
+      chapterIndex: index + 1,
+      entity: `无关物件${index + 1}`,
+      aliases: [],
+      tags: ["道具", "物件"],
+      related_entities: ["陈平安"],
+      fact_type: "ownership",
+      fact: `无关物件${index + 1}与神人承露甲、甘露甲、西嶽没有直接关系。`,
+      evidence: [`无关物件${index + 1}`],
+      importance: 0.5,
+      confidence: 0.8
+    })),
+    {
+      chapterIndex: 250,
+      entity: "神人承露甲",
+      aliases: ["甘露甲", "甲丸"],
+      tags: ["道具", "护甲", "兵家甲丸"],
+      related_entities: ["楚濠"],
+      fact_type: "classification",
+      fact: "神人承露甲又称甘露甲，是一副兵家甲丸。",
+      evidence: ["神人承露甲 / 甘露甲 / 兵家甲丸"],
+      importance: 0.95,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 344,
+      entity: "西嶽",
+      aliases: ["甘露甲", "神人承露甲"],
+      tags: ["道具", "护甲", "甲胄"],
+      related_entities: ["钟魁", "陈平安"],
+      fact_type: "ownership",
+      fact: "西嶽是甘露甲、神人承露甲相关条目，曾与陈平安、钟魁相关。",
+      evidence: ["西嶽 / 甘露甲 / 陈平安"],
+      importance: 0.9,
+      confidence: 0.95
+    },
+    {
+      chapterIndex: 719,
+      entity: "七彩甘露甲",
+      aliases: ["甘露甲"],
+      tags: ["道具", "护甲", "宝甲"],
+      related_entities: ["赊月"],
+      fact_type: "appearance",
+      fact: "七彩甘露甲是甘露甲体系中的另一副宝甲。",
+      evidence: ["七彩甘露甲 / 甘露甲"],
+      importance: 0.75,
+      confidence: 0.85
+    }
+  ];
+
+  for (const row of rows) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex: row.chapterIndex,
+      title: `第${row.chapterIndex}章`,
+      content: `第${row.chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, row.chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "item-special",
+      chapterIndex: row.chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-typed-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "item",
+        entity: row.entity,
+        aliases: row.aliases,
+        tags: row.tags,
+        related_entities: row.related_entities,
+        fact_type: row.fact_type,
+        fact: row.fact,
+        evidence: row.evidence,
+        importance: row.importance,
+        confidence: row.confidence
+      }]
+    });
+  }
+
+  const previousFetch = global.fetch;
+  let recalledFacts = [];
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    const summaryInput = body.input[0].content[0].text;
+    recalledFacts = extractL2QueryFacts(summaryInput);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_slash_alias_target",
+        output: [{ content: [{ type: "output_text", text: "## 神人承露甲\n只汇总目标甲胄事实。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 800,
+      index_group_keys: ["item-special"],
+      query: "帮我总结“神人承露甲/甘露甲/西嶽”的信息"
+    });
+    await waitForTask(analysis);
+    assert.deepEqual(recalledFacts.map((fact) => fact.entity), ["神人承露甲", "西嶽", "七彩甘露甲"]);
+    assert.equal(recalledFacts.some((fact) => fact.entity.startsWith("无关物件")), false);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.target_subject, "神人承露甲/甘露甲/西嶽");
+    assert.equal(result.source_stats.target_candidate_facts, 3);
+    assert.equal(result.source_stats.target_selected_facts, 3);
+    assert.equal(result.source_stats.recalled_facts, 3);
+    assert.equal(result.source_stats.l2_query_chunk_count, 1);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query summaries use direct OpenAI when global analysis provider is Dify", async () => {
+  const bookId = "book-l2-query-openai-summary-provider";
+  db.createBookIndexGroup(bookId, {
+    group_key: "item-special",
+    name: "物件专项",
+    l2_index_prompt: "物件专项事实"
+  });
+  await db.saveEncryptedChapter({
+    bookId,
+    chapterIndex: 1,
+    title: "第1章",
+    content: "第1章原文不应被 L2 提问读取"
+  });
+  const chapter = db.getChapterMetadata(bookId, 1);
+  await db.saveL2ChapterFacts({
+    bookId,
+    indexGroupKey: "item-special",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l2-v1-typed-facts",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "item",
+      entity: "陈平安的鲜红法袍",
+      aliases: ["鲜红法袍"],
+      tags: ["道具", "法袍", "陈平安"],
+      related_entities: ["陈平安"],
+      fact_type: "ownership",
+      fact: "陈平安持有并穿着鲜红法袍。",
+      evidence: ["陈平安 / 鲜红法袍"],
+      importance: 0.95,
+      confidence: 0.95
+    }]
+  });
+
+  const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousFetch = global.fetch;
+  let openaiCalls = 0;
+  let difyWorkflowCalls = 0;
+  global.fetch = async (url, request) => {
+    const href = String(url);
+    if (href.includes("/parameters")) {
+      return { ok: true, status: 200, json: async () => ({ user_input_form: [] }) };
+    }
+    if (href.includes("/workflows/run")) {
+      difyWorkflowCalls += 1;
+      return { ok: true, json: async () => ({ data: { outputs: { text: "" } } }) };
+    }
+    if (href.includes("/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    openaiCalls += 1;
+    const body = JSON.parse(request.body);
+    assert.equal(body.input[0].content[0].text.includes("陈平安持有并穿着鲜红法袍"), true);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_openai_summary_provider",
+        output: [{ content: [{ type: "output_text", text: "## 陈平安的鲜红法袍\n陈平安持有并穿着鲜红法袍。" }] }]
+      })
+    };
+  };
+
+  try {
+    appConfig.config.indexing.analysisProvider = "dify";
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1,
+      index_group_keys: ["item-special"],
+      query: "帮我总结“陈平安的鲜红法袍”的信息，包含：持有者"
+    });
+    await waitForTask(analysis);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.status, "completed");
+    assert.equal(result.finalResult.includes("陈平安的鲜红法袍"), true);
+    assert.equal(openaiCalls > 0, true);
+    assert.equal(difyWorkflowCalls, 0);
+    assert.equal(result.source_stats.l2_query_summary_provider, "openai");
+  } finally {
+    appConfig.config.indexing.analysisProvider = previousProvider;
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query falls back to local facts when OpenAI summary model is unavailable", async () => {
+  const bookId = "book-l2-query-openai-model-unavailable-fallback";
+  db.createBookIndexGroup(bookId, {
+    group_key: "item-special",
+    name: "物件专项",
+    l2_index_prompt: "物件专项事实"
+  });
+  await db.saveEncryptedChapter({
+    bookId,
+    chapterIndex: 1,
+    title: "第1章",
+    content: "第1章原文不应被 L2 提问读取"
+  });
+  const chapter = db.getChapterMetadata(bookId, 1);
+  await db.saveL2ChapterFacts({
+    bookId,
+    indexGroupKey: "item-special",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "gpt-5.5",
+    promptHash: "l2-v1-typed-facts",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "item",
+      entity: "陈平安的鲜红法袍",
+      aliases: ["鲜红法袍"],
+      tags: ["道具", "法袍", "陈平安"],
+      related_entities: ["陈平安"],
+      fact_type: "ownership",
+      fact: "陈平安持有并穿着鲜红法袍。",
+      evidence: ["陈平安 / 鲜红法袍"],
+      importance: 0.95,
+      confidence: 0.95
+    }]
+  });
+
+  const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousFetch = global.fetch;
+  let responseCalls = 0;
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    responseCalls += 1;
+    return {
+      ok: false,
+      status: 503,
+      json: async () => ({
+        error: {
+          message: "模型「gpt-5.5」当前暂无可用上游，请稍后重试"
+        }
+      })
+    };
+  };
+
+  try {
+    appConfig.config.indexing.analysisProvider = "dify";
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 1,
+      index_group_keys: ["item-special"],
+      query: "帮我总结“陈平安的鲜红法袍”的信息，包含：持有者"
+    });
+    await waitForTask(analysis);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.status, "completed");
+    assert.equal(result.finalResult.includes("系统降级"), true);
+    assert.equal(result.finalResult.includes("陈平安持有并穿着鲜红法袍"), true);
+    assert.equal(result.source_stats.l2_query_merge_fallback_used, true);
+    assert.equal(responseCalls >= 3, true);
+    const fallbackTrace = result.sourceTrace.find((trace) => trace.fallback_reason === "summary_model_unavailable");
+    assert.ok(fallbackTrace, "fallback trace should expose OpenAI model unavailable reason");
+  } finally {
+    appConfig.config.indexing.analysisProvider = previousProvider;
+    global.fetch = previousFetch;
+  }
+});
+
 test("L2 query target dossier uses conservative Dify chunk inputs", async () => {
   const bookId = "book-l2-query-target-dify-budget";
   db.createBookIndexGroup(bookId, {
@@ -2736,6 +3405,7 @@ test("L2 query target dossier uses conservative Dify chunk inputs", async () => 
   }
 
   const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousOpenAiKey = appConfig.config.openai.apiKey;
   const previousFetch = global.fetch;
   const summaryInputs = [];
   global.fetch = async (url, request) => {
@@ -2762,6 +3432,7 @@ test("L2 query target dossier uses conservative Dify chunk inputs", async () => 
 
   try {
     appConfig.config.indexing.analysisProvider = "dify";
+    appConfig.config.openai.apiKey = "";
     const analysis = workflows.startAnalysisTask({
       analysis_mode: "l2_query",
       book_id: bookId,
@@ -2778,6 +3449,7 @@ test("L2 query target dossier uses conservative Dify chunk inputs", async () => 
     assert.equal(result.source_stats.target_recalled_facts, 180);
   } finally {
     appConfig.config.indexing.analysisProvider = previousProvider;
+    appConfig.config.openai.apiKey = previousOpenAiKey;
     global.fetch = previousFetch;
   }
 });
@@ -2823,6 +3495,7 @@ test("L2 query falls back to local fact markdown when a Dify batch returns empty
   }
 
   const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousOpenAiKey = appConfig.config.openai.apiKey;
   const previousFetch = global.fetch;
   const emptyInputs = [];
   global.fetch = async (url, request) => {
@@ -2851,6 +3524,7 @@ test("L2 query falls back to local fact markdown when a Dify batch returns empty
 
   try {
     appConfig.config.indexing.analysisProvider = "dify";
+    appConfig.config.openai.apiKey = "";
     const analysis = workflows.startAnalysisTask({
       analysis_mode: "l2_query",
       book_id: bookId,
@@ -2869,11 +3543,12 @@ test("L2 query falls back to local fact markdown when a Dify batch returns empty
     assert.ok(fallbackTrace, "fallback trace should expose Dify empty text reason");
   } finally {
     appConfig.config.indexing.analysisProvider = previousProvider;
+    appConfig.config.openai.apiKey = previousOpenAiKey;
     global.fetch = previousFetch;
   }
 });
 
-test("L2 query Dify direct summary errors are labeled as L2 query", async () => {
+test("L2 query Dify direct empty summary falls back with L2 query trace reason", async () => {
   const bookId = "book-l2-query-dify-direct-label";
   db.createBookIndexGroup(bookId, {
     group_key: "sword-special",
@@ -2911,6 +3586,7 @@ test("L2 query Dify direct summary errors are labeled as L2 query", async () => 
   });
 
   const previousProvider = appConfig.config.indexing.analysisProvider;
+  const previousOpenAiKey = appConfig.config.openai.apiKey;
   const previousFetch = global.fetch;
   global.fetch = async (url) => {
     if (String(url).includes("/parameters")) {
@@ -2921,6 +3597,7 @@ test("L2 query Dify direct summary errors are labeled as L2 query", async () => 
 
   try {
     appConfig.config.indexing.analysisProvider = "dify";
+    appConfig.config.openai.apiKey = "";
     const analysis = workflows.startAnalysisTask({
       analysis_mode: "l2_query",
       book_id: bookId,
@@ -2929,19 +3606,17 @@ test("L2 query Dify direct summary errors are labeled as L2 query", async () => 
       index_group_keys: ["sword-special"],
       query: "帮我总结飞剑“笼中雀”的相关事实"
     });
-    await assert.rejects(
-      () => waitForTask(analysis),
-      (error) => {
-        assert.equal(String(error.message).includes("Dify L2 提问汇总返回了空文本"), true);
-        assert.equal(String(error.message).includes("Dify 分析工作流返回了空文本"), false);
-        return true;
-      }
-    );
+    await waitForTask(analysis);
     const result = await workflows.publicAnalysisRunWithResult(analysis.id);
-    assert.equal(result.status, "failed");
-    assert.equal(result.error_summary.includes("Dify L2 提问汇总返回了空文本"), true);
+    assert.equal(result.status, "completed");
+    assert.equal(result.finalResult.includes("系统降级"), true);
+    assert.equal(result.finalResult.includes("第1章笼中雀事实"), true);
+    assert.equal(result.source_stats.l2_query_merge_fallback_used, true);
+    const fallbackTrace = result.sourceTrace.find((trace) => trace.fallback_reason === "dify_empty_text");
+    assert.ok(fallbackTrace, "fallback trace should expose Dify empty text reason");
   } finally {
     appConfig.config.indexing.analysisProvider = previousProvider;
+    appConfig.config.openai.apiKey = previousOpenAiKey;
     global.fetch = previousFetch;
   }
 });
@@ -3031,6 +3706,100 @@ test("L2 query analysis does not treat broad collection queries as a single targ
   }
 });
 
+test("L2 query martial stage collection recalls facts for per-stage top people requests", async () => {
+  const bookId = "book-l2-query-martial-stage-top";
+  await seedMartialCultivationFacts(bookId);
+
+  const previousFetch = global.fetch;
+  let summaryInput = "";
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    summaryInput = body.input[0].content[0].text;
+    assert.equal(summaryInput.includes("章节原文："), false);
+    assert.equal(summaryInput.includes("原文不应被 L2 提问读取"), false);
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_martial_stage_top",
+        output: [{ content: [{ type: "output_text", text: "## 武夫境界代表人物\n已按境界整理朱敛、裴钱、陈平安等人物。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 80,
+      index_group_keys: ["martial-special"],
+      query: "武夫每个境界最强的人取前三，需要有人名，以及人物介绍"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryInput.includes("武夫第七境"), true);
+    assert.equal(summaryInput.includes("武夫第八境"), true);
+    assert.equal(summaryInput.includes("止境"), true);
+    assert.equal(summaryInput.includes("朱敛"), true);
+    assert.equal(summaryInput.includes("裴钱"), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.l2_query_collection_mode, true);
+    assert.equal(result.source_stats.target_subject, "");
+    assert.ok(result.source_stats.recalled_facts > 0);
+    assert.equal(result.source_stats.l2_query_recall_terms.includes("武夫"), true);
+    assert.equal(result.source_stats.l2_query_recall_terms.includes("境界"), true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
+test("L2 query martial strongest people request does not become a fake target subject", async () => {
+  const bookId = "book-l2-query-martial-strongest";
+  await seedMartialCultivationFacts(bookId);
+
+  const previousFetch = global.fetch;
+  let summaryInput = "";
+  global.fetch = async (url, request) => {
+    if (String(url).includes("api.openai.com/v1/models")) {
+      return { ok: true, status: 200, json: async () => ({ data: [] }) };
+    }
+    const body = JSON.parse(request.body);
+    summaryInput = body.input[0].content[0].text;
+    return {
+      ok: true,
+      json: async () => ({
+        id: "resp_l2_query_martial_strongest",
+        output: [{ content: [{ type: "output_text", text: "## 最强武夫人物\n已召回裴钱、朱敛、陈平安的境界事实。" }] }]
+      })
+    };
+  };
+
+  try {
+    const analysis = workflows.startAnalysisTask({
+      analysis_mode: "l2_query",
+      book_id: bookId,
+      start_chapter: 1,
+      end_chapter: 80,
+      index_group_keys: ["martial-special"],
+      query: "最强人物，人物境界"
+    });
+    await waitForTask(analysis);
+    assert.equal(summaryInput.includes("裴钱"), true);
+    assert.equal(summaryInput.includes("朱敛"), true);
+    assert.equal(summaryInput.includes("陈平安"), true);
+    const result = await workflows.publicAnalysisRunWithResult(analysis.id);
+    assert.equal(result.source_stats.l2_query_collection_mode, true);
+    assert.equal(result.source_stats.target_subject, "");
+    assert.notEqual(result.source_stats.target_subject, "人物境界");
+    assert.ok(result.source_stats.recalled_facts > 0);
+    assert.equal(result.source_stats.l2_query_collection_reason.includes("最强"), true);
+  } finally {
+    global.fetch = previousFetch;
+  }
+});
+
 test("L2 query collection analysis caps full-library candidates with chapter coverage", async () => {
   const bookId = "book-l2-query-collection-cap";
   db.createBookIndexGroup(bookId, {
@@ -3113,6 +3882,79 @@ test("L2 query collection analysis caps full-library candidates with chapter cov
     global.fetch = previousFetch;
   }
 });
+
+async function seedMartialCultivationFacts(bookId) {
+  db.createBookIndexGroup(bookId, {
+    group_key: "martial-special",
+    name: "修炼体系-武夫专项",
+    l2_index_prompt: "只提取修炼体系、武夫境界、代表人物和境界变化相关 L2 事实。"
+  });
+  const rows = [
+    {
+      chapterIndex: 10,
+      entity: "武夫第七境",
+      fact_type: "representative_candidate",
+      fact: "朱敛认为武夫第七境是纯粹武夫的一道大门槛，朱敛本人具备跨过这道门槛的武学理解。",
+      tags: ["武夫", "境界体系", "七境", "代表人物"],
+      related_entities: ["朱敛"]
+    },
+    {
+      chapterIndex: 20,
+      entity: "武夫第八境",
+      fact_type: "representative_candidate",
+      fact: "卢白象、魏羡、种秋均为远游境武夫，远游境对应武夫第八境。",
+      tags: ["武夫", "境界体系", "八境", "远游境", "代表人物"],
+      related_entities: ["卢白象", "魏羡", "种秋"]
+    },
+    {
+      chapterIndex: 30,
+      entity: "止境",
+      fact_type: "representative_candidate",
+      fact: "裴钱是一位止境武夫，止境是武夫体系中的高阶境界。",
+      tags: ["武夫", "境界体系", "止境", "代表人物"],
+      related_entities: ["裴钱"]
+    },
+    {
+      chapterIndex: 40,
+      entity: "武夫第十境",
+      fact_type: "representative_candidate",
+      fact: "陈平安被明确提及为十境武夫，武夫修为已至第十境。",
+      tags: ["武夫", "境界体系", "十境", "代表人物"],
+      related_entities: ["陈平安"]
+    }
+  ];
+  for (const row of rows) {
+    await db.saveEncryptedChapter({
+      bookId,
+      chapterIndex: row.chapterIndex,
+      title: `第${row.chapterIndex}章`,
+      content: `第${row.chapterIndex}章原文不应被 L2 提问读取`
+    });
+    const chapter = db.getChapterMetadata(bookId, row.chapterIndex);
+    await db.saveL2ChapterFacts({
+      bookId,
+      indexGroupKey: "martial-special",
+      chapterIndex: row.chapterIndex,
+      status: "completed",
+      sourceHmac: chapter.content_hmac,
+      model: "gpt-5.5",
+      promptHash: "l2-v1-martial-facts",
+      schemaVersion: "l2-facts-v1",
+      facts: [{
+        category: "cultivation",
+        entity: row.entity,
+        aliases: [],
+        tags: row.tags,
+        related_entities: row.related_entities,
+        fact_type: row.fact_type,
+        fact: row.fact,
+        evidence: [row.fact.slice(0, 30)],
+        importance: 0.95,
+        confidence: 1
+      }]
+    });
+  }
+}
 
 test("balanced index analysis reviews only budgeted high-risk chapters", async () => {
   for (const chapterIndex of [1, 2, 3]) {
@@ -6465,6 +7307,13 @@ async function waitForTask(task) {
 
 function extractEvidenceMaterial(text) {
   const marker = "证据包素材 JSON：";
+  const index = String(text || "").indexOf(marker);
+  assert.notEqual(index, -1);
+  return JSON.parse(String(text).slice(index + marker.length).trim());
+}
+
+function extractL2QueryFacts(text) {
+  const marker = "L2 facts JSON：";
   const index = String(text || "").indexOf(marker);
   assert.notEqual(index, -1);
   return JSON.parse(String(text).slice(index + marker.length).trim());

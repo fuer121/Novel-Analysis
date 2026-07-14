@@ -115,8 +115,12 @@ export function AnalysisPage({
   const analysisProviderReady = analysisProvider === "dify"
     ? Boolean(isL2QueryMode ? config.difyAnalysisSummaryConfigured : config.difyAnalysisChapterConfigured && config.difyAnalysisSummaryConfigured)
     : Boolean(config.openaiConfigured && config.retentionConfirmed);
+  const selectedL2QueryEnabledIndexKeys = useMemo(
+    () => filterEnabledIndexKeys(selectedL2QueryIndexKeys, indexGroups),
+    [selectedL2QueryIndexKeys, indexGroups]
+  );
   const activeIndexGroupKeys = isL2QueryMode
-    ? selectedL2QueryIndexKeys
+    ? selectedL2QueryEnabledIndexKeys
     : selectedPromptGroupEntry?.index_group_keys || [];
   const hasBoundIndexGroups = activeIndexGroupKeys.length > 0;
 
@@ -134,7 +138,7 @@ export function AnalysisPage({
     }
     void loadL2Coverage();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [analysisForm.book_id, analysisForm.start_chapter, analysisForm.end_chapter, selectedPromptGroupId, bookPromptGroups, selectedL2QueryIndexKeys, isL2QueryMode]);
+  }, [analysisForm.book_id, analysisForm.start_chapter, analysisForm.end_chapter, selectedPromptGroupId, bookPromptGroups, selectedL2QueryEnabledIndexKeys, isL2QueryMode]);
 
   async function loadAnalyses() {
     setBusy((state) => ({ ...state, list: true }));
@@ -257,7 +261,7 @@ export function AnalysisPage({
       use_l1_context: false,
       analysis_mode: analysisForm.analysis_mode,
       query: isL2QueryMode ? l2QueryText.trim() : "",
-      index_group_keys: isL2QueryMode ? selectedL2QueryIndexKeys : undefined,
+      index_group_keys: isL2QueryMode ? selectedL2QueryEnabledIndexKeys : undefined,
       prompt: {
         ...promptDraft,
         output_schema: outputSchemaForPrompt(promptDraft)
@@ -334,7 +338,9 @@ export function AnalysisPage({
       analysis_mode: copiedMode
     });
     setL2QueryText(rawPrompt.l2_query || analysis.source_stats?.query || "");
-    setSelectedL2QueryIndexKeys(rawPrompt.index_group_keys || analysis.source_stats?.index_group_keys || []);
+    const copiedIndexKeys = rawPrompt.index_group_keys || analysis.source_stats?.index_group_keys || [];
+    const availableIndexKeys = filterEnabledIndexKeys(copiedIndexKeys, indexGroups);
+    setSelectedL2QueryIndexKeys(availableIndexKeys.length ? availableIndexKeys : defaultL2QueryIndexKeys(indexGroups));
     selectionOverrideRef.current = analysis.chapter_indexes || [];
     setSelectionOverrideToken((value) => value + 1);
     setSelectedPromptGroupId(copiedMode === "l2_query" ? "" : "__snapshot__");
@@ -356,7 +362,7 @@ export function AnalysisPage({
     if (patch.book_id !== undefined || patch.start_chapter !== undefined || patch.end_chapter !== undefined) {
       setL2CoveragesByGroup({});
     }
-    if (patch.analysis_mode === "l2_query" && !selectedL2QueryIndexKeys.length) {
+    if (patch.analysis_mode === "l2_query" && !selectedL2QueryEnabledIndexKeys.length) {
       setSelectedL2QueryIndexKeys(defaultL2QueryIndexKeys(indexGroups));
     }
   }
@@ -488,7 +494,7 @@ export function AnalysisPage({
                 analysisForm.analysis_mode,
                 l2CoveragesByGroup,
                 selectedIndexes.length,
-                isL2QueryMode ? { index_group_keys: selectedL2QueryIndexKeys } : selectedPromptGroupEntry,
+                isL2QueryMode ? { index_group_keys: selectedL2QueryEnabledIndexKeys } : selectedPromptGroupEntry,
                 indexGroups
               )}
             </div>
@@ -598,6 +604,15 @@ function defaultL2QueryIndexKeys(groups = []) {
   const nonBase = groups.find((group) => group.group_key && group.group_key !== "base");
   const first = nonBase || groups[0];
   return first?.group_key ? [first.group_key] : [];
+}
+
+function filterEnabledIndexKeys(keys = [], groups = []) {
+  const enabled = new Set(groups.map((group) => group.group_key).filter(Boolean));
+  return uniqueList(keys).filter((key) => enabled.has(key));
+}
+
+function uniqueList(values = []) {
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
 }
 
 function toggleListValue(values, value) {
