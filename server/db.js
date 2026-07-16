@@ -282,6 +282,29 @@ db.exec(`
     ON l2_facts(book_id, index_group_key, category, entity, chapter_index);
   CREATE INDEX IF NOT EXISTS idx_l2_facts_chapter
     ON l2_facts(book_id, index_group_key, chapter_index);
+
+  CREATE TABLE IF NOT EXISTS l2_subjects (
+    book_id TEXT NOT NULL,
+    index_group_key TEXT NOT NULL,
+    subject_key TEXT NOT NULL,
+    canonical_name TEXT NOT NULL,
+    aliases TEXT NOT NULL DEFAULT '[]',
+    creature_type TEXT NOT NULL DEFAULT '',
+    original_form TEXT NOT NULL DEFAULT '',
+    qualification_chapter INTEGER NOT NULL,
+    qualification_basis TEXT NOT NULL DEFAULT '',
+    qualification_evidence TEXT NOT NULL DEFAULT '[]',
+    confidence REAL NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'verified',
+    prompt_hash TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (book_id, index_group_key, subject_key),
+    FOREIGN KEY (book_id) REFERENCES books(book_id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_l2_subjects_lookup
+    ON l2_subjects(book_id, index_group_key, qualification_chapter, status);
 `);
 
 migrateSchema();
@@ -750,6 +773,7 @@ export function deleteBookIndexGroup(bookId, groupKey) {
     const deleted = db.prepare("DELETE FROM book_index_groups WHERE book_id = ? AND group_key = ?").run(id, key);
     db.prepare("DELETE FROM l2_chapter_statuses WHERE book_id = ? AND index_group_key = ?").run(id, key);
     db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND index_group_key = ?").run(id, key);
+    db.prepare("DELETE FROM l2_subjects WHERE book_id = ? AND index_group_key = ?").run(id, key);
     return deleted;
   })();
   return { deleted: result.changes > 0, bookId: id, groupKey: key };
@@ -1182,12 +1206,13 @@ export function getL1Coverage({ bookId, startChapter, endChapter, model = "", pr
   };
 }
 
-export async function saveL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, chapterIndex, status, sourceHmac, model, promptHash, schemaVersion, facts = [], errorSummary = "" }) {
+export async function saveL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, chapterIndex, status, sourceHmac, model, promptHash, schemaVersion, facts = [], candidateFacts = [], errorSummary = "" }) {
   const id = normalizeBookId(bookId);
   const groupKey = normalizeIndexGroupKey(indexGroupKey);
   const index = normalizeChapterIndex(chapterIndex);
   const now = nowIso();
   const normalizedFacts = Array.isArray(facts) ? facts.map((fact) => normalizeL2Fact(fact)).filter(Boolean) : [];
+  const normalizedCandidateFacts = Array.isArray(candidateFacts) ? candidateFacts.map((fact) => normalizeL2Fact(fact)).filter(Boolean) : [];
 
   db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND index_group_key = ? AND chapter_index = ?").run(id, groupKey, index);
 
@@ -1221,7 +1246,11 @@ export async function saveL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GR
     now
   );
 
-  for (const fact of normalizedFacts) {
+  for (const entry of [
+    ...normalizedFacts.map((fact) => ({ fact, status: String(status || "completed"), reviewSource: fact.review_source })),
+    ...normalizedCandidateFacts.map((fact) => ({ fact, status: "candidate", reviewSource: "candidate" }))
+  ]) {
+    const { fact, status: factStatus, reviewSource } = entry;
     const factId = crypto.randomUUID();
     const encrypted = await encryptText(JSON.stringify({
       fact: fact.fact,
@@ -1240,7 +1269,7 @@ export async function saveL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GR
       id,
       groupKey,
       index,
-      String(status || "completed"),
+      factStatus,
       String(sourceHmac || ""),
       String(model || ""),
       String(promptHash || ""),
@@ -1253,7 +1282,7 @@ export async function saveL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GR
       fact.fact_type,
       fact.importance,
       fact.confidence,
-      fact.review_source,
+      reviewSource,
       encrypted.ciphertext,
       encrypted.iv,
       encrypted.tag,
@@ -1264,6 +1293,30 @@ export async function saveL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GR
   }
 
   return getL2ChapterStatus(id, index, groupKey);
+}
+
+export async function appendL2ChapterFacts({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, chapterIndex, sourceHmac, model, promptHash, schemaVersion, facts = [] }) {
+  const id = normalizeBookId(bookId);
+  const groupKey = normalizeIndexGroupKey(indexGroupKey);
+  const index = normalizeChapterIndex(chapterIndex);
+  const normalizedFacts = Array.isArray(facts) ? facts.map((fact) => normalizeL2Fact(fact)).filter(Boolean) : [];
+  const now = nowIso();
+  for (const fact of normalizedFacts) {
+    const factId = crypto.randomUUID();
+    const encrypted = await encryptText(JSON.stringify({ fact: fact.fact, evidence: fact.evidence, review_note: fact.review_note }), l2FactAad(factId));
+    db.prepare(`
+      INSERT INTO l2_facts (
+        id, book_id, index_group_key, chapter_index, status, source_hmac, model, prompt_hash, schema_version,
+        category, entity, aliases, tags, related_entities, fact_type, importance, confidence,
+        review_source, ciphertext, iv, tag, algorithm, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'completed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'historical_rescan', ?, ?, ?, ?, ?, ?)
+    `).run(
+      factId, id, groupKey, index, String(sourceHmac || ""), String(model || ""), String(promptHash || ""), String(schemaVersion || ""),
+      fact.category, fact.entity, stringifyJsonArray(fact.aliases), stringifyJsonArray(fact.tags), stringifyJsonArray(fact.related_entities),
+      fact.fact_type, fact.importance, fact.confidence, encrypted.ciphertext, encrypted.iv, encrypted.tag, encrypted.algorithm, now, now
+    );
+  }
+  return normalizedFacts.length;
 }
 
 export function saveL2ChapterStatus({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, chapterIndex, status, sourceHmac, model, promptHash, schemaVersion, errorSummary = "" }) {
@@ -1301,6 +1354,100 @@ export function saveL2ChapterStatus({ bookId, indexGroupKey = BASE_INDEX_GROUP_K
   );
   if (status !== "failed") db.prepare("DELETE FROM l2_facts WHERE book_id = ? AND index_group_key = ? AND chapter_index = ?").run(id, groupKey, index);
   return getL2ChapterStatus(id, index, groupKey);
+}
+
+export function upsertL2Subject({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, subjectKey, canonicalName, aliases = [], creatureType = "", originalForm = "", qualificationChapter, qualificationBasis = "", qualificationEvidence = [], confidence = 0.0, status = "verified", promptHash = "" }) {
+  const id = normalizeBookId(bookId);
+  const groupKey = normalizeIndexGroupKey(indexGroupKey);
+  ensureBook(id);
+  const key = String(subjectKey || canonicalName || "").trim().slice(0, 160);
+  const name = String(canonicalName || key).trim().slice(0, 160);
+  if (!key || !name) throw new Error("L2 神奇生物主体缺少稳定名称。");
+  const chapter = status === "candidate" ? Math.max(0, Number(qualificationChapter) || 0) : normalizeChapterIndex(qualificationChapter);
+  const subjectStatus = status === "candidate" ? "candidate" : "verified";
+  const now = nowIso();
+  const existing = db.prepare("SELECT aliases FROM l2_subjects WHERE book_id = ? AND index_group_key = ? AND subject_key = ?")
+    .get(id, groupKey, key);
+  const mergedAliases = [...new Set([
+    ...parseJsonArray(existing?.aliases),
+    ...normalizeStringArray(aliases, 12, 80),
+    key === name ? "" : key
+  ].filter(Boolean))].slice(0, 24);
+  db.prepare(`
+    INSERT INTO l2_subjects (
+      book_id, index_group_key, subject_key, canonical_name, aliases, creature_type, original_form,
+      qualification_chapter, qualification_basis, qualification_evidence, confidence, status, prompt_hash, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(book_id, index_group_key, subject_key) DO UPDATE SET
+      canonical_name = excluded.canonical_name,
+      aliases = excluded.aliases,
+      creature_type = excluded.creature_type,
+      original_form = excluded.original_form,
+      qualification_chapter = CASE WHEN excluded.status = 'verified' THEN excluded.qualification_chapter ELSE MIN(l2_subjects.qualification_chapter, excluded.qualification_chapter) END,
+      qualification_basis = CASE WHEN l2_subjects.qualification_basis <> '' THEN l2_subjects.qualification_basis ELSE excluded.qualification_basis END,
+      qualification_evidence = CASE WHEN l2_subjects.qualification_evidence <> '[]' THEN l2_subjects.qualification_evidence ELSE excluded.qualification_evidence END,
+      confidence = MAX(l2_subjects.confidence, excluded.confidence),
+      status = excluded.status,
+      prompt_hash = excluded.prompt_hash,
+      updated_at = excluded.updated_at
+  `).run(
+    id, groupKey, key, name, stringifyJsonArray(mergedAliases), String(creatureType || "").trim().slice(0, 80),
+    String(originalForm || "").trim().slice(0, 200), chapter, String(qualificationBasis || "").trim().slice(0, 80),
+    stringifyJsonArray(qualificationEvidence), normalizeConfidence(confidence), subjectStatus, String(promptHash || ""), now, now
+  );
+  return listL2Subjects({ bookId: id, indexGroupKey: groupKey, terms: [key], chapterIndex: Math.max(chapter, Number.MAX_SAFE_INTEGER), promptHash })[0] || null;
+}
+
+export function listL2Subjects({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, chapterIndex = Number.MAX_SAFE_INTEGER, terms = [], promptHash = "" }) {
+  const id = normalizeBookId(bookId);
+  const groupKey = normalizeIndexGroupKey(indexGroupKey);
+  const values = normalizeStringArray(terms, 24, 160);
+  const params = [id, groupKey, Number(chapterIndex) || Number.MAX_SAFE_INTEGER];
+  const where = ["book_id = ?", "index_group_key = ?", "qualification_chapter <= ?", "status = 'verified'"];
+  if (promptHash) {
+    where.push("prompt_hash = ?");
+    params.push(String(promptHash));
+  }
+  if (values.length) {
+    where.push(`(${values.map(() => "LOWER(canonical_name) LIKE ? OR LOWER(subject_key) LIKE ? OR LOWER(aliases) LIKE ?").join(" OR ")})`);
+    for (const value of values) {
+      const pattern = `%${value.toLowerCase()}%`;
+      params.push(pattern, pattern, pattern);
+    }
+  }
+  return db.prepare(`SELECT * FROM l2_subjects WHERE ${where.join(" AND ")} ORDER BY qualification_chapter ASC, canonical_name ASC`).all(...params).map((row) => ({
+    subject_key: row.subject_key,
+    canonical_name: row.canonical_name,
+    aliases: parseJsonArray(row.aliases),
+    creature_type: row.creature_type,
+    original_form: row.original_form,
+    qualification_chapter: Number(row.qualification_chapter),
+    qualification_basis: row.qualification_basis,
+    qualification_evidence: parseJsonArray(row.qualification_evidence),
+    confidence: Number(row.confidence || 0)
+  }));
+}
+
+export function clearL2Subjects({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY }) {
+  return db.prepare("DELETE FROM l2_subjects WHERE book_id = ? AND index_group_key = ?")
+    .run(normalizeBookId(bookId), normalizeIndexGroupKey(indexGroupKey));
+}
+
+export function promoteL2CandidateFacts({ bookId, indexGroupKey = BASE_INDEX_GROUP_KEY, canonicalName, aliases = [], promptHash = "" }) {
+  const id = normalizeBookId(bookId);
+  const groupKey = normalizeIndexGroupKey(indexGroupKey);
+  const names = [...new Set([canonicalName, ...aliases].map((value) => String(value || "").trim().toLowerCase()).filter(Boolean))];
+  if (!names.length) return 0;
+  const where = names.map(() => "(LOWER(entity) = ? OR LOWER(aliases) LIKE ? OR LOWER(related_entities) LIKE ? OR LOWER(tags) LIKE ?)").join(" OR ");
+  const params = ["completed", "index", nowIso(), id, groupKey];
+  if (promptHash) params.push(String(promptHash));
+  params.push(...names.flatMap((name) => [name, `%"${name}"%`, `%"${name}"%`, `%"${name}"%`]));
+  return Number(db.prepare(`
+    UPDATE l2_facts
+    SET status = ?, review_source = ?, updated_at = ?
+    WHERE book_id = ? AND index_group_key = ? AND status = 'candidate'
+      ${promptHash ? "AND prompt_hash = ?" : ""} AND (${where})
+  `).run(...params).changes || 0);
 }
 
 export function getL2ChapterStatus(bookId, chapterIndex, indexGroupKey = BASE_INDEX_GROUP_KEY) {
@@ -1845,6 +1992,7 @@ function migrateSchema() {
   ensureColumn("analysis_runs", "prompt_algorithm", "prompt_algorithm TEXT NOT NULL DEFAULT 'aes-256-gcm'");
   ensureColumn("analysis_chapters", "model", "model TEXT NOT NULL DEFAULT ''");
   ensureColumn("analysis_summary_parts", "trace_summary", "trace_summary TEXT NOT NULL DEFAULT ''");
+  ensureColumn("l2_subjects", "prompt_hash", "prompt_hash TEXT NOT NULL DEFAULT ''");
   migrateL2IndexGroupColumns();
   migrateBookIndexPrompts();
   migrateBookIndexGroups();
@@ -2237,6 +2385,7 @@ const L2_CATEGORIES = new Set([
   "cultivation",
   "force",
   "item",
+  "magical_creature",
   "location",
   "event",
   "foreshadowing",

@@ -168,6 +168,15 @@ workflow:
           required: true
           type: paragraph
           variable: index_prompt
+        - default: '[]'
+          hint: ''
+          label: 已确认神奇生物主体JSON
+          max_length: 50000
+          options: []
+          placeholder: '[]'
+          required: false
+          type: paragraph
+          variable: known_subjects_json
       height: 258
       id: '2000000000101'
       position:
@@ -200,7 +209,7 @@ workflow:
             {
               "facts": [
                 {
-                  "category": "character|relationship|cultivation|force|item|location|event|foreshadowing|other",
+                  "category": "string，必须遵循索引规则指定的类别，可使用 magical_creature",
                   "entity": "string",
                   "aliases": ["string"],
                   "tags": ["string"],
@@ -209,10 +218,21 @@ workflow:
                   "fact": "string",
                   "evidence": ["string"],
                   "importance": 0.0,
-                  "confidence": 0.0
+                  "confidence": 0.0,
+                  "scope_eligible": true,
+                  "scope_basis": "string",
+                  "transformation_eligible": false,
+                  "creature_type": "string",
+                  "original_form": "string",
+                  "qualification_evidence": ["string"],
+                  "subject_key": "string",
+                  "identity_basis": "current_chapter"
                 }
               ]
             }
+            当索引规则要求严格专项准入时，scope_eligible 只有在该对象明确符合专项范围时才为 true；scope_basis 必须填写原文可直接支持的资格依据。若无法确认资格，不要输出该 fact。
+            每条 fact 都必须完整输出以下字段，禁止省略或使用 null：category、entity、aliases、tags、related_entities、fact_type、fact、evidence、importance、confidence、scope_eligible、scope_basis、transformation_eligible、creature_type、original_form、qualification_evidence、subject_key、identity_basis。
+            即使是候选事实，也必须完整输出全部字段；候选事实使用 scope_eligible=false、scope_basis=""、fact_type="identity_clue"，不能省略准入字段。
             只输出 JSON，不要 Markdown，不要解释文字。
         - id: l2-user
           role: user
@@ -227,6 +247,9 @@ workflow:
 
             L1 路由 JSON：
             {{#2000000000101.l1_route_json#}}
+
+            已确认的神奇生物主体 JSON（如果有）：
+            {{#2000000000101.known_subjects_json#}}
 
             章节正文：
             {{#2000000000101.chapter_content#}}

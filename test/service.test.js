@@ -120,6 +120,7 @@ test("normalizes Dify L1/L2 workflow outputs from result/text/output/data envelo
   assert.equal(l2.facts.length, 1);
   assert.equal(l2.facts[0].entity, "初一");
   assert.equal(l2.facts[0].category, "item");
+  assert.equal(l2.facts[0].scope_fields_complete, false);
 });
 
 test("l2 schema accepts optional chapter metadata", () => {
@@ -1116,6 +1117,567 @@ test("stores L2 facts with encrypted fact content and reports coverage", async (
   assert.equal(dbBytes.includes(Buffer.from("陈平安得到木剑。")), false);
 });
 
+test("appends historical rescan facts without replacing chapter facts", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-l2-history-append",
+    chapterIndex: 1,
+    title: "历史回扫",
+    content: "测试异兽出现。"
+  });
+  const chapter = db.getChapterMetadata("book-l2-history-append", 1);
+  await db.saveL2ChapterFacts({
+    bookId: "book-l2-history-append",
+    indexGroupKey: "magical-creatures",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "dify:l2:v1",
+    promptHash: "history-prompt",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "magical_creature",
+      entity: "测试异兽",
+      fact_type: "classification",
+      fact: "测试异兽被确认属于异兽。",
+      evidence: ["异兽"],
+      importance: 0.9,
+      confidence: 0.9
+    }]
+  });
+  await db.appendL2ChapterFacts({
+    bookId: "book-l2-history-append",
+    indexGroupKey: "magical-creatures",
+    chapterIndex: 1,
+    sourceHmac: chapter.content_hmac,
+    model: "dify:l2:v1",
+    promptHash: "history-prompt",
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "magical_creature",
+      entity: "测试异兽",
+      fact_type: "appearance",
+      fact: "测试异兽通体土黄。",
+      evidence: ["通体土黄"],
+      importance: 0.7,
+      confidence: 0.8
+    }]
+  });
+  const facts = await db.listL2Facts({
+    bookId: "book-l2-history-append",
+    indexGroupKeys: ["magical-creatures"],
+    startChapter: 1,
+    endChapter: 1
+  });
+  assert.equal(facts.length, 2);
+  assert.deepEqual(facts.map((fact) => fact.fact_type).sort(), ["appearance", "classification"]);
+});
+
+test("persists specialized magical creature facts with their declared category", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-magical-category",
+    chapterIndex: 1,
+    title: "白鹿",
+    content: "白鹿主动认主。"
+  });
+  const group = db.createBookIndexGroup("book-magical-category", {
+    group_key: "magical-creatures",
+    name: "神奇生物",
+    category_scope: ["magical_creature"],
+    l2_index_prompt: "只提取神奇生物。"
+  });
+  const chapter = db.getChapterMetadata("book-magical-category", 1);
+  await db.saveL2ChapterFacts({
+    bookId: "book-magical-category",
+    indexGroupKey: group.group_key,
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "dify:l2:v1",
+    promptHash: group.l2_index_prompt_hash,
+    schemaVersion: "l2-facts-v1",
+    facts: [{
+      category: "magical_creature",
+      entity: "白鹿",
+      tags: ["神奇生物", "异兽", "白鹿"],
+      fact_type: "classification",
+      fact: "白鹿被原文明确称为祥瑞异兽。",
+      evidence: ["白鹿主动认主。"],
+      importance: 0.9,
+      confidence: 0.95
+    }]
+  });
+
+  const facts = await db.listL2Facts({
+    bookId: "book-magical-category",
+    indexGroupKeys: [group.group_key],
+    startChapter: 1,
+    endChapter: 1,
+    categories: ["magical_creature"]
+  });
+  assert.deepEqual(group.category_scope, ["magical_creature"]);
+  assert.equal(facts.length, 1);
+  assert.equal(facts[0].category, "magical_creature");
+});
+
+test("magical creature index rejects ineligible Dify facts before storage", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-magical-admission",
+    chapterIndex: 1,
+    title: "资格校验",
+    content: "白鹿主动认主，铁匠正在打铁。"
+  });
+  const group = db.createBookIndexGroup("book-magical-admission", {
+    group_key: "magical-creatures",
+    name: "神奇生物",
+    category_scope: ["magical_creature"],
+    l2_index_prompt: "只提取神奇生物。"
+  });
+
+  const previousFetch = global.fetch;
+  const previousProvider = appConfig.config.indexing.l2Provider;
+  appConfig.config.indexing.l2Provider = "dify";
+  global.fetch = async (url, _request = {}) => {
+    if (String(url).includes("/parameters")) {
+      return { ok: true, status: 200, text: async () => JSON.stringify({ user_input_form: [] }) };
+    }
+    if (!String(url).includes("/workflows/run")) throw new Error(`Unexpected fetch URL: ${url}`);
+    return {
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({
+        data: {
+          outputs: {
+            result: JSON.stringify({
+              facts: [
+                {
+                  category: "other",
+                  entity: "阮师傅",
+                  tags: ["神奇生物", "器物成精", "铁匠"],
+                  fact_type: "classification",
+                  fact: "阮师傅是普通铁匠，未说明其为器物成精。",
+                  evidence: ["原文称其为铁匠。"],
+                  importance: 0.8,
+                  confidence: 0.9,
+                  scope_eligible: false,
+                  scope_basis: ""
+                },
+                {
+                  category: "magical_creature",
+                  entity: "锈剑条",
+                  tags: ["神奇生物", "器物成精", "剑类器物"],
+                  fact_type: "status_change",
+                  fact: "本章未说明锈剑条具有独立灵智或化形能力。",
+                  evidence: ["仅描述其镇压功能。"],
+                  importance: 0.7,
+                  confidence: 0.8,
+                  scope_eligible: false,
+                  scope_basis: ""
+                },
+                {
+                  category: "other",
+                  entity: "白鹿",
+                  tags: ["神奇生物", "异兽", "白鹿"],
+                  fact_type: "classification",
+                  fact: "白鹿被原文明确称为祥瑞异兽，并主动认主。",
+                  evidence: ["白鹿主动走出山野大泽认主。"],
+                  importance: 0.95,
+                  confidence: 0.98,
+                  scope_eligible: true,
+                  scope_basis: "explicit_nonhuman_species"
+                }
+              ]
+            })
+          }
+        }
+      })
+    };
+  };
+
+  try {
+    const task = workflows.startL2IndexTask({
+      book_id: "book-magical-admission",
+      index_group_key: group.group_key,
+      start_chapter: 1,
+      end_chapter: 1,
+      force: true
+    });
+    await waitForTask(task);
+    const facts = await db.listL2Facts({
+      bookId: "book-magical-admission",
+      indexGroupKeys: [group.group_key],
+      startChapter: 1,
+      endChapter: 1
+    });
+    assert.equal(task.status, "completed");
+    assert.deepEqual(facts.map((fact) => fact.entity), ["白鹿"]);
+    assert.equal(facts[0].category, "magical_creature");
+    assert.ok(task.events.some((event) => event.message === "章节 1 生成 3 条，准入 1 条。"));
+  } finally {
+    global.fetch = previousFetch;
+    appConfig.config.indexing.l2Provider = previousProvider;
+  }
+});
+
+test("stores and recalls verified magical creature subjects across chapters", () => {
+  db.upsertL2Subject({
+    bookId: "book-magical-subject-memory",
+    indexGroupKey: "magical-creatures",
+    subjectKey: "测试异兽",
+    canonicalName: "测试异兽",
+    aliases: ["测试别名"],
+    creatureType: "异兽",
+    originalForm: "自然繁衍的测试异兽",
+    qualificationChapter: 11,
+    qualificationBasis: "explicit_nonhuman_species",
+    qualificationEvidence: ["原文明确其为异兽"],
+    confidence: 0.96
+  });
+
+  assert.deepEqual(db.listL2Subjects({
+    bookId: "book-magical-subject-memory",
+    indexGroupKey: "magical-creatures",
+    chapterIndex: 12,
+    terms: ["测试异兽"]
+  }), [{
+    subject_key: "测试异兽",
+    canonical_name: "测试异兽",
+    aliases: ["测试别名"],
+    creature_type: "异兽",
+    original_form: "自然繁衍的测试异兽",
+    qualification_chapter: 11,
+    qualification_basis: "explicit_nonhuman_species",
+    qualification_evidence: ["原文明确其为异兽"],
+    confidence: 0.96
+  }]);
+
+  const inherited = workflows.admitL2FactsForIndexGroup([{
+    category: "magical_creature",
+    entity: "测试别名",
+    aliases: [],
+    related_entities: [],
+    fact_type: "event_record",
+    fact: "测试异兽在本章参与了一次行动。",
+    evidence: ["章节中出现测试别名"],
+    scope_eligible: false,
+    scope_basis: ""
+  }], { category_scope: ["magical_creature"] }, db.listL2Subjects({
+    bookId: "book-magical-subject-memory",
+    indexGroupKey: "magical-creatures",
+    chapterIndex: 12,
+    terms: ["测试别名"]
+  }));
+  assert.equal(inherited.facts.length, 1);
+  assert.equal(inherited.facts[0].identity_basis, "prior_verified_subject");
+});
+
+test("magical creature admission rejects sentient artifacts without biological transformation evidence", async () => {
+  const group = db.createBookIndexGroup("book-magical-artifact-gate", {
+    group_key: "magical-creatures",
+    name: "神奇生物",
+    category_scope: ["magical_creature"],
+    l2_index_prompt: "只提取神奇生物。"
+  });
+  const admission = workflows.admitL2FactsForIndexGroup([{
+      category: "magical_creature",
+      entity: "飞剑",
+      fact_type: "intelligence",
+      fact: "飞剑具有独立意识。",
+      evidence: ["飞剑有灵。"],
+      scope_eligible: true,
+      scope_basis: "explicit_sentience",
+      transformation_eligible: false
+    }], group);
+  assert.equal(admission.facts.length, 0);
+});
+
+test("magical creature admission rejects artifact names even when the model marks them as nonhuman", () => {
+  const group = { category_scope: ["magical_creature"] };
+  const admission = workflows.admitL2FactsForIndexGroup([{
+    category: "magical_creature",
+    entity: "符箓",
+    fact_type: "classification",
+    fact: "符箓被描述为具有灵性并能自行飞行。",
+    evidence: ["符箓自行飞行"],
+    scope_eligible: true,
+    scope_basis: "explicit_nonhuman_species",
+    transformation_eligible: false
+  }], group);
+  assert.equal(admission.facts.length, 0);
+  assert.equal(admission.candidateFacts.length, 0);
+});
+
+test("magical creature admission does not trust a fabricated artifact transformation flag", () => {
+  const admission = workflows.admitL2FactsForIndexGroup([{
+    category: "magical_creature",
+    entity: "飞剑",
+    fact_type: "classification",
+    fact: "飞剑具有独立灵智和生物化形能力。",
+    evidence: ["飞剑会飞行并执行命令。"],
+    scope_eligible: true,
+    scope_basis: "explicit_transformation",
+    transformation_eligible: true,
+    creature_type: "器物成精"
+  }], { category_scope: ["magical_creature"] });
+  assert.equal(admission.facts.length, 0);
+});
+
+test("historical rescan helpers reject negative facts and generic subject aliases", () => {
+  assert.equal(workflows.isHistoricalRescanFactUsable({
+    entity: "飞剑",
+    fact_type: "identity_clue",
+    fact: "本章未直接出现飞剑，仅作为历史主体保留候选。",
+    evidence: ["本章正文未提及飞剑"]
+  }), false);
+  assert.equal(workflows.isHistoricalRescanSubjectName("飞剑"), false);
+  assert.equal(workflows.isHistoricalRescanSubjectName("白衣女子"), false);
+  assert.equal(workflows.isHistoricalRescanSubjectName("四脚蛇"), true);
+});
+
+test("extracts an embedded named creature as an independent candidate subject", () => {
+  const expanded = workflows.expandEmbeddedMagicalCreatureFacts([{
+    category: "magical_creature",
+    entity: "稚圭",
+    fact_type: "event_record",
+    fact: "稚圭回到院子后，一条四脚蛇从角落窜出爬到她脚边，被她一脚踢飞。",
+    evidence: ["一条四脚蛇从角落窜出"],
+    scope_eligible: false,
+    scope_basis: ""
+  }]);
+  assert.equal(expanded.length, 2);
+  assert.deepEqual(expanded[1], {
+    category: "magical_creature",
+    entity: "四脚蛇",
+    aliases: [],
+    tags: ["候选主体"],
+    related_entities: ["稚圭"],
+    fact_type: "identity_clue",
+    fact: "当前章节出现四脚蛇，并记录其与稚圭发生接触；当前证据不足以确认其属于神奇生物。",
+    evidence: ["一条四脚蛇从角落窜出"],
+    importance: 0.45,
+    confidence: 0.55,
+    scope_eligible: false,
+    scope_basis: "",
+    transformation_eligible: false,
+    creature_type: "",
+    original_form: "",
+    subject_key: "四脚蛇",
+    identity_basis: "current_chapter"
+  });
+});
+
+test("magical creature candidate retention excludes ordinary people and artifacts", () => {
+  const result = workflows.admitL2FactsForIndexGroup([
+    {
+      category: "character",
+      entity: "年轻剑客",
+      fact_type: "identity_clue",
+      fact: "年轻剑客在街上行走。",
+      evidence: ["年轻剑客"],
+      scope_eligible: false,
+      scope_basis: ""
+    },
+    {
+      category: "item",
+      entity: "符箓",
+      fact_type: "event_record",
+      fact: "符箓被用于劈开石台。",
+      evidence: ["符箓"],
+      scope_eligible: false,
+      scope_basis: ""
+    },
+    {
+      category: "other",
+      entity: "测试异兽",
+      fact_type: "identity_clue",
+      fact: "本章只出现测试异兽的名称，尚不足以确认其类别。",
+      evidence: ["测试异兽"],
+      scope_eligible: false,
+      scope_basis: ""
+    }
+  ], { category_scope: ["magical_creature"] });
+
+  assert.deepEqual(result.candidateFacts.map((fact) => fact.entity), ["测试异兽"]);
+});
+
+test("magical creature candidates exclude named materials and structures", () => {
+  const result = workflows.admitL2FactsForIndexGroup([
+    ...["山魈茶壶", "祖荫槐叶", "十二脚牌坊", "蛇胆石"].map((entity) => ({
+      category: "other",
+      entity,
+      fact_type: "identity_clue",
+      fact: `${entity}在本章出现。`,
+      evidence: [entity],
+      scope_eligible: false,
+      scope_basis: ""
+    })),
+    {
+      category: "other",
+      entity: "四脚蛇",
+      fact_type: "identity_clue",
+      fact: "四脚蛇头顶生角，行动异常，当前证据不足。",
+      evidence: ["头顶生角"],
+      scope_eligible: false,
+      scope_basis: ""
+    }
+  ], { category_scope: ["magical_creature"] });
+  assert.deepEqual(result.candidateFacts.map((fact) => fact.entity), ["四脚蛇"]);
+});
+
+test("magical creature admission rejects tentative human similes without nonhuman evidence", () => {
+  const result = workflows.admitL2FactsForIndexGroup([{
+    category: "magical_creature",
+    entity: "青衣少女",
+    fact_type: "classification",
+    fact: "青衣少女看起来像一头年幼狐魅，但本章没有说明其本体。",
+    evidence: ["像一头年幼狐魅"],
+    scope_eligible: true,
+    scope_basis: "explicit_nonhuman_species"
+  }], { category_scope: ["magical_creature"] });
+  assert.equal(result.facts.length, 0);
+});
+
+test("magical creature candidate retention excludes ordinary animals and named sword artifacts", () => {
+  const result = workflows.admitL2FactsForIndexGroup([
+    {
+      category: "item",
+      entity: "锈剑条",
+      fact_type: "identity_clue",
+      fact: "锈剑条在本章出现。",
+      evidence: ["锈剑条"],
+      scope_eligible: false,
+      scope_basis: ""
+    },
+    {
+      category: "other",
+      entity: "来福",
+      tags: ["狗", "普通动物", "年老"],
+      fact_type: "identity_clue",
+      fact: "来福是一条年老的普通狗。",
+      evidence: ["年老的狗"],
+      scope_eligible: false,
+      scope_basis: ""
+    },
+    {
+      category: "other",
+      entity: "小蛟",
+      tags: ["异兽", "水族"],
+      fact_type: "identity_clue",
+      fact: "小蛟在本章短暂出现，尚未确认其完整来历。",
+      evidence: ["小蛟"],
+      scope_eligible: false,
+      scope_basis: ""
+    }
+  ], { category_scope: ["magical_creature"] });
+  assert.deepEqual(result.candidateFacts.map((fact) => fact.entity), ["小蛟"]);
+});
+
+test("verified magical creature subjects are isolated by L2 prompt hash", () => {
+  db.upsertL2Subject({
+    bookId: "book-magical-subject-prompt-isolation",
+    indexGroupKey: "magical-creatures",
+    subjectKey: "旧版本主体",
+    canonicalName: "旧版本主体",
+    qualificationChapter: 1,
+    qualificationBasis: "explicit_nonhuman_species",
+    qualificationEvidence: ["旧版本证据"],
+    promptHash: "prompt-old"
+  });
+  db.upsertL2Subject({
+    bookId: "book-magical-subject-prompt-isolation",
+    indexGroupKey: "magical-creatures",
+    subjectKey: "新版本主体",
+    canonicalName: "新版本主体",
+    qualificationChapter: 2,
+    qualificationBasis: "explicit_nonhuman_species",
+    qualificationEvidence: ["新版本证据"],
+    promptHash: "prompt-new"
+  });
+
+  assert.deepEqual(
+    db.listL2Subjects({
+      bookId: "book-magical-subject-prompt-isolation",
+      indexGroupKey: "magical-creatures",
+      promptHash: "prompt-new"
+    }).map((subject) => subject.canonical_name),
+    ["新版本主体"]
+  );
+
+  db.upsertL2Subject({
+    bookId: "book-magical-subject-prompt-isolation",
+    indexGroupKey: "magical-creatures",
+    subjectKey: "新版本主体",
+    canonicalName: "新版本主体",
+    qualificationChapter: 3,
+    qualificationBasis: "explicit_transformation",
+    qualificationEvidence: ["新版本补充证据"],
+    promptHash: "prompt-newer"
+  });
+  assert.equal(db.listL2Subjects({
+    bookId: "book-magical-subject-prompt-isolation",
+    indexGroupKey: "magical-creatures",
+    promptHash: "prompt-new"
+  }).length, 0);
+  assert.equal(db.listL2Subjects({
+    bookId: "book-magical-subject-prompt-isolation",
+    indexGroupKey: "magical-creatures",
+    promptHash: "prompt-newer"
+  }).length, 1);
+});
+
+test("keeps uncertain magical creature facts as candidates and promotes them after subject verification", async () => {
+  await db.saveEncryptedChapter({
+    bookId: "book-magical-candidate-replay",
+    chapterIndex: 1,
+    title: "候选主体",
+    content: "章节只提到测试异兽的名字。"
+  });
+  const chapter = db.getChapterMetadata("book-magical-candidate-replay", 1);
+  await db.saveL2ChapterFacts({
+    bookId: "book-magical-candidate-replay",
+    indexGroupKey: "magical-creatures",
+    chapterIndex: 1,
+    status: "completed",
+    sourceHmac: chapter.content_hmac,
+    model: "dify:l2:v1",
+    promptHash: "candidate-prompt",
+    schemaVersion: "l2-facts-v1",
+    facts: [],
+    candidateFacts: [{
+      category: "magical_creature",
+      entity: "测试异兽",
+      aliases: ["测试别名"],
+      fact_type: "identity_clue",
+      fact: "本章只出现测试异兽的名称，尚不足以确认其类别。",
+      evidence: ["测试异兽"],
+      importance: 0.7,
+      confidence: 0.4
+    }]
+  });
+
+  assert.equal((await db.listL2Facts({
+    bookId: "book-magical-candidate-replay",
+    indexGroupKeys: ["magical-creatures"],
+    startChapter: 1,
+    endChapter: 1
+  })).length, 0);
+
+  const promoted = db.promoteL2CandidateFacts({
+    bookId: "book-magical-candidate-replay",
+    indexGroupKey: "magical-creatures",
+    canonicalName: "测试异兽",
+    aliases: ["测试别名"]
+  });
+  assert.equal(promoted, 1);
+  const facts = await db.listL2Facts({
+    bookId: "book-magical-candidate-replay",
+    indexGroupKeys: ["magical-creatures"],
+    startChapter: 1,
+    endChapter: 1
+  });
+  assert.equal(facts.length, 1);
+  assert.equal(facts[0].review_source, "index");
+});
+
 test("L2 index groups isolate statuses, facts, and prompt bindings", async () => {
   await db.saveEncryptedChapter({
     bookId: "book-l2-groups",
@@ -1272,6 +1834,16 @@ test("builds L2 indexes, skips fresh facts, and keeps requests ZDR-shaped", asyn
     });
     await waitForTask(task);
     assert.equal(task.status, "completed");
+    assert.deepEqual(task.result.diagnostics, {
+      generated_facts: 1,
+      admitted_facts: 1,
+      rejected_facts: 0,
+      candidate_facts: 0,
+      candidate_filtered_facts: 0,
+      missing_scope_fields: 0,
+      historical_rescan_facts: 0,
+      historical_rescan_chapters: 0
+    });
     assert.equal(responseCalls, 1);
     assert.equal(capturedBodies[0].store, false);
     assert.equal(Object.hasOwn(capturedBodies[0], "background"), false);
@@ -1283,7 +1855,7 @@ test("builds L2 indexes, skips fresh facts, and keeps requests ZDR-shaped", asyn
       end_chapter: 1
     });
     await waitForTask(skipped);
-    assert.equal(skipped.progress.skipped, 1);
+    assert.equal(skipped.progress.skipped, 1, JSON.stringify({ error: skipped.error, events: skipped.events.slice(-3) }));
     assert.equal(responseCalls, 1);
   } finally {
     global.fetch = previousFetch;

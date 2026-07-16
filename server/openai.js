@@ -804,7 +804,7 @@ export function buildL1ChapterInput({ chapterIndex, title, content, indexPrompt 
   ];
 }
 
-export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, indexPrompt }) {
+export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, knownSubjects = [], indexPrompt }) {
   return [
     {
       role: "user",
@@ -819,6 +819,9 @@ export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, ind
             "",
             "可选 L1 路标 JSON：",
             JSON.stringify(l1Index || null),
+            "",
+            "已确认的神奇生物主体 JSON（仅用于识别后续章节事实，不得把历史准入证据伪装成本章证据）：",
+            JSON.stringify(knownSubjects || []),
             "",
             "章节原文：",
             content
@@ -895,7 +898,7 @@ export function l2ChapterFactsSchema() {
           properties: {
             category: {
               type: "string",
-              enum: ["character", "relationship", "cultivation", "force", "item", "location", "event", "foreshadowing", "other"]
+              enum: ["character", "relationship", "cultivation", "force", "item", "magical_creature", "location", "event", "foreshadowing", "other"]
             },
             entity: { type: "string" },
             aliases: {
@@ -917,7 +920,15 @@ export function l2ChapterFactsSchema() {
               items: { type: "string" }
             },
             importance: { type: "number" },
-            confidence: { type: "number" }
+            confidence: { type: "number" },
+            scope_eligible: { type: "boolean" },
+            scope_basis: { type: "string" },
+            transformation_eligible: { type: "boolean" },
+            creature_type: { type: "string" },
+            original_form: { type: "string" },
+            qualification_evidence: { type: "array", items: { type: "string" } },
+            subject_key: { type: "string" },
+            identity_basis: { type: "string" }
           },
           required: ["category", "entity", "aliases", "tags", "related_entities", "fact_type", "fact", "evidence", "importance", "confidence"]
         }
