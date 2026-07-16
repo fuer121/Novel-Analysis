@@ -131,6 +131,8 @@ export function normalizeDifyL2Output(raw) {
       ? record.items
       : [];
   return {
+    chapter_index: normalizeInteger(record.chapter_index ?? record.chapterIndex),
+    chapter_title: normalizeString(record.chapter_title ?? record.chapterTitle ?? record.title),
     facts: facts.map(normalizeDifyFact).filter(Boolean)
   };
 }
@@ -351,7 +353,17 @@ function normalizeDifyFact(value) {
     fact: normalizeString(value.fact),
     evidence: normalizeStringArray(value.evidence),
     importance: normalizeNumber(value.importance),
-    confidence: normalizeNumber(value.confidence)
+    confidence: normalizeNumber(value.confidence),
+    scope_eligible: value.scope_eligible === true,
+    scope_basis: normalizeString(value.scope_basis),
+    transformation_eligible: value.transformation_eligible === true,
+    scope_fields_complete: ["scope_eligible", "scope_basis", "transformation_eligible", "creature_type", "original_form", "subject_key", "identity_basis"]
+      .every((key) => Object.hasOwn(value, key)),
+    creature_type: normalizeString(value.creature_type ?? value.creatureType),
+    original_form: normalizeString(value.original_form ?? value.originalForm),
+    qualification_evidence: normalizeStringArray(value.qualification_evidence ?? value.qualificationEvidence),
+    subject_key: normalizeString(value.subject_key ?? value.subjectKey),
+    identity_basis: normalizeString(value.identity_basis ?? value.identityBasis)
   };
 }
 
@@ -378,6 +390,11 @@ function normalizeNumber(value) {
   return number;
 }
 
+function normalizeInteger(value) {
+  const number = Number.parseInt(value, 10);
+  return Number.isFinite(number) ? number : 0;
+}
+
 function extractChapters(value) {
   if (Array.isArray(value)) return value;
   if (value && typeof value === "object") {
@@ -398,6 +415,7 @@ const DIFY_FACT_CATEGORIES = [
   "cultivation",
   "force",
   "item",
+  "magical_creature",
   "location",
   "event",
   "foreshadowing",

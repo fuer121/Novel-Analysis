@@ -1,6 +1,6 @@
 # L1 / L2 Index Storage
 
-Last updated: 2026-06-02, Asia/Shanghai
+Last updated: 2026-07-15, Asia/Shanghai
 
 This document describes the current L1/L2 index storage used by the service. It replaces the earlier marker/object proposal. The implementation source of truth is `server/db.js` and the runtime orchestration is in `server/workflows.js`.
 
@@ -276,6 +276,14 @@ Execution signature:
 - optionally review a small number of high-risk original chapters
 - summarize evidence packets into the final result
 
+`l2_query` mode:
+
+- queries one or more enabled L2 index groups directly
+- scans candidates in chapter windows so later chapters are not hidden by a global candidate limit
+- recalls facts by target, aliases, structured metadata, fact body, and evidence text
+- does not run chapter analysis or read original chapter bodies
+- generates Markdown directly or through resumable budgeted batches
+
 Source review budget:
 
 - `fast_index`: 0 chapters
@@ -292,6 +300,6 @@ Source review budget:
 
 ## Known Follow-Ups
 
-- The analysis page currently displays coverage for the first bound index group only, while backend recall can use multiple groups.
-- Analysis chapter-result reuse should include the analysis execution signature to avoid accidental reuse after switching analysis provider or workflow version.
-- Dify analysis workflows should be validated end to end with a small real task after API keys are configured.
+- Collection-style L2 queries still use a global scored limit instead of guaranteed per-group or per-stage recall buckets
+- L2 query domain expansion terms are currently embedded in workflow code and need a versioned, extensible vocabulary layer
+- Task execution is in memory, so service restart loses live import/L1/L2 task state even though persisted units can be skipped on rerun

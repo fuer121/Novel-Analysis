@@ -11,7 +11,7 @@ export async function callOpenAIJson({ model, reasoningEffort, instructions, inp
   const response = await postOpenAIJson("responses", body);
 
   if (!response.ok) {
-    const error = new Error(sanitizeText(response.data?.error?.message || response.data?.message || `OpenAI 调用失败：HTTP ${response.status}`));
+    const error = new Error(sanitizeText(openAIResponseMessage(response.data) || `OpenAI 调用失败：HTTP ${response.status}`));
     error.status = response.status;
     error.details = sanitizeDetails(response.data);
     throw error;
@@ -98,7 +98,7 @@ async function repairOpenAIJsonOutput({ model, schema, schemaName, strict, origi
   });
   const repairResponse = await postOpenAIJson("responses", repairBody);
   if (!repairResponse.ok) {
-    const error = new Error(sanitizeText(repairResponse.data?.error?.message || repairResponse.data?.message || `OpenAI JSON 修复失败：HTTP ${repairResponse.status}`));
+    const error = new Error(sanitizeText(openAIResponseMessage(repairResponse.data) || `OpenAI JSON 修复失败：HTTP ${repairResponse.status}`));
     error.status = repairResponse.status;
     error.details = sanitizeDetails(repairResponse.data);
     throw error;
@@ -144,7 +144,7 @@ export async function callOpenAIText({ model, reasoningEffort, instructions, inp
   const response = await postOpenAIJson("responses", body);
 
   if (!response.ok) {
-    const error = new Error(sanitizeText(response.data?.error?.message || response.data?.message || `OpenAI 调用失败：HTTP ${response.status}`));
+    const error = new Error(sanitizeText(openAIResponseMessage(response.data) || `OpenAI 调用失败：HTTP ${response.status}`));
     error.status = response.status;
     error.details = sanitizeDetails(response.data);
     throw error;
@@ -162,14 +162,24 @@ async function postOpenAIJson(path, body) {
     Authorization: `Bearer ${config.openai.apiKey}`,
     "Content-Type": "application/json"
   };
-  const payload = JSON.stringify(body);
 
   let lastError = null;
-  for (let attempt = 0; attempt <= config.openai.maxRetries; attempt += 1) {
+  let requestBody = body;
+  let retriedWithoutMaxOutputTokens = false;
+  let attempt = 0;
+  while (attempt <= config.openai.maxRetries) {
     try {
+      const payload = JSON.stringify(requestBody);
       const result = config.openai.proxyUrl
         ? await postJsonViaHttpProxy(endpoint, headers, payload)
         : await postJsonDirect(endpoint, headers, payload);
+      if (isUnsupportedMaxOutputTokens(result) && Object.hasOwn(requestBody || {}, "max_output_tokens") && !retriedWithoutMaxOutputTokens) {
+        const withoutMaxOutputTokens = { ...requestBody };
+        delete withoutMaxOutputTokens.max_output_tokens;
+        requestBody = withoutMaxOutputTokens;
+        retriedWithoutMaxOutputTokens = true;
+        continue;
+      }
       if (!isRetryableOpenAIStatus(result.status) || attempt >= config.openai.maxRetries) {
         return result;
       }
@@ -181,6 +191,7 @@ async function postOpenAIJson(path, body) {
       lastError = error;
     }
     await delay(openAIRetryDelayMs(attempt));
+    attempt += 1;
   }
   throw openAINetworkError(lastError);
 }
@@ -194,7 +205,7 @@ async function postJsonDirect(endpoint, headers, payload) {
   return {
     ok: response.ok,
     status: response.status,
-    data: await response.json().catch(() => null)
+    data: await readOpenAIResponseData(response)
   };
 }
 
@@ -272,7 +283,7 @@ function postJsonViaHttpProxy(endpoint, headers, payload) {
             finish(resolve, {
               ok: response.statusCode >= 200 && response.statusCode < 300,
               status: response.statusCode,
-              data: parseJsonOrNull(text)
+              data: parseOpenAIResponseBody(text)
             });
           });
         });
@@ -305,6 +316,156 @@ function parseJsonOrNull(value) {
   } catch {
     return null;
   }
+}
+
+async function readOpenAIResponseData(response) {
+  if (typeof response.text === "function") {
+    const text = await response.text().catch(() => "");
+    return parseOpenAIResponseBody(text);
+  }
+  return await response.json().catch(() => null);
+}
+
+function parseOpenAIResponseBody(text) {
+  const parsed = parseJsonOrNull(text);
+  if (parsed !== null) return parsed;
+  const leadingJson = parseLeadingJsonObject(text);
+  const stream = parseOpenAIEventStream(text);
+  if (leadingJson !== null && stream !== null) {
+    return {
+      ...stream,
+      ...leadingJson,
+      error: stream.error || leadingJson.error || null,
+      message: leadingJson.message || leadingJson.detail || stream.message || null
+    };
+  }
+  return leadingJson || stream;
+}
+
+function parseLeadingJsonObject(value) {
+  const text = String(value || "").trimStart();
+  if (!text.startsWith("{")) return null;
+  let depth = 0;
+  let inString = false;
+  let escaping = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (escaping) {
+        escaping = false;
+      } else if (char === "\\") {
+        escaping = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+    if (char === "{") depth += 1;
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return parseJsonOrNull(text.slice(0, index + 1));
+      }
+    }
+  }
+  return null;
+}
+
+function parseOpenAIEventStream(text) {
+  if (!String(text || "").includes("data:")) return null;
+  const events = [];
+  let eventName = null;
+  let dataLines = [];
+
+  const flush = () => {
+    if (!dataLines.length) return;
+    const raw = dataLines.join("\n").trim();
+    dataLines = [];
+    if (!raw || raw === "[DONE]") return;
+    const data = parseJsonOrNull(raw);
+    if (data !== null) {
+      events.push({ event: eventName, data });
+    }
+  };
+
+  for (const line of String(text || "").split(/\r?\n/)) {
+    if (!line.trim()) {
+      flush();
+      eventName = null;
+      continue;
+    }
+    if (line.startsWith("event:")) {
+      eventName = line.slice("event:".length).trim();
+      continue;
+    }
+    if (line.startsWith("data:")) {
+      dataLines.push(line.slice("data:".length).trimStart());
+    }
+  }
+  flush();
+
+  if (!events.length) return null;
+  let id = null;
+  let detail = null;
+  let error = null;
+  const deltas = [];
+  const contentParts = [];
+  const outputItems = [];
+  const responseOutputs = [];
+
+  for (const { event, data } of events) {
+    id ||= data?.id || data?.response?.id || null;
+    detail ||= typeof data?.detail === "string" ? data.detail : null;
+    if (data?.error || data?.response?.error || event === "response.failed" || data?.type === "response.failed") {
+      error ||= data?.response?.error || data?.error || { message: openAIResponseMessage(data) || "OpenAI SSE 响应失败" };
+    }
+    if (typeof data?.delta === "string") {
+      deltas.push(data.delta);
+    }
+    if (data?.part?.type === "output_text" && typeof data.part.text === "string") {
+      contentParts.push(data.part.text);
+    }
+    if (Array.isArray(data?.item?.content)) {
+      outputItems.push(...data.item.content
+        .filter((content) => content?.type === "output_text" && typeof content.text === "string")
+        .map((content) => content.text));
+    }
+    const responseText = extractResponseText(data?.response);
+    if (responseText) {
+      responseOutputs.push(responseText);
+    }
+  }
+
+  const outputText = [
+    outputItems.join("\n").trim(),
+    contentParts.join("\n").trim(),
+    responseOutputs.join("\n").trim(),
+    deltas.join("").trim()
+  ].find(Boolean) || "";
+
+  return {
+    id,
+    detail,
+    message: detail || error?.message || null,
+    error,
+    output: outputText
+      ? [{ content: [{ type: "output_text", text: outputText }] }]
+      : []
+  };
+}
+
+function openAIResponseMessage(data) {
+  return data?.detail || data?.message || data?.error?.message || null;
+}
+
+function isUnsupportedMaxOutputTokens(result) {
+  if (Number(result?.status) !== 400) return false;
+  const message = String(openAIResponseMessage(result?.data) || "").toLowerCase();
+  return message.includes("unsupported parameter") && message.includes("max_output_tokens");
 }
 
 function openAINetworkError(error) {
@@ -643,7 +804,7 @@ export function buildL1ChapterInput({ chapterIndex, title, content, indexPrompt 
   ];
 }
 
-export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, indexPrompt }) {
+export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, knownSubjects = [], indexPrompt }) {
   return [
     {
       role: "user",
@@ -658,6 +819,9 @@ export function buildL2ChapterInput({ chapterIndex, title, content, l1Index, ind
             "",
             "可选 L1 路标 JSON：",
             JSON.stringify(l1Index || null),
+            "",
+            "已确认的神奇生物主体 JSON（仅用于识别后续章节事实，不得把历史准入证据伪装成本章证据）：",
+            JSON.stringify(knownSubjects || []),
             "",
             "章节原文：",
             content
@@ -724,6 +888,8 @@ export function l2ChapterFactsSchema() {
     type: "object",
     additionalProperties: false,
     properties: {
+      chapter_index: { type: "integer" },
+      chapter_title: { type: "string" },
       facts: {
         type: "array",
         items: {
@@ -732,7 +898,7 @@ export function l2ChapterFactsSchema() {
           properties: {
             category: {
               type: "string",
-              enum: ["character", "relationship", "cultivation", "force", "item", "location", "event", "foreshadowing", "other"]
+              enum: ["character", "relationship", "cultivation", "force", "item", "magical_creature", "location", "event", "foreshadowing", "other"]
             },
             entity: { type: "string" },
             aliases: {
@@ -754,7 +920,15 @@ export function l2ChapterFactsSchema() {
               items: { type: "string" }
             },
             importance: { type: "number" },
-            confidence: { type: "number" }
+            confidence: { type: "number" },
+            scope_eligible: { type: "boolean" },
+            scope_basis: { type: "string" },
+            transformation_eligible: { type: "boolean" },
+            creature_type: { type: "string" },
+            original_form: { type: "string" },
+            qualification_evidence: { type: "array", items: { type: "string" } },
+            subject_key: { type: "string" },
+            identity_basis: { type: "string" }
           },
           required: ["category", "entity", "aliases", "tags", "related_entities", "fact_type", "fact", "evidence", "importance", "confidence"]
         }

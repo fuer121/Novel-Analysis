@@ -3,6 +3,8 @@ import crypto from "node:crypto";
 import { config } from "./config.js";
 import {
   createAnalysisRun,
+  appendL2ChapterFacts,
+  clearL2Subjects,
   decryptAnalysisChapterResult,
   decryptAnalysisSummaryPartResult,
   decryptCompletedAnalysisChapterResults,
@@ -27,6 +29,7 @@ import {
   indexGroupL2PromptHash,
   listBookIndexGroups,
   listL2Facts,
+  listL2Subjects,
   listAnalysisChapterMetadata,
   listAnalysisSummaryPartMetadata,
   listChapterMetadata,
@@ -45,6 +48,8 @@ import {
   saveL1ChapterIndex,
   saveL2ChapterFacts,
   saveL2ChapterStatus,
+  promoteL2CandidateFacts,
+  upsertL2Subject,
   schemaHash,
   updateAnalysisRun,
   updateBookImportStatus
@@ -97,7 +102,18 @@ const L2_QUERY_MAX_FACTS = 160;
 const L2_QUERY_COLLECTION_MAX_FACTS = 1200;
 const L2_QUERY_DIFY_INPUT_MAX_CHARS = 20000;
 const L2_SCHEMA_VERSION = "l2-facts-v1";
+const L2_HISTORICAL_RESCAN_MAX_CHAPTERS = 80;
 const FIELD_BATCH_MERGE_STRATEGY_VERSION = "recursive-object-v2";
+const MAGICAL_CREATURE_CATEGORY = "magical_creature";
+const MAGICAL_CREATURE_SCOPE_BASES = new Set([
+  "explicit_nonhuman_species",
+  "explicit_sentience",
+  "explicit_transformation",
+  "explicit_supernatural_origin",
+  "explicit_undead_origin",
+  "explicit_fortune_manifestation",
+  "explicit_plant_spirit"
+]);
 
 export function l1IndexExecutionSignature(openaiModel = config.openai.model) {
   if (config.indexing.l1Provider === "dify") return `dify:l1:${config.dify.l1WorkflowVersion}`;
@@ -116,6 +132,15 @@ export function analysisChapterExecutionSignature(openaiModel = config.openai.mo
 
 export function analysisSummaryExecutionSignature(openaiModel = config.openai.model) {
   if (config.indexing.analysisProvider === "dify") return `dify:analysis:summary:${config.dify.analysisSummaryWorkflowVersion}`;
+  return String(openaiModel || config.openai.model || "");
+}
+
+function l2QuerySummaryProvider() {
+  return config.openai.apiKey ? "openai" : config.indexing.analysisProvider;
+}
+
+function l2QuerySummaryExecutionSignature(openaiModel = config.openai.model) {
+  if (l2QuerySummaryProvider() === "dify") return `dify:analysis:summary:${config.dify.analysisSummaryWorkflowVersion}`;
   return String(openaiModel || config.openai.model || "");
 }
 
@@ -520,6 +545,22 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
       }
     });
 
+    if (force && mode === "all" && startChapter === 1) {
+      clearL2Subjects({ bookId, indexGroupKey: indexGroup.group_key });
+    }
+
+    const rescannedSubjectKeys = new Set();
+    const diagnostics = {
+      generated_facts: 0,
+      admitted_facts: 0,
+      rejected_facts: 0,
+      candidate_facts: 0,
+      candidate_filtered_facts: 0,
+      missing_scope_fields: 0,
+      historical_rescan_facts: 0,
+      historical_rescan_chapters: 0
+    };
+
     for (const chapter of chapters) {
       await waitIfPaused(task);
       const existing = getL2ChapterStatus(bookId, chapter.chapter_index, indexGroup.group_key);
@@ -563,7 +604,20 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
         const content = await decryptChapterContent(bookId, chapter.chapter_index);
         const l1Index = getL1ChapterIndex(bookId, chapter.chapter_index);
         const l1Route = compactL1RouteForPrompt(l1Index);
-        const facts = provider === "dify"
+        const knownSubjects = findKnownL2Subjects({
+          bookId,
+          indexGroupKey: indexGroup.group_key,
+          chapterIndex: chapter.chapter_index,
+          content,
+          title: chapter.title,
+          promptHash: indexPromptHash
+        });
+        const effectiveIndexPrompt = buildL2IndexPromptWithSubjectMemory(
+          indexGroup.l2_index_prompt,
+          knownSubjects,
+          Array.isArray(indexGroup.category_scope) && indexGroup.category_scope.includes(MAGICAL_CREATURE_CATEGORY)
+        );
+        const providerFacts = provider === "dify"
           ? normalizeDifyL2Output(await runDifyWorkflow({
             apiKey: config.dify.l2ApiKey,
             target: "l2",
@@ -574,7 +628,8 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
               chapter_title: chapter.title || "",
               chapter_content: content,
               l1_route_json: JSON.stringify(l1Route || null),
-              index_prompt: indexGroup.l2_index_prompt
+              known_subjects_json: JSON.stringify(knownSubjects),
+              index_prompt: effectiveIndexPrompt
             }
           })).facts
           : (await callOpenAIJson({
@@ -586,11 +641,36 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
               title: chapter.title,
               content,
               l1Index: l1Route,
-              indexPrompt: indexGroup.l2_index_prompt
+              knownSubjects,
+              indexPrompt: effectiveIndexPrompt
             }),
             schema: l2ChapterFactsSchema(),
             schemaName: "l2_chapter_facts"
           })).value?.facts || [];
+        const generatedFacts = expandEmbeddedMagicalCreatureFacts(providerFacts);
+        const admission = admitL2FactsForIndexGroup(generatedFacts, indexGroup, knownSubjects);
+        diagnostics.generated_facts += generatedFacts.length;
+        diagnostics.missing_scope_fields += generatedFacts.filter((fact) => fact.scope_fields_complete === false).length;
+        diagnostics.admitted_facts += admission.facts.length;
+        diagnostics.rejected_facts += admission.rejectedCount;
+        diagnostics.candidate_facts += admission.candidateFacts.length;
+        diagnostics.candidate_filtered_facts += Math.max(0, admission.rejectedCount - admission.candidateFacts.length);
+        updateTask(task, {
+          progress: { ...task.progress, current: `L2 事实索引 ${chapter.chapter_index}` },
+          message: `章节 ${chapter.chapter_index} 生成 ${generatedFacts.length} 条，准入 ${admission.facts.length} 条。`
+        });
+        if (admission.rejectedCount) {
+          updateTask(task, {
+            progress: { ...task.progress, current: `L2 事实索引 ${chapter.chapter_index}` },
+            message: `章节 ${chapter.chapter_index} 已拒绝 ${admission.rejectedCount} 条不符合 ${indexGroup.name || indexGroup.group_key} 范围的事实。`
+          }, "warning");
+        }
+        if (admission.candidateFacts.length) {
+          updateTask(task, {
+            progress: { ...task.progress, current: `L2 事实索引 ${chapter.chapter_index}` },
+            message: `章节 ${chapter.chapter_index} 已保留 ${admission.candidateFacts.length} 条待确认主体候选事实。`
+          }, "candidate");
+        }
         await saveL2ChapterFacts({
           bookId,
           indexGroupKey: indexGroup.group_key,
@@ -600,8 +680,65 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
           model: executionModel,
           promptHash: indexPromptHash,
           schemaVersion: L2_SCHEMA_VERSION,
-          facts
+          facts: admission.facts,
+          candidateFacts: admission.candidateFacts
         });
+        for (const candidate of admission.candidateFacts) {
+          if (!candidate.entity) continue;
+          upsertL2Subject({
+            bookId,
+            indexGroupKey: indexGroup.group_key,
+            subjectKey: candidate.subject_key || candidate.entity,
+            canonicalName: candidate.entity,
+            aliases: candidate.aliases,
+            creatureType: candidate.creature_type,
+            originalForm: candidate.original_form,
+            qualificationChapter: chapter.chapter_index,
+            confidence: candidate.confidence,
+            status: "candidate",
+            promptHash: indexPromptHash
+          });
+        }
+        for (const subject of admission.newSubjects) {
+          upsertL2Subject({
+            bookId,
+            indexGroupKey: indexGroup.group_key,
+            subjectKey: subject.subject_key || subject.entity,
+            canonicalName: subject.entity,
+            aliases: subject.aliases,
+            creatureType: subject.creature_type,
+            originalForm: subject.original_form,
+            qualificationChapter: chapter.chapter_index,
+            qualificationBasis: subject.scope_basis,
+            qualificationEvidence: subject.qualification_evidence.length ? subject.qualification_evidence : subject.evidence,
+            confidence: subject.confidence,
+            promptHash: indexPromptHash
+          });
+          promoteL2CandidateFacts({
+            bookId,
+            indexGroupKey: indexGroup.group_key,
+            canonicalName: subject.entity,
+            aliases: subject.aliases,
+            promptHash: indexPromptHash
+          });
+          const subjectKey = subject.subject_key || subject.entity;
+          if (!rescannedSubjectKeys.has(subjectKey)) {
+            rescannedSubjectKeys.add(subjectKey);
+            const rescan = await rescanHistoricalSubjectMentions({
+              task,
+              bookId,
+              indexGroup,
+              subject: { ...subject, qualification_chapter: chapter.chapter_index },
+              indexPromptHash,
+              executionModel,
+              model,
+              reasoningEffort,
+              provider
+            });
+            diagnostics.historical_rescan_facts += rescan.facts;
+            diagnostics.historical_rescan_chapters += rescan.chapters;
+          }
+        }
         task.progress.completed += 1;
         updateTask(task, {
           progress: { ...task.progress, current: `章节 ${chapter.chapter_index} L2 完成` },
@@ -636,11 +773,263 @@ async function runL2IndexTask(task, { bookId, indexGroupKey, startChapter, endCh
     completeTask(task, {
       bookId,
       indexGroupKey: indexGroup.group_key,
+      diagnostics,
       coverage: getL2Coverage({ bookId, indexGroupKey: indexGroup.group_key, startChapter, endChapter, model: executionModel, promptHash: indexPromptHash, schemaVersion: L2_SCHEMA_VERSION })
     });
   } catch (error) {
     failTask(task, error);
   }
+}
+
+async function rescanHistoricalSubjectMentions({ task, bookId, indexGroup, subject, indexPromptHash, executionModel, model, reasoningEffort, provider }) {
+  const names = [subject.entity, ...(subject.aliases || [])]
+    .map((value) => String(value || "").trim())
+    .filter((value) => value.length >= 2 && isHistoricalRescanSubjectName(value));
+  const qualificationChapter = Number(subject.qualification_chapter || 0);
+  if (!names.length || qualificationChapter <= 1) return { facts: 0, chapters: 0 };
+  const chapters = listChapterMetadata(bookId)
+    .filter((chapter) => chapter.chapter_index < qualificationChapter)
+    .slice(0, L2_HISTORICAL_RESCAN_MAX_CHAPTERS);
+  const result = { facts: 0, chapters: 0 };
+  for (const chapter of chapters) {
+    const content = await decryptChapterContent(bookId, chapter.chapter_index);
+    if (!names.some((name) => content.includes(name))) continue;
+    const historicalPrompt = `${indexGroup.l2_index_prompt}\n\n【历史主体定向回扫】\n已确认主体：${subject.entity}\n别名：${names.join("、")}\n只提取与该主体直接相关的事实，不提取其他人物、器物或生物。即使本章只补充该主体的行为、外观、能力或事件，也要保留。`;
+    const generatedFacts = provider === "dify"
+      ? normalizeDifyL2Output(await runDifyWorkflow({
+        apiKey: config.dify.l2ApiKey,
+        target: "l2",
+        inputs: {
+          book_id: bookId,
+          index_group_key: indexGroup.group_key,
+          chapter_index: chapter.chapter_index,
+          chapter_title: chapter.title || "",
+          chapter_content: content,
+          l1_route_json: JSON.stringify(null),
+          known_subjects_json: JSON.stringify([subject]),
+          index_prompt: historicalPrompt
+        }
+      })).facts
+      : (await callOpenAIJson({
+        model,
+        reasoningEffort,
+        instructions: "你是小说 L2 历史主体回扫器，只输出符合 Schema 的 JSON。",
+        input: buildL2ChapterInput({ chapterIndex: chapter.chapter_index, title: chapter.title, content, l1Index: null, knownSubjects: [subject], indexPrompt: historicalPrompt }),
+        schema: l2ChapterFactsSchema(),
+        schemaName: "l2_historical_subject_facts"
+      })).value?.facts || [];
+    const relatedFacts = generatedFacts
+      .filter((fact) => isHistoricalRescanFactUsable(fact))
+      .filter((fact) => matchesKnownL2Subject(fact, [subject]))
+      .map((fact) => ({
+      ...fact,
+      category: MAGICAL_CREATURE_CATEGORY,
+      scope_eligible: true,
+      scope_basis: "prior_verified_subject",
+      identity_basis: "historical_subject_rescan"
+    }));
+    if (!relatedFacts.length) continue;
+    await appendL2ChapterFacts({
+      bookId,
+      indexGroupKey: indexGroup.group_key,
+      chapterIndex: chapter.chapter_index,
+      sourceHmac: chapter.content_hmac,
+      model: executionModel,
+      promptHash: indexPromptHash,
+      schemaVersion: L2_SCHEMA_VERSION,
+      facts: relatedFacts
+    });
+    result.facts += relatedFacts.length;
+    result.chapters += 1;
+    updateTask(task, {
+      progress: { ...task.progress, current: `历史回扫 ${subject.entity} · 第 ${chapter.chapter_index} 章` },
+      message: `已为主体 ${subject.entity} 补扫第 ${chapter.chapter_index} 章历史事实`
+    }, "historical_rescan");
+  }
+  return result;
+}
+
+export function expandEmbeddedMagicalCreatureFacts(facts) {
+  const values = Array.isArray(facts) ? facts : [];
+  const expanded = [...values];
+  const embeddedSubjects = ["四脚蛇", "四角蛇"];
+  for (const fact of values) {
+    const source = [fact?.fact, ...(fact?.evidence || [])].map((value) => String(value || "")).join(" ");
+    for (const subject of embeddedSubjects) {
+      if (!source.includes(subject) || String(fact?.entity || "").includes(subject)) continue;
+      const related = String(fact?.entity || "").trim();
+      const evidence = (fact?.evidence || []).filter((value) => String(value || "").includes(subject)).slice(0, 2);
+      expanded.push({
+        category: MAGICAL_CREATURE_CATEGORY,
+        entity: subject,
+        aliases: [],
+        tags: ["候选主体"],
+        related_entities: related ? [related] : [],
+        fact_type: "identity_clue",
+        fact: `当前章节出现${subject}${related ? `，并记录其与${related}发生接触` : ""}；当前证据不足以确认其属于神奇生物。`,
+        evidence: evidence.length ? evidence : [source.slice(0, 120)],
+        importance: 0.45,
+        confidence: 0.55,
+        scope_eligible: false,
+        scope_basis: "",
+        transformation_eligible: false,
+        creature_type: "",
+        original_form: "",
+        subject_key: subject,
+        identity_basis: "current_chapter"
+      });
+    }
+  }
+  return expanded;
+}
+
+export function admitL2FactsForIndexGroup(facts, indexGroup = {}, knownSubjects = []) {
+  const values = Array.isArray(facts) ? facts : [];
+  const categoryScope = Array.isArray(indexGroup.category_scope) ? indexGroup.category_scope : [];
+  if (!categoryScope.includes(MAGICAL_CREATURE_CATEGORY)) {
+    return { facts: values, rejectedCount: 0, newSubjects: [], candidateFacts: [] };
+  }
+  const known = Array.isArray(knownSubjects) ? knownSubjects : [];
+  const admitted = values
+    .filter((fact) => isEligibleMagicalCreatureFact(fact) || matchesKnownL2Subject(fact, known))
+    .map((fact) => ({
+      ...fact,
+      category: MAGICAL_CREATURE_CATEGORY,
+      scope_eligible: true,
+      scope_basis: isEligibleMagicalCreatureFact(fact) ? fact.scope_basis : "prior_verified_subject",
+      identity_basis: isEligibleMagicalCreatureFact(fact) ? "current_chapter" : "prior_verified_subject"
+    }));
+  return {
+    facts: admitted,
+    rejectedCount: values.length - admitted.length,
+    newSubjects: admitted.filter((fact) => isEligibleMagicalCreatureFact(fact) && fact.entity),
+    candidateFacts: values.filter((fact) => !isEligibleL2FactForSubject(fact, known) && isCandidateL2FactForSubject(fact))
+  };
+}
+
+function isCandidateL2FactForSubject(fact) {
+  const entity = String(fact?.entity || "").trim();
+  if (!entity || isArtifactLikeMagicalFact(fact) || isNonCreatureObjectLikeFact(fact) || isOrdinaryHumanLikeFact(fact) || isOrdinaryAnimalLikeFact(fact)) return false;
+  const factType = String(fact?.fact_type || "").trim();
+  if (factType === "identity_clue") return true;
+  const text = [fact?.fact, fact?.evidence, ...(fact?.tags || [])]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /异兽|妖|精|鬼|灵|化形|人形|灵智|通灵|大妖|水神|山神|鬼魅|阴物|祥瑞|神兽|树妖|狐妖|蛇精/.test(text);
+}
+
+function isEligibleL2FactForSubject(fact, knownSubjects) {
+  return isEligibleMagicalCreatureFact(fact) || matchesKnownL2Subject(fact, knownSubjects);
+}
+
+function isEligibleMagicalCreatureFact(fact) {
+  const basis = String(fact?.scope_basis || "").trim();
+  if (isTentativeHumanSimileFact(fact)) return false;
+  if (isArtifactLikeMagicalFact(fact) && (basis !== "explicit_transformation" || fact.transformation_eligible !== true || !hasExplicitTransformationEvidence(fact))) return false;
+  return fact?.scope_eligible === true
+    && MAGICAL_CREATURE_SCOPE_BASES.has(basis)
+    && (basis !== "explicit_transformation" || fact.transformation_eligible === true);
+}
+
+function isNonCreatureObjectLikeFact(fact) {
+  const text = [fact?.entity, ...(fact?.aliases || []), ...(fact?.tags || []), fact?.fact]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /茶壶|茶杯|槐叶|叶片|牌坊|石头|石块|矿石|胆石|材料|木料|树枝|树叶/.test(text);
+}
+
+function isOrdinaryAnimalLikeFact(fact) {
+  const text = [fact?.entity, ...(fact?.tags || []), fact?.fact]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /普通动物|普通狗|家犬|老狗|家养狗/.test(text)
+    && !/异兽|妖|灵兽|神兽|灵智|化形|神通|修为|异常血脉|超自然/.test(text);
+}
+
+function isTentativeHumanSimileFact(fact) {
+  const entity = String(fact?.entity || "").trim();
+  const text = [fact?.fact, ...(fact?.evidence || [])]
+    .map((value) => String(value || ""))
+    .join(" ");
+  return /^(青衣|白衣|红衣|黑衣|高大|年轻)?(少女|女子|少年|男子|老人|妇人|男人|女人)/.test(entity)
+    && /像|仿佛|如同|好似/.test(text)
+    && !/明确[^。；，,]{0,12}本体|真身|原文[^。；，,]{0,12}是|化形|幻化|变作/.test(text);
+}
+
+function hasExplicitTransformationEvidence(fact) {
+  const text = [fact?.fact, ...(fact?.evidence || [])]
+    .map((value) => String(value || ""))
+    .join(" ");
+  return /化为人形|幻化为人形|化作人形|变作人形|化为动物|化作动物|变作动物|以[^，。；,.;]{1,12}(人形|动物形态)出现|现出人形/.test(text);
+}
+
+function isArtifactLikeMagicalFact(fact) {
+  const text = [fact?.entity, ...(fact?.aliases || []), ...(fact?.tags || []), fact?.fact]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  return /飞剑|剑胚|剑灵|老剑条|锈剑条|铁剑|长剑|养剑葫|法宝|兵器|符箓|符纸|傀儡|神像|荷叶伞|压衣刀|斩龙台|符纸甲士|开山傀儡|卸岭甲士/.test(text);
+}
+
+function isOrdinaryHumanLikeFact(fact) {
+  const entity = String(fact?.entity || "").trim();
+  const text = [fact?.fact, fact?.evidence, ...(fact?.tags || [])]
+    .map((value) => String(value || "").toLowerCase())
+    .join(" ");
+  if (/普通人物|普通人|人物|修士|道人|剑客|铁匠|妇人|女子|少年|少女|老人|男子|男人|年轻人/.test(text)) return true;
+  return /^(年轻|高大|白衣|红衣|长春宫|帷帽少女|年轻剑客|道人|修士|老人|妇人|女子|少年|少女|男子|男人)/.test(entity);
+}
+
+export function isHistoricalRescanSubjectName(value) {
+  const name = String(value || "").trim();
+  if (!name || name.length < 2) return false;
+  return !/^(飞剑|剑|长剑|短剑|铁剑|那把剑|那柄剑|少女|女子|少年|男子|男人|女人|老人|年轻人|白衣女子|黑衣少女|帷帽少女)$/.test(name)
+    && !/^(飞剑|长剑|那把剑|那柄剑)[（(]/.test(name);
+}
+
+export function isHistoricalRescanFactUsable(fact) {
+  const text = [fact?.fact, ...(fact?.evidence || [])]
+    .map((value) => String(value || ""))
+    .join(" ");
+  return !/未直接出现|未提及|没有提及|本章正文未|仅作为.*追踪|仅作为.*候选/.test(text);
+}
+
+function matchesKnownL2Subject(fact, subjects) {
+  const values = [fact?.entity, ...(fact?.aliases || []), ...(fact?.related_entities || [])]
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  return subjects.some((subject) => {
+    const names = [subject.canonical_name, subject.subject_key, ...(subject.aliases || [])].filter(Boolean);
+    return values.some((value) => names.some((name) => value === name || value.includes(name) || name.includes(value)));
+  });
+}
+
+function findKnownL2Subjects({ bookId, indexGroupKey, chapterIndex, content, title, promptHash = "" }) {
+  const subjects = listL2Subjects({ bookId, indexGroupKey, chapterIndex, promptHash });
+  const source = `${title || ""}\n${content || ""}`;
+  return subjects.filter((subject) => {
+    const names = [subject.canonical_name, subject.subject_key, ...(subject.aliases || [])].filter(Boolean);
+    return names.some((name) => source.includes(name));
+  });
+}
+
+function buildL2IndexPromptWithSubjectMemory(indexPrompt, knownSubjects, isMagicalCreatureIndex) {
+  const sections = [indexPrompt];
+  if (isMagicalCreatureIndex) {
+    sections.push(
+      "",
+      "【候选主体保留规则】",
+      "如果本章出现稳定名称或稳定指代，且可能属于神奇生物，但当前证据不足以完成六类正式准入，可以输出最小候选事实：scope_eligible=false、scope_basis为空、fact_type=identity_clue。候选事实只用于跨章节追踪，不属于正式神奇生物事实，不得把普通人物、普通动物或明显器物仅因名称出现就大量输出为候选。"
+    );
+  }
+  if (knownSubjects.length) {
+    sections.push(
+      "",
+      "【跨章节已确认主体】",
+      "以下主体已经在更早章节完成神奇生物准入。本章如再次出现这些主体，只需提取本章事实，不要要求本章重复证明其神奇生物身份，也不要把历史准入证据写成本章证据。",
+      JSON.stringify(knownSubjects)
+    );
+  }
+  return sections.join("\n");
 }
 
 async function runAnalysisTask(task, options) {
@@ -846,11 +1235,12 @@ async function executeAnalysisTask(task, prepared) {
   const model = settings.model;
   const reasoningEffort = settings.reasoning_effort;
   const analysisProvider = config.indexing.analysisProvider;
+  const summaryProvider = analysisMode === "l2_query" ? l2QuerySummaryProvider() : analysisProvider;
   const chapterExecutionModel = analysisChapterExecutionSignature(model);
   const summaryExecutionModel = analysisSummaryExecutionSignature(model);
 
   if (analysisMode === "l2_query") {
-    await ensureAnalysisSummaryProviderReady(analysisProvider);
+    await ensureAnalysisSummaryProviderReady(summaryProvider);
   } else {
     await ensureAnalysisProviderReady(analysisProvider);
   }
@@ -1035,12 +1425,13 @@ async function executeAnalysisTask(task, prepared) {
 }
 
 async function executeL2QueryAnalysisTask(task, { analysisId, bookId, startChapter, endChapter, indexGroups = [], model, reasoningEffort, outputSchemaHash, query }) {
-  const analysisProvider = config.indexing.analysisProvider;
-  const summaryExecutionModel = analysisSummaryExecutionSignature(model);
+  const analysisProvider = l2QuerySummaryProvider();
+  const summaryExecutionModel = l2QuerySummaryExecutionSignature(model);
   const inputBudget = l2QuerySummaryInputBudget(analysisProvider);
   const indexGroupKeys = indexGroups.map((group) => group.group_key);
-  const targetContext = buildTargetContext({ userPrompt: query });
-  const collectionMode = !targetContext.subject && isL2CollectionQuery(query);
+  const queryIntent = buildL2QueryIntent(query, indexGroups);
+  const targetContext = queryIntent.targetContext;
+  const collectionMode = queryIntent.collectionMode;
 
   await waitIfPaused(task);
   updateTask(task, {
@@ -1061,6 +1452,7 @@ async function executeL2QueryAnalysisTask(task, { analysisId, bookId, startChapt
     facts: candidateFacts,
     query,
     targetContext,
+    extraTerms: queryIntent.recallTerms,
     limit: collectionMode ? L2_QUERY_COLLECTION_MAX_FACTS : L2_QUERY_MAX_FACTS,
     allowExpandedLimit: collectionMode
   });
@@ -1080,6 +1472,11 @@ async function executeL2QueryAnalysisTask(task, { analysisId, bookId, startChapt
     recalled_chapter_indexes: recalledChapters,
     matched_terms: recall.matchedTerms,
     expanded_terms: recall.expandedTerms,
+    l2_query_intent: queryIntent.intent,
+    l2_query_collection_reason: queryIntent.reason,
+    l2_query_recall_terms: queryIntent.recallTerms,
+    l2_query_summary_provider: analysisProvider,
+    l2_query_configured_analysis_provider: config.indexing.analysisProvider,
     l2_query_scored_facts: recall.scoredFacts,
     l2_query_dropped_after_recall_limit: recall.droppedAfterRecallLimit,
     l2_query_collection_mode: collectionMode,
@@ -1091,15 +1488,8 @@ async function executeL2QueryAnalysisTask(task, { analysisId, bookId, startChapt
     target_subject: targetContext.subject,
     target_candidate_facts: recall.targetCandidateFacts,
     target_selected_facts: recall.targetSelectedFacts,
-    target_recalled_facts: targetContext.subject
-      ? recall.facts.filter((fact) => factMatchesAnyEntity(fact, [targetContext.subject])).length
-      : 0,
-    target_recalled_chapters: targetContext.subject
-      ? new Set(recall.facts
-        .filter((fact) => factMatchesAnyEntity(fact, [targetContext.subject]))
-        .map((fact) => Number(fact.chapter_index || 0))
-        .filter(Boolean)).size
-      : 0,
+    target_recalled_facts: recall.targetSelectedFacts,
+    target_recalled_chapters: recall.targetSelectedChapters,
     target_recall_fallback_used: false
   };
 
@@ -1185,7 +1575,13 @@ async function executeL2QueryAnalysisTask(task, { analysisId, bookId, startChapt
     });
     return;
   }
-  const summary = await runFinalSummaryCall({
+  const summaryTrace = sourceTraceFromMaterial({
+    partKey: "l2_query.final.merge",
+    stage: "text_final_merge",
+    fieldName: "l2_query",
+    material: sourceMaterial
+  });
+  const summary = await runL2QuerySummaryCallWithFallback({
     analysisId,
     task,
     partKey: "l2_query.final.merge",
@@ -1198,13 +1594,9 @@ async function executeL2QueryAnalysisTask(task, { analysisId, bookId, startChapt
     input,
     schema: null,
     sourceChapterCount: Math.max(recall.facts.length, 1),
-    errorLabel: "Dify L2 提问汇总",
-    traceSummary: sourceTraceFromMaterial({
-      partKey: "l2_query.final.merge",
-      stage: "text_final_merge",
-      fieldName: "l2_query",
-      material: sourceMaterial
-    })
+    traceSummary: summaryTrace,
+    sourceStats,
+    fallbackMarkdown: () => buildL2QueryDirectFallbackMarkdown({ query, facts: recall.facts, targetContext })
   });
 
   assertNotCancelled(task);
@@ -1474,9 +1866,10 @@ async function runL2QuerySummaryCallWithFallback({
       sourceChapterCount,
       traceSummary,
       errorLabel: "Dify L2 提问汇总"
-    });
+  });
   } catch (error) {
-    if (!isDifyEmptyAnalysisTextError(error)) throw error;
+    const fallbackReason = l2QuerySummaryFallbackReason(error);
+    if (!fallbackReason) throw error;
     const markdown = fallbackMarkdown();
     const isMerge = partKey === "l2_query.final.merge";
     if (isMerge) {
@@ -1487,7 +1880,7 @@ async function runL2QuerySummaryCallWithFallback({
     const fallbackTrace = {
       ...(traceSummary || {}),
       fallback_used: true,
-      fallback_reason: "dify_empty_text",
+      fallback_reason: fallbackReason,
       field_material_mode: isMerge ? "l2_query_merge_local_fallback" : "l2_query_batch_local_fallback"
     };
     await saveAnalysisSummaryPart({
@@ -1501,7 +1894,7 @@ async function runL2QuerySummaryCallWithFallback({
       schemaHash: "",
       model,
       reasoningEffort,
-      inputSummary: `${stageLabel} · 输入 ${inputTextLength(input)} 字 · Dify 空输出后本地降级`,
+      inputSummary: `${stageLabel} · 输入 ${inputTextLength(input)} 字 · 汇总器不可用后本地降级`,
       traceSummary: fallbackTrace,
       result: { value: markdown, responseId: null },
       errorSummary: ""
@@ -1517,8 +1910,24 @@ async function runL2QuerySummaryCallWithFallback({
   }
 }
 
-function isDifyEmptyAnalysisTextError(error) {
-  return /Dify (分析工作流|L2 提问汇总)返回了空文本/.test(String(error?.message || ""));
+function l2QuerySummaryFallbackReason(error) {
+  const message = String(error?.message || "");
+  if (/Dify (分析工作流|L2 提问汇总)返回了空文本/.test(message)) return "dify_empty_text";
+  if (/暂无可用上游|no available upstream|model.*unavailable|模型.*不可用|模型.*暂无|upstream/i.test(message)) return "summary_model_unavailable";
+  if (/timeout|timed out|aborted|fetch failed|network|网络连接失败|unexpected end of json input/i.test(message)) return "summary_transport_unavailable";
+  return "";
+}
+
+function buildL2QueryDirectFallbackMarkdown({ query, facts, targetContext }) {
+  return buildL2QueryBatchFallbackMarkdown({
+    query,
+    targetContext,
+    chunk: {
+      batch: 1,
+      total: 1,
+      rawFacts: facts || []
+    }
+  });
 }
 
 function buildL2QueryBatchFallbackMarkdown({ query, chunk, targetContext }) {
@@ -2082,12 +2491,29 @@ function mergeFacts(facts, { chronological = false } = {}) {
   return sorted.slice(0, 1200);
 }
 
-function recallL2QueryFacts({ facts, query, targetContext = null, limit = L2_QUERY_MAX_FACTS, allowExpandedLimit = false }) {
-  const baseTerms = extractL2QueryTerms(query, targetContext?.subject);
-  const firstPass = scoreL2QueryFacts(facts, baseTerms)
+function recallL2QueryFacts({ facts, query, targetContext = null, extraTerms = [], limit = L2_QUERY_MAX_FACTS, allowExpandedLimit = false }) {
+  const baseTerms = uniqueCompact([
+    ...extractL2QueryTerms(query, targetContext?.subject),
+    ...(Array.isArray(extraTerms) ? extraTerms : [])
+  ].map(cleanupL2QueryTerm).filter(Boolean), 80);
+  const initialTargetTerms = l2QueryTargetTerms(targetContext, baseTerms);
+  const directTargetEntries = targetContext?.subject
+    ? (Array.isArray(facts) ? facts : [])
+      .filter((fact) => isStrongL2TargetMatch(fact, targetContext, initialTargetTerms))
+      .map((fact) => ({ fact, score: 1000 + Number(fact?.importance || 0), matched: initialTargetTerms.length || 1 }))
+    : [];
+  const firstPassTerms = uniqueCompact([...baseTerms, ...initialTargetTerms], 80);
+  const firstPass = scoreL2QueryFacts(facts, firstPassTerms)
     .filter((entry) => entry.score > 0)
     .sort(compareL2QueryScores);
-  const expandedTerms = expandL2QueryTerms(firstPass.slice(0, 80).map((entry) => entry.fact), baseTerms);
+  const targetSeedEntries = initialTargetTerms.length
+    ? firstPass.filter((entry) => isStrongL2TargetMatch(entry.fact, targetContext, initialTargetTerms))
+    : [];
+  const expansionSourceEntries = directTargetEntries.length ? directTargetEntries : targetSeedEntries.length ? targetSeedEntries : firstPass;
+  const expandedTerms = expandL2QueryTerms(
+    expansionSourceEntries.slice(0, 80).map((entry) => entry.fact),
+    baseTerms
+  );
   const terms = uniqueCompact([...baseTerms, ...expandedTerms], 80);
   const scored = dedupeL2QueryScoreEntries(scoreL2QueryFacts(facts, terms)
     .filter((entry) => entry.score > 0)
@@ -2096,16 +2522,30 @@ function recallL2QueryFacts({ facts, query, targetContext = null, limit = L2_QUE
   const maxFacts = allowExpandedLimit
     ? Math.max(1, requestedLimit)
     : Math.max(1, Math.min(L2_QUERY_MAX_FACTS, requestedLimit));
-  const targetTerms = l2QueryTargetTerms(targetContext, baseTerms);
-  const targetEntries = targetTerms.length
-    ? scored.filter((entry) => factMatchesAnyEntity(entry.fact, targetTerms))
+  const targetTerms = targetSeedEntries.length
+    ? l2QueryTargetTerms(targetContext, expandL2QueryTerms(
+      targetSeedEntries.slice(0, 80).map((entry) => entry.fact),
+      initialTargetTerms
+    ))
+    : l2QueryTargetTerms(targetContext, baseTerms);
+  const targetEntries = directTargetEntries.length
+    ? directTargetEntries
+    : targetTerms.length
+      ? scored.filter((entry) => isStrongL2TargetMatch(entry.fact, targetContext, targetTerms))
     : [];
-  const selectionLimit = targetEntries.length ? Math.max(maxFacts, targetEntries.length) : maxFacts;
-  const selectedEntries = selectL2QueryRecallEntries({
-    scored,
-    targetEntries,
-    limit: selectionLimit
-  });
+  const selectedEntries = targetEntries.length
+    ? selectL2QueryTargetRecallEntries({
+      scored,
+      targetEntries,
+      targetContext,
+      supportTerms: expandedTerms,
+      limit: directTargetEntries.length ? targetEntries.length : Math.max(maxFacts, targetEntries.length)
+    })
+    : selectL2QueryRecallEntries({
+      scored,
+      targetEntries,
+      limit: maxFacts
+    });
   const selected = selectedEntries.map((entry) => entry.fact)
     .sort((left, right) => Number(left.chapter_index || 0) - Number(right.chapter_index || 0)
       || Number(right.importance || 0) - Number(left.importance || 0));
@@ -2116,6 +2556,10 @@ function recallL2QueryFacts({ facts, query, targetContext = null, limit = L2_QUE
     scoredFacts: scored.length,
     targetCandidateFacts: targetEntries.length,
     targetSelectedFacts: selectedEntries.filter((entry) => targetEntries.includes(entry)).length,
+    targetSelectedChapters: new Set(selectedEntries
+      .filter((entry) => targetEntries.includes(entry))
+      .map((entry) => Number(entry?.fact?.chapter_index || 0))
+      .filter(Boolean)).size,
     droppedAfterRecallLimit: Math.max(0, scored.length - selectedEntries.length)
   };
 }
@@ -2168,6 +2612,25 @@ function selectL2QueryRecallEntries({ scored, targetEntries, limit }) {
   for (const entry of targetSelection) addEntry(entry);
   for (const entry of scored || []) addEntry(entry);
   return selected;
+}
+
+function selectL2QueryTargetRecallEntries({ scored, targetEntries, targetContext = null, supportTerms = [], limit }) {
+  const targetSelection = selectCoveragePreservingL2QueryEntries(targetEntries, Math.min(limit, targetEntries.length));
+  const ownerTerms = targetOwnerTerms(targetContext);
+  if (ownerTerms.length) return targetSelection;
+  const supportEntries = (scored || []).filter((entry) => {
+    if (targetEntries.includes(entry)) return false;
+    const haystack = l2QueryFactSearchText(entry.fact);
+    const supportMatched = supportTerms.some((term) => haystack.includes(normalizeRouteToken(term)));
+    if (!supportMatched) return false;
+    return true;
+  });
+  const supportLimit = Math.min(
+    Math.max(0, limit - targetSelection.length),
+    Math.max(8, Math.min(48, targetEntries.length * 2))
+  );
+  const supportSelection = selectCoveragePreservingL2QueryEntries(supportEntries, supportLimit);
+  return [...targetSelection, ...supportSelection];
 }
 
 function selectCoveragePreservingL2QueryEntries(entries, limit) {
@@ -2242,6 +2705,59 @@ function l2QueryTargetTerms(targetContext, baseTerms = []) {
   ], 12);
 }
 
+function targetOwnerTerms(targetContext) {
+  const possessive = splitPossessiveTargetSubject(targetContext?.subject || "");
+  if (!possessive?.owner) return [];
+  return uniqueCompact([
+    possessive.owner,
+    ...l2QuerySubTerms(possessive.owner)
+  ].map(cleanupL2QueryTerm).filter(Boolean), 6);
+}
+
+function targetDescriptorTerms(targetContext) {
+  const aliases = Array.isArray(targetContext?.aliases) ? targetContext.aliases : [];
+  const possessive = splitPossessiveTargetSubject(targetContext?.subject || "");
+  const object = possessive?.object || "";
+  const descriptors = [...aliases];
+  if (object) {
+    descriptors.push(object);
+    const suffix = object.match(/(法袍|飞剑|本命飞剑|本命物|佩剑|长剑|短剑|重剑|古剑|剑胚|剑鞘|剑匣|法宝|宝甲|甲胄|道袍|衣袍|长袍)$/);
+    if (suffix?.[1] && normalizeRouteToken(object) === normalizeRouteToken(suffix[1])) descriptors.push(suffix[1]);
+  }
+  return uniqueCompact(descriptors.map(cleanupL2QueryTerm).filter(Boolean), 12);
+}
+
+function isStrongL2TargetMatch(fact, targetContext, targetTerms = []) {
+  if (!fact || !targetContext?.subject) return false;
+  const ownerTerms = targetOwnerTerms(targetContext);
+  const descriptorTerms = targetDescriptorTerms(targetContext);
+  if (ownerTerms.length && descriptorTerms.length) {
+    if (factMatchesAnyEntity(fact, [targetContext.subject])) return true;
+    const haystack = l2QueryFactSearchText(fact);
+    const ownerMatched = ownerTerms.every((term) => haystack.includes(normalizeRouteToken(term)));
+    const descriptorMatched = descriptorTerms.some((term) => haystack.includes(normalizeRouteToken(term)));
+    return ownerMatched && descriptorMatched;
+  }
+  const explicitAliases = uniqueCompact([
+    targetContext.subject,
+    ...(Array.isArray(targetContext?.aliases) ? targetContext.aliases : [])
+  ].map(cleanupL2QueryTerm).filter(Boolean), 8);
+  if (explicitAliases.length && factMatchesAnyStructuredTargetField(fact, explicitAliases)) return true;
+  if (targetTerms.length) return factMatchesAnyStructuredTargetField(fact, targetTerms);
+  return false;
+}
+
+function factMatchesAnyStructuredTargetField(fact, terms = []) {
+  const fields = [
+    fact?.entity,
+    ...(Array.isArray(fact?.aliases) ? fact.aliases : []),
+    ...(Array.isArray(fact?.tags) ? fact.tags : []),
+    ...(Array.isArray(fact?.related_entities) ? fact.related_entities : [])
+  ].map(normalizeRouteToken).filter(Boolean);
+  const normalizedTerms = uniqueCompact((terms || []).map(normalizeRouteToken).filter(Boolean), 16);
+  return normalizedTerms.some((term) => fields.some((field) => field === term || (term.length >= 3 && field.includes(term))));
+}
+
 function isLikelyL2TargetAliasTerm(value) {
   const text = normalizeRouteToken(value);
   if (!text || text.length < 2 || text.length > 12) return false;
@@ -2297,6 +2813,90 @@ function dedupeFactsById(facts) {
   return output;
 }
 
+function buildL2QueryIntent(query, indexGroups = []) {
+  const reason = l2QueryCollectionReason(query, indexGroups);
+  const collectionMode = Boolean(reason);
+  const targetContext = collectionMode
+    ? { subject: "", aliases: [], source: "collection" }
+    : buildTargetContext({ userPrompt: query });
+  const recallTerms = buildL2QueryIntentRecallTerms(query, indexGroups, { collectionMode });
+  return {
+    intent: collectionMode ? "collection" : targetContext.subject ? "target" : "query",
+    collectionMode,
+    targetContext,
+    recallTerms,
+    reason
+  };
+}
+
+function l2QueryCollectionReason(query, indexGroups = []) {
+  const text = normalizeRouteToken(query);
+  if (!text || isExplicitSingleTargetL2Query(text)) return "";
+  const contextText = normalizeRouteToken([
+    query,
+    ...(indexGroups || []).flatMap((group) => [
+      group?.name,
+      group?.description,
+      group?.l2_index_prompt,
+      ...(Array.isArray(group?.category_scope) ? group.category_scope : []),
+      ...(Array.isArray(group?.trigger_keywords) ? group.trigger_keywords : [])
+    ])
+  ].filter(Boolean).join(" "));
+  const hits = [];
+  if (/提取|整理|汇总|列出|输出|清单|列表/.test(text)) hits.push("清单");
+  if (/排名|排行|top\s*\d+|前\s*\d+|取前|取\d+|前三|前五|前十|最重要|重要程度|最强/.test(text)) hits.push("排行");
+  if (/最强/.test(text)) hits.push("最强");
+  if (/每个|每一|各个|各境|分境界|分层|逐境界/.test(text)) hits.push("分组");
+  if (/最强人物|人物境界|境界排名/.test(text)) hits.push("修炼体系排行");
+  const asksForCollection = hits.length > 0;
+  const asksForManyItems = /所有|全部|多把|一批|前\s*\d+|top\s*\d+|取前|取\d+|前三|前五|前十|清单|列表|排名|排行|每个|每一|各个|各境|分境界|逐境界|最强人物|人物境界/.test(text);
+  const hasCollectionSubject = /飞剑|剑胚|剑匣|剑气|剑意|武器|法宝|道具|人物|角色|地点|势力|武夫|纯粹武夫|武道|修炼|境界|体系/.test(contextText);
+  return asksForCollection && asksForManyItems && hasCollectionSubject
+    ? uniqueCompact(hits, 4).join(" / ")
+    : "";
+}
+
+function isExplicitSingleTargetL2Query(text) {
+  const hasSpecificTarget = /武夫第[一二三四五六七八九十\d]+境|第[一二三四五六七八九十\d]+境|远游境|山巅境|止境|气盛|归真|神到/.test(text);
+  if (!hasSpecificTarget) return false;
+  const hasRankingOrGrouping = /每个|每一|各个|各境|分境界|逐境界|排名|排行|top\s*\d+|前\s*\d+|取前|取\d+|前三|前五|最强/.test(text);
+  return !hasRankingOrGrouping && /总结|查询|查找|关于|全部|全部事实|相关事实/.test(text);
+}
+
+function buildL2QueryIntentRecallTerms(query, indexGroups = [], { collectionMode = false } = {}) {
+  const contextText = [
+    query,
+    ...(indexGroups || []).flatMap((group) => [
+      group?.name,
+      group?.description,
+      group?.l2_index_prompt
+    ])
+  ].filter(Boolean).join(" ");
+  const terms = [];
+  if (/武夫|纯粹武夫|武道|修炼|境界|体系|山巅境|远游境|止境/.test(contextText)) {
+    terms.push(
+      "cultivation",
+      "武夫",
+      "纯粹武夫",
+      "武道",
+      "境界",
+      "境界体系",
+      "修炼",
+      "山巅境",
+      "远游境",
+      "止境",
+      "十境",
+      "九境",
+      "八境",
+      "七境"
+    );
+  }
+  if (collectionMode && /人物|角色|最强|前三|排名|排行|代表/.test(contextText)) {
+    terms.push("代表人物", "人物");
+  }
+  return uniqueCompact(terms.map(cleanupL2QueryTerm).filter(Boolean), 32);
+}
+
 function extractL2QueryTerms(query, target = "") {
   const text = String(query || "");
   const terms = [];
@@ -2319,7 +2919,8 @@ function cleanupL2QueryTerm(value) {
   text = text.replace(/(内容|结果|相关事实|事实清单|时间线|设定集|对应章节|输出要求|模式)$/g, "");
   text = text.trim();
   if (!text || text.length < 2 || text.length > 18) return "";
-  if (/^(剑来|l2|json|markdown|事实|章节|内容|整理|总结|查询|查找|时间线|外形演化|输出)$|^\d+$/.test(text.toLowerCase())) return "";
+  if (/^(剑来|l2|json|markdown|事实|章节|内容|整理|总结|查询|查找|时间线|外形演化|输出|需要有人名|有人名|人名|人物介绍|人物简介|介绍|为什么重要)$|^\d+$/.test(text.toLowerCase())) return "";
+  if (/^(最强人物|人物境界|武夫每个境界|每个境界|取前三|前三)$/.test(text)) return "";
   return text;
 }
 
@@ -2328,11 +2929,11 @@ function l2QuerySubTerms(value) {
   const terms = new Set();
   for (const match of text.matchAll(/[\u4e00-\u9fa5A-Za-z0-9]{2,8}/g)) {
     const word = match[0];
-    if (/初一|十五|小酆都|银锭|白虹|剑胚|飞剑|外形|形态|炼化|来历|战绩|神通|持有|名字|别名|称呼/.test(word)) {
+    if (/初一|十五|小酆都|银锭|白虹|剑胚|飞剑|外形|形态|炼化|来历|战绩|神通|持有|名字|别名|称呼|武夫|武道|境界|修炼|山巅境|远游境|止境|十境|九境|八境|七境/.test(word)) {
       terms.add(word);
     }
   }
-  for (const keyword of ["初一", "十五", "小酆都", "银锭", "小银锭", "白虹", "小小白虹", "剑胚", "飞剑", "外形", "形态"]) {
+  for (const keyword of ["初一", "十五", "小酆都", "银锭", "小银锭", "白虹", "小小白虹", "剑胚", "飞剑", "外形", "形态", "武夫", "纯粹武夫", "武道", "境界", "境界体系", "修炼", "山巅境", "远游境", "止境", "十境", "九境", "八境", "七境", "代表人物"]) {
     if (text.includes(keyword)) terms.add(keyword);
   }
   return [...terms];
@@ -3028,7 +3629,7 @@ function buildTargetContext({ userPrompt, schema, sourceMaterial } = {}) {
     if (subject) {
       return {
         subject,
-        aliases: [subject],
+        aliases: buildTargetAliases(subject),
         source: candidate === template?.target_item ? "template.target_item" : "prompt"
       };
     }
@@ -3037,9 +3638,52 @@ function buildTargetContext({ userPrompt, schema, sourceMaterial } = {}) {
   return { subject: "", aliases: [], source: schemaFields.length ? "schema" : "" };
 }
 
+function buildTargetAliases(subject) {
+  const text = String(subject || "").trim();
+  if (!text) return [];
+  const aliases = [text];
+  aliases.push(...splitTargetAliasText(text));
+  const possessive = splitPossessiveTargetSubject(text);
+  if (possessive?.object) {
+    aliases.push(possessive.object);
+    aliases.push(...splitTargetAliasText(possessive.object));
+  }
+  return uniqueCompact(aliases.map(normalizeTargetSubject).filter(Boolean), 8);
+}
+
+function splitTargetAliasText(value) {
+  const text = String(value || "").trim();
+  if (!text) return [];
+  const normalized = text
+    .replace(/（\s*(?:亦称|又称|别称|也称|简称)\s*([^）]{1,32})）/g, "/$1")
+    .replace(/\(\s*(?:亦称|又称|别称|也称|简称)\s*([^)]{1,32})\)/g, "/$1");
+  return normalized
+    .split(/[/／|｜、，,；;]/)
+    .map((entry) => entry.replace(/^(?:亦称|又称|别称|也称|简称)/, "").trim())
+    .filter((entry) => entry && entry !== text);
+}
+
+function splitPossessiveTargetSubject(value) {
+  const text = String(value || "").trim();
+  const index = text.lastIndexOf("的");
+  if (index <= 0 || index >= text.length - 1) return null;
+  const owner = text.slice(0, index).trim();
+  const object = text.slice(index + 1).trim();
+  if (!owner || !object) return null;
+  return { owner, object };
+}
+
 function inferL2QueryTargetSubject(prompt) {
   const text = String(prompt || "");
-  const patternMatch = text.match(/(?:查询|查找|关于|围绕|聚焦|只看)\s*([^\s，。；;、（）()]{2,12}?)(?:相关|这把|这件|的|事实|内容|外形|形态|时间线)/);
+  if (isL2CollectionQuery(text)) return "";
+  const quotedCandidates = [...text.matchAll(/[《“「『‘]([^》”」』’]{2,40})[》”」』’]/g)]
+    .map((match) => normalizeTargetSubject(match[1]))
+    .filter(Boolean);
+  const slashQuoted = quotedCandidates.find((candidate) => splitTargetAliasText(candidate).length >= 2);
+  if (slashQuoted) return slashQuoted;
+  const quoted = quotedCandidates.find((candidate) => isLikelyL2TargetSubjectTerm(candidate));
+  if (quoted) return quoted;
+  const patternMatch = text.match(/(?:查询|查找|关于|围绕|聚焦|只看|输出|整理|总结)\s*([^\s，。；;、（）()]{2,12}?)(?:相关|这把|这件|的|事实|内容|外形|形态|时间线|形象|外貌|关系)/);
   const candidates = [
     patternMatch?.[1],
     ...extractL2QueryTerms(text).filter(isLikelyL2TargetSubjectTerm)
@@ -3052,18 +3696,13 @@ function inferL2QueryTargetSubject(prompt) {
 }
 
 function isL2CollectionQuery(prompt) {
-  const text = normalizeRouteToken(prompt);
-  if (!text) return false;
-  const asksForCollection = /提取|整理|汇总|列出|输出|清单|列表|排名|排行|top\s*\d+|前\s*\d+|最重要|重要程度/.test(text);
-  const asksForManyItems = /所有|全部|多把|一批|前\s*\d+|top\s*\d+|清单|列表|排名|排行/.test(text);
-  const hasCollectionSubject = /飞剑|剑胚|剑匣|剑气|剑意|武器|法宝|道具|人物|角色|地点|势力/.test(text);
-  return asksForCollection && asksForManyItems && hasCollectionSubject;
+  return Boolean(l2QueryCollectionReason(prompt));
 }
 
 function isLikelyL2TargetSubjectTerm(value) {
   const text = normalizeRouteToken(value);
   if (!text || text.length < 2 || text.length > 12) return false;
-  if (/提取|输出|总结|整理|包含|涉及|所有|清单|列表|名称|持有者|重要程度|前\d+|多少/.test(text)) return false;
+  if (/提取|输出|总结|整理|包含|涉及|所有|清单|列表|名称|持有者|重要程度|前\d+|多少|最强|每个|各个|分境界|取前三|前三|人物境界|人物介绍|需要有人名/.test(text)) return false;
   if (/^(把|个|条|项|类)/.test(text)) return false;
   if (/以及|对应|章节|事实|内容|结果|要求|时间线|演化|外形|形态|来源|能力|战绩|设定|信息/.test(text)) return false;
   if (/^(l2|json|markdown|剑来|飞剑|本命飞剑|剑类|道具|重要道具|陈平安|章节)$/.test(text)) return false;
@@ -3077,10 +3716,24 @@ function normalizeTargetSubject(value) {
     .replace(/设定集|资料集|分析|专题|topic|target/gi, "")
     .replace(/^飞剑[·:：\s]*/, "")
     .replace(/[（）()[\]【】]/g, " ")
+    .replace(/[《》“”「」『』‘’"']/g, " ")
     .trim();
+  text = stripL2TargetDescriptorSuffix(text);
   if (!text || isTemplatePlaceholderText(text) || isReservedTemplateToken(text)) return "";
   if (text.length > 24 && /初一/.test(text)) return "初一";
   return text.slice(0, 24);
+}
+
+function stripL2TargetDescriptorSuffix(value) {
+  let text = String(value || "").trim();
+  for (let index = 0; index < 3; index += 1) {
+    const next = text
+      .replace(/(?:的)?(?:人物)?(?:形象特征|形象特点|形象描写|形象|外貌特征|外貌描写|外貌|外形特征|外形描写|外形|关系网|人物关系|关系|介绍|简介)$/g, "")
+      .trim();
+    if (next === text) break;
+    text = next;
+  }
+  return text;
 }
 
 function mergeEntityQueries(groups) {
@@ -5927,7 +6580,7 @@ export function getL2IndexCoverageForBook({ bookId, indexGroupKey = "base", star
   const settings = getPromptSettings();
   const indexGroup = getBookIndexGroup(bookId, indexGroupKey);
   if (!indexGroup || !indexGroup.enabled) {
-    const error = new Error("索引组不存在或已禁用。");
+    const error = new Error(`索引组不存在或已禁用：${indexGroupKey || "base"}`);
     error.status = 404;
     throw error;
   }
