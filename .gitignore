@@ -29,6 +29,7 @@ data-preview/
 !.vscode/extensions.json
 .idea
 .superpowers/
+.worktrees/
 .DS_Store
 *.suo
 *.ntvs*
