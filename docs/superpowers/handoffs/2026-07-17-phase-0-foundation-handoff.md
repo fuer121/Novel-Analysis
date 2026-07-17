@@ -118,11 +118,14 @@ c9623b6 fix: validate CI repository diffs
 - `npm audit` reports 5 known findings: 1 low, 1 moderate, 1 high, and 2 critical; advisory remediation is separate maintenance and these findings are not fixed by Phase 0
 - GitHub Actions use floating `v4` tags; full SHA pinning is separate supply-chain hardening
 
-## Phase 1 Inputs
+## Available Inputs
 
 - Stable contracts and domain exports listed above
 - Established job status transition semantics
 - Deterministic workflow manifest and five workflow hashes listed above
+
+## Phase 1 Scope To Plan
+
 - PostgreSQL schema and migrations
 - Feishu authentication and RBAC
 - Jobs, steps, attempts, events, and outbox persistence
