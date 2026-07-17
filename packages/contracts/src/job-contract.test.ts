@@ -52,6 +52,31 @@ describe("job contracts", () => {
     })).toThrow();
   });
 
+  it("rejects an empty explicit chapter selection", () => {
+    expect(() => BookJobScopeSchema.parse({
+      bookId: "215243",
+      chapterIndexes: [],
+    })).toThrow();
+  });
+
+  it("rejects a misspelled scope field", () => {
+    expect(() => BookJobScopeSchema.parse({
+      bookId: "215243",
+      startChaper: 1,
+    })).toThrow();
+  });
+
+  it("rejects migration fields mixed into a book scope", () => {
+    expect(() => PublicJobSchema.parse({
+      ...validJob,
+      scope: {
+        bookId: "215243",
+        migrationId: "482723a2-92bd-47aa-aa7b-254350e92831",
+        sourceLabel: "正式 SQLite 快照",
+      },
+    })).toThrow();
+  });
+
   it("rejects a book job without a book id", () => {
     expect(() => PublicJobSchema.parse({
       ...validJob,

@@ -39,11 +39,11 @@ export type JobType = z.infer<typeof JobTypeSchema>;
 export type JobStatus = z.infer<typeof JobStatusSchema>;
 export type JobEventType = z.infer<typeof JobEventTypeSchema>;
 
-export const BookJobScopeSchema = z.object({
+export const BookJobScopeSchema = z.strictObject({
   bookId: z.string().trim().min(1),
   startChapter: z.number().int().positive().optional(),
   endChapter: z.number().int().positive().optional(),
-  chapterIndexes: z.array(z.number().int().positive()).optional(),
+  chapterIndexes: z.array(z.number().int().positive()).min(1).optional(),
   indexGroupKeys: z.array(z.string().trim().min(1)).min(1).optional(),
   mode: z.enum(["all", "missing", "retry_failed"]).optional(),
 }).superRefine((scope, context) => {
@@ -60,7 +60,7 @@ export const BookJobScopeSchema = z.object({
   }
 });
 
-export const MigrationJobScopeSchema = z.object({
+export const MigrationJobScopeSchema = z.strictObject({
   migrationId: z.string().uuid(),
   sourceLabel: z.string().trim().min(1),
 });
