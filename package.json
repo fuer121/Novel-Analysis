@@ -22,7 +22,7 @@
     "preview": "vite preview --host 127.0.0.1",
     "dify:manifest": "node scripts/generate-dify-workflow-manifest.mjs",
     "dify:manifest:check": "node --test test/dify-workflow-manifest.test.js",
-    "test": "node --test test/*.test.js",
+    "test": "npm run test:legacy && npm run test:contracts && npm run test:new",
     "test:contracts": "node --test test/contracts/*.test.js",
     "test:legacy": "node --test test/service.test.js",
     "test:new": "vitest run",
@@ -30,7 +30,8 @@
     "verify:new": "npm run typecheck:new && npm run test:contracts && npm run test:new",
     "lint:legacy": "eslint src server test/service.test.js",
     "build:legacy": "vite build",
-    "verify:legacy": "npm run test:legacy && npm run lint:legacy && npm run build:legacy"
+    "verify:legacy": "npm run test:legacy && npm run lint:legacy && npm run build:legacy",
+    "verify": "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check"
   },
   "dependencies": {
     "concurrently": "^9.2.1",
@@ -50,7 +51,8 @@
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
     "globals": "^17.6.0",
-    "typescript": "^7.0.2",
+    "typescript": "6.0.3",
+    "typescript-eslint": "^8.64.0",
     "vite": "^8.0.12",
     "vitest": "^4.1.10"
   }
