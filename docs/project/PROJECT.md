@@ -37,9 +37,9 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 
 ## Active Work
 
-| 工作项 | Scope | Status | Depends | Next action |
-| --- | --- | --- | --- | --- |
-| PHASE1-PLAN | Phase 1 detailed implementation plan | planned | governance source merged | write and review plan |
+| Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | none | be49f4ccd312a269ee4c7419c6d9d08407df2c21 | none | planned | governance source merged | none | write and review plan |
 
 ## Effective Decisions
 

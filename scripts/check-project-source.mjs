@@ -35,7 +35,33 @@ const CHECKPOINT_STATUSES = new Set([
   "rejected",
   "superseded",
 ]);
+const DECISION_STATUSES = new Set(["accepted", "rejected", "superseded"]);
+const ACTIVE_WORK_COLUMNS = [
+  "Task",
+  "Phase",
+  "Scope",
+  "Owner",
+  "Branch",
+  "Base",
+  "Head",
+  "Status",
+  "Depends On",
+  "Checkpoint",
+  "Next Action",
+];
+const ACTIVE_WORK_STATUSES = new Set([
+  "planned",
+  "ready",
+  "in_progress",
+  "review",
+  "accepted",
+  "merged",
+  "blocked",
+  "cancelled",
+  "superseded",
+]);
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
+const RECORD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 function parseFrontMatter(content, label) {
   const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
@@ -136,48 +162,188 @@ async function validateLocalLinks(content, projectPath, root, errors) {
   }
 }
 
-async function readCheckpoints(root, errors) {
-  const checkpointDirectory = path.join(root, "docs/project/checkpoints");
+function parseMarkdownRow(line) {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) {
+    return null;
+  }
+  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim());
+}
+
+function validateActiveWork(content, errors) {
+  const sectionMatch = content.match(/^## Active Work\s*$([\s\S]*?)(?=^##\s|(?![\s\S]))/m);
+  if (!sectionMatch) {
+    return;
+  }
+
+  const lines = sectionMatch[1].split(/\r?\n/);
+  const tableStart = lines.findIndex((line) => line.trim().startsWith("|"));
+  const header = tableStart === -1 ? null : parseMarkdownRow(lines[tableStart]);
+  const separator = tableStart === -1 ? null : parseMarkdownRow(lines[tableStart + 1] || "");
+  if (!header || !separator) {
+    errors.push("PROJECT.md Active Work must contain a Markdown table");
+    return;
+  }
+
+  const missingColumns = ACTIVE_WORK_COLUMNS.filter((column) => !header.includes(column));
+  if (header.length !== ACTIVE_WORK_COLUMNS.length
+    || header.some((column, index) => column !== ACTIVE_WORK_COLUMNS[index])) {
+    errors.push(
+      `PROJECT.md Active Work columns must be exactly: ${ACTIVE_WORK_COLUMNS.join(", ")}`
+      + (missingColumns.length > 0 ? `; missing: ${missingColumns.join(", ")}` : ""),
+    );
+  }
+  if (separator.length !== header.length
+    || separator.some((cell) => !/^:?-{3,}:?$/.test(cell))) {
+    errors.push("PROJECT.md Active Work has an invalid table separator");
+  }
+
+  const rows = [];
+  for (const line of lines.slice(tableStart + 2)) {
+    const row = parseMarkdownRow(line);
+    if (!row) {
+      if (rows.length > 0) break;
+      continue;
+    }
+    rows.push(row);
+  }
+  if (rows.length === 0) {
+    errors.push("PROJECT.md Active Work must contain at least one row");
+    return;
+  }
+
+  for (const [rowIndex, row] of rows.entries()) {
+    const rowLabel = `PROJECT.md Active Work row ${rowIndex + 1}`;
+    if (row.length !== header.length) {
+      errors.push(`${rowLabel} has ${row.length} cells; expected ${header.length}`);
+      continue;
+    }
+    for (const [cellIndex, value] of row.entries()) {
+      if (!value) {
+        errors.push(`${rowLabel} has an empty ${header[cellIndex] || `column ${cellIndex + 1}`} cell`);
+      }
+    }
+    const values = Object.fromEntries(header.map((column, index) => [column, row[index]]));
+    if (!ACTIVE_WORK_STATUSES.has(values.Status)) {
+      errors.push(`${rowLabel} has invalid status: ${values.Status || "missing"}`);
+    }
+    for (const field of ["Base", "Head"]) {
+      if (values[field] !== "none" && !COMMIT_PATTERN.test(values[field] || "")) {
+        errors.push(`${rowLabel} ${field.toLowerCase()} must be none or a 40-character lowercase commit SHA`);
+      }
+    }
+  }
+}
+
+async function readGovernanceRecords(root, directoryName, config, errors) {
+  const recordDirectory = path.join(root, `docs/project/${directoryName}`);
   let entries;
   try {
-    entries = await fs.readdir(checkpointDirectory, { withFileTypes: true });
+    entries = await fs.readdir(recordDirectory, { withFileTypes: true });
   } catch (error) {
     if (error.code === "ENOENT") {
       return new Map();
     }
-    errors.push(`Could not read checkpoint directory: ${error.message}`);
+    errors.push(`Could not read ${config.type} directory: ${error.message}`);
     return new Map();
   }
 
-  const checkpoints = new Map();
+  const records = new Map();
   const markdownFiles = entries.filter((entry) => entry.isFile() && entry.name.endsWith(".md"));
   for (const entry of markdownFiles) {
-    const checkpointPath = path.join(checkpointDirectory, entry.name);
+    const recordPath = path.join(recordDirectory, entry.name);
+    let content;
     let fields;
     try {
-      const content = await fs.readFile(checkpointPath, "utf8");
+      content = await fs.readFile(recordPath, "utf8");
       fields = parseFrontMatter(content, entry.name);
     } catch (error) {
       errors.push(error.message);
       continue;
     }
 
-    if (!CHECKPOINT_STATUSES.has(fields.status)) {
-      errors.push(`${entry.name} has invalid checkpoint status: ${fields.status || "missing"}`);
+    for (const field of config.requiredFields) {
+      if (!fields[field]) {
+        errors.push(`${entry.name} is missing required field ${field}`);
+      }
     }
-    if (!fields.checkpoint_id) {
-      errors.push(`${entry.name} is missing required field checkpoint_id`);
-      continue;
+    if (!config.statuses.has(fields.status)) {
+      errors.push(`${entry.name} has invalid ${config.type} status: ${fields.status || "missing"}`);
     }
-    if (checkpoints.has(fields.checkpoint_id)) {
-      errors.push(`Duplicate checkpoint_id: ${fields.checkpoint_id}`);
-      continue;
+    if (fields.recorded_at && Number.isNaN(Date.parse(fields.recorded_at))) {
+      errors.push(`${entry.name} has invalid recorded_at: ${fields.recorded_at}`);
+    }
+    for (const field of config.commitFields || []) {
+      if (fields[field] && !COMMIT_PATTERN.test(fields[field])) {
+        errors.push(`${entry.name} ${field} must be 40 lowercase hexadecimal characters`);
+      }
+    }
+    if (fields.supersedes && fields.supersedes !== "none"
+      && !RECORD_ID_PATTERN.test(fields.supersedes)) {
+      errors.push(`${entry.name} has invalid supersedes ID: ${fields.supersedes}`);
+    }
+    if (fields.status === "accepted" && config.acceptedSections) {
+      const headings = new Set(
+        [...content.matchAll(/^##\s+(.+?)\s*$/gm)].map((match) => match[1]),
+      );
+      for (const section of config.acceptedSections) {
+        if (!headings.has(section)) {
+          errors.push(`${entry.name} accepted ${config.type} is missing required section: ${section}`);
+        }
+      }
     }
 
-    checkpoints.set(fields.checkpoint_id, fields);
+    const recordId = fields[config.idField];
+    if (!recordId) {
+      continue;
+    }
+    if (records.has(recordId)) {
+      errors.push(`Duplicate ${config.idField}: ${recordId}`);
+      continue;
+    }
+    records.set(recordId, { fields, content, name: entry.name });
   }
 
-  return checkpoints;
+  return records;
+}
+
+function validateSupersedes(records, type, errors) {
+  const incoming = new Set();
+  for (const [recordId, record] of records) {
+    const target = record.fields.supersedes;
+    if (!target || target === "none") continue;
+    if (target === recordId) {
+      errors.push(`${record.name} supersedes self: ${recordId}`);
+    } else if (!records.has(target)) {
+      errors.push(`${record.name} supersedes missing ${type}: ${target}`);
+    } else {
+      incoming.add(target);
+    }
+  }
+
+  const visited = new Set();
+  const active = new Set();
+  function visit(recordId) {
+    if (active.has(recordId)) {
+      errors.push(`${type} supersedes cycle detected at ${recordId}`);
+      return;
+    }
+    if (visited.has(recordId)) return;
+    visited.add(recordId);
+    active.add(recordId);
+    const target = records.get(recordId)?.fields.supersedes;
+    if (target && target !== "none" && records.has(target) && target !== recordId) {
+      visit(target);
+    }
+    active.delete(recordId);
+  }
+  for (const recordId of records.keys()) visit(recordId);
+
+  for (const [recordId, record] of records) {
+    if (record.fields.status === "superseded" && !incoming.has(recordId)) {
+      errors.push(`${record.name} is superseded but is not targeted by another record's supersedes`);
+    }
+  }
 }
 
 function validateGitBaseline(root, commit, errors) {
@@ -195,7 +361,67 @@ function validateGitBaseline(root, commit, errors) {
   }
 }
 
-export async function validateProjectSource(root, { checkGit = true } = {}) {
+async function validateAcceptedRecordImmutability(root, baseRef, errors) {
+  if (!baseRef || /^0{40}$/.test(baseRef)) {
+    return;
+  }
+  if (!COMMIT_PATTERN.test(baseRef)) {
+    errors.push(`Project source baseRef must be a 40-character lowercase commit SHA: ${baseRef}`);
+    return;
+  }
+  try {
+    execFileSync("git", ["cat-file", "-e", `${baseRef}^{commit}`], {
+      cwd: root,
+      stdio: "ignore",
+    });
+  } catch {
+    errors.push(`Project source baseRef commit does not exist: ${baseRef}`);
+    return;
+  }
+
+  let output;
+  try {
+    output = execFileSync(
+      "git",
+      ["ls-tree", "-r", "--name-only", baseRef, "--", "docs/project/checkpoints", "docs/project/decisions"],
+      { cwd: root, encoding: "utf8" },
+    );
+  } catch (error) {
+    errors.push(`Could not inspect project source baseRef: ${error.message}`);
+    return;
+  }
+
+  const governanceDirectories = new Set([
+    "docs/project/checkpoints",
+    "docs/project/decisions",
+  ]);
+  const recordPaths = output.split(/\r?\n/).filter((recordPath) => (
+    recordPath.endsWith(".md") && governanceDirectories.has(path.posix.dirname(recordPath))
+  ));
+  for (const recordPath of recordPaths) {
+    let baseContent;
+    try {
+      baseContent = execFileSync("git", ["show", `${baseRef}:${recordPath}`], { cwd: root });
+      const baseFields = parseFrontMatter(baseContent.toString("utf8"), `${recordPath} at ${baseRef}`);
+      if (baseFields.status !== "accepted") continue;
+      const currentContent = await fs.readFile(path.join(root, recordPath));
+      if (!baseContent.equals(currentContent)) {
+        errors.push(`accepted governance record is immutable: ${recordPath}`);
+      }
+    } catch (error) {
+      if (error.code === "ENOENT") {
+        errors.push(`accepted governance record is immutable: ${recordPath} was deleted`);
+      } else {
+        errors.push(`Could not compare governance record ${recordPath}: ${error.message}`);
+      }
+    }
+  }
+}
+
+export async function validateProjectSource(
+  root,
+  { checkGit = true, baseRef = process.env.PROJECT_SOURCE_BASE_SHA || null } = {},
+) {
   const projectPath = path.join(root, "docs/project/PROJECT.md");
   let content;
   let project;
@@ -230,9 +456,33 @@ export async function validateProjectSource(root, { checkGit = true } = {}) {
     }
   }
 
+  validateActiveWork(content, errors);
   await validateLocalLinks(content, projectPath, root, errors);
-  const checkpoints = await readCheckpoints(root, errors);
-  const lastCheckpoint = checkpoints.get(project.last_checkpoint);
+  const checkpoints = await readGovernanceRecords(root, "checkpoints", {
+    type: "checkpoint",
+    idField: "checkpoint_id",
+    requiredFields: [
+      "checkpoint_id",
+      "task_id",
+      "status",
+      "recorded_at",
+      "base_commit",
+      "head_commit",
+      "supersedes",
+    ],
+    statuses: CHECKPOINT_STATUSES,
+    commitFields: ["base_commit", "head_commit"],
+    acceptedSections: ["Scope", "Evidence", "Accepted Result"],
+  }, errors);
+  const decisions = await readGovernanceRecords(root, "decisions", {
+    type: "decision",
+    idField: "decision_id",
+    requiredFields: ["decision_id", "status", "recorded_at", "confidence", "scope", "supersedes"],
+    statuses: DECISION_STATUSES,
+  }, errors);
+  validateSupersedes(checkpoints, "checkpoint", errors);
+  validateSupersedes(decisions, "decision", errors);
+  const lastCheckpoint = checkpoints.get(project.last_checkpoint)?.fields;
   if (!lastCheckpoint) {
     errors.push(`PROJECT.md last_checkpoint does not exist: ${project.last_checkpoint || "missing"}`);
   } else if (lastCheckpoint.status !== "accepted") {
@@ -243,6 +493,9 @@ export async function validateProjectSource(root, { checkGit = true } = {}) {
 
   if (checkGit && validCommit) {
     validateGitBaseline(root, project.baseline_commit, errors);
+  }
+  if (checkGit) {
+    await validateAcceptedRecordImmutability(root, baseRef, errors);
   }
 
   return errors;
