@@ -16,7 +16,11 @@
     "preview:local": "npm run preview:prepare-data && npm run build:preview && npm run start:preview",
     "lint": "eslint .",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "test:legacy": "node --test test/service.test.js",
+    "lint:legacy": "eslint src server test/service.test.js",
+    "build:legacy": "vite build",
+    "verify:legacy": "npm run test:legacy && npm run lint:legacy && npm run build:legacy"
   },
   "dependencies": {
     "concurrently": "^9.2.1",
