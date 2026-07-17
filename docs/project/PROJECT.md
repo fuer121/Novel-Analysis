@@ -56,7 +56,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 - GitHub Actions 依赖尚未固定到完整 SHA
 - `JobProgress` 的当前进度可以超过 `total`
 - 拒绝迁移矩阵和诊断断言等待 Phase 1 处理
-- 当前本地 Dify 和 OpenAI 尚未配置
+- `2026-07-17 controller main worktree /api/health observation: Dify and OpenAI are not configured; this is environment-specific and not a project-wide architecture fact`
 
 ## Pending Feedback
 

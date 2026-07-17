@@ -3,6 +3,7 @@ checkpoint_id: CP-YYYYMMDD-TASK-ID
 task_id: TASK-ID
 status: submitted
 recorded_at: YYYY-MM-DDTHH:MM:SS+08:00
+branch: replace-with-task-branch
 base_commit: 0000000000000000000000000000000000000000
 head_commit: 0000000000000000000000000000000000000000
 supersedes: none
@@ -10,11 +11,15 @@ supersedes: none
 
 # Checkpoint Submission Template
 
+> **提交门禁：`checkpoint_id`、`task_id`、`recorded_at`、`branch`、`base_commit`、`head_commit` 等占位值必须全部替换后才能提交，模板永远不能自行成为 `accepted`**
+
 本文件是状态为 `submitted` 的可复用提交模板，不代表结果已被接受
 
 ## Assigned Scope
 
-待填写：说明获授权执行的任务范围和明确排除项
+- Allowed files：待填写获授权修改的文件范围
+- Required behavior：待填写必须实现并验证的行为
+- Prohibited changes：待填写明确禁止的变更
 
 ## Actual Changes
 
