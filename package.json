@@ -20,6 +20,8 @@
     "preview:local": "npm run preview:prepare-data && npm run build:preview && npm run start:preview",
     "lint": "eslint .",
     "preview": "vite preview --host 127.0.0.1",
+    "dify:manifest": "node scripts/generate-dify-workflow-manifest.mjs",
+    "dify:manifest:check": "node --test test/dify-workflow-manifest.test.js",
     "test": "node --test test/*.test.js",
     "test:contracts": "node --test test/contracts/*.test.js",
     "test:legacy": "node --test test/service.test.js",
