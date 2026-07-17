@@ -95,6 +95,14 @@ supersedes: none
 ---
 
 # Decision 001
+
+## Decision
+
+Use one project source
+
+## Source
+
+Project governance review
 `;
 
 async function createFixture(t) {
@@ -360,6 +368,65 @@ test("rejects invalid decision metadata", async (t) => {
   assert.match(errors.join("\n"), /recorded_at/);
   assert.match(errors.join("\n"), /confidence/);
   assert.match(errors.join("\n"), /scope/);
+});
+
+test("rejects an accepted decision without evidence sections", async (t) => {
+  const root = await createFixture(t);
+  await writeDecision(
+    root,
+    "decision-001.md",
+    decisionDocument.slice(0, decisionDocument.indexOf("# Decision 001")),
+  );
+
+  const errors = await validateProjectSource(root, { checkGit: false });
+  assert.match(errors.join("\n"), /accepted decision.*Decision/i);
+  assert.match(errors.join("\n"), /accepted decision.*Source/i);
+});
+
+test("requires checkpoint superseders to be accepted", async (t) => {
+  for (const status of ["rejected", "submitted"]) {
+    await t.test(status, async (subtest) => {
+      const root = await createFixture(subtest);
+      await writeCheckpoint(
+        root,
+        "checkpoint-001.md",
+        checkpointDocument.replace("status: accepted", "status: superseded"),
+      );
+      await writeCheckpoint(
+        root,
+        "checkpoint-002.md",
+        checkpointDocument
+          .replaceAll("checkpoint-001", "checkpoint-002")
+          .replace("status: accepted", `status: ${status}`)
+          .replace("supersedes: none", "supersedes: checkpoint-001"),
+      );
+
+      const errors = await validateProjectSource(root, { checkGit: false });
+      assert.match(errors.join("\n"), /checkpoint-002.*superseder must be accepted/i);
+      assert.match(errors.join("\n"), /checkpoint-001.*not targeted/i);
+    });
+  }
+});
+
+test("requires decision superseders to be accepted", async (t) => {
+  const root = await createFixture(t);
+  await writeDecision(
+    root,
+    "decision-001.md",
+    decisionDocument.replace("status: accepted", "status: superseded"),
+  );
+  await writeDecision(
+    root,
+    "decision-002.md",
+    decisionDocument
+      .replaceAll("decision-001", "decision-002")
+      .replace("status: accepted", "status: rejected")
+      .replace("supersedes: none", "supersedes: decision-001"),
+  );
+
+  const errors = await validateProjectSource(root, { checkGit: false });
+  assert.match(errors.join("\n"), /decision-002.*superseder must be accepted/i);
+  assert.match(errors.join("\n"), /decision-001.*not targeted/i);
 });
 
 test("rejects missing, self-referential, and cyclic checkpoint supersedes links", async (t) => {

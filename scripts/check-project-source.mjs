@@ -312,11 +312,17 @@ function validateSupersedes(records, type, errors) {
   for (const [recordId, record] of records) {
     const target = record.fields.supersedes;
     if (!target || target === "none") continue;
+    const acceptedSuperseder = record.fields.status === "accepted";
+    if (!acceptedSuperseder) {
+      errors.push(
+        `${record.name} superseder must be accepted: ${recordId} is ${record.fields.status || "missing"}`,
+      );
+    }
     if (target === recordId) {
       errors.push(`${record.name} supersedes self: ${recordId}`);
     } else if (!records.has(target)) {
       errors.push(`${record.name} supersedes missing ${type}: ${target}`);
-    } else {
+    } else if (acceptedSuperseder) {
       incoming.add(target);
     }
   }
@@ -332,7 +338,8 @@ function validateSupersedes(records, type, errors) {
     visited.add(recordId);
     active.add(recordId);
     const target = records.get(recordId)?.fields.supersedes;
-    if (target && target !== "none" && records.has(target) && target !== recordId) {
+    if (records.get(recordId)?.fields.status === "accepted"
+      && target && target !== "none" && records.has(target) && target !== recordId) {
       visit(target);
     }
     active.delete(recordId);
@@ -479,6 +486,7 @@ export async function validateProjectSource(
     idField: "decision_id",
     requiredFields: ["decision_id", "status", "recorded_at", "confidence", "scope", "supersedes"],
     statuses: DECISION_STATUSES,
+    acceptedSections: ["Decision", "Source"],
   }, errors);
   validateSupersedes(checkpoints, "checkpoint", errors);
   validateSupersedes(decisions, "decision", errors);
