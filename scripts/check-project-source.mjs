@@ -50,6 +50,10 @@ function parseFrontMatter(content, label) {
 
   const fields = {};
   for (const line of lines.slice(1, closingIndex)) {
+    if (!line.trim()) {
+      continue;
+    }
+
     const colonIndex = line.indexOf(":");
     if (colonIndex <= 0) {
       throw new Error(`${label} has invalid front matter line: ${line}`);
@@ -91,7 +95,15 @@ async function validateLocalLinks(content, projectPath, errors) {
       continue;
     }
 
-    const resolvedPath = path.resolve(path.dirname(projectPath), relativePath);
+    let decodedPath;
+    try {
+      decodedPath = decodeURIComponent(relativePath);
+    } catch {
+      errors.push(`PROJECT.md local reference is invalid: ${target}`);
+      continue;
+    }
+
+    const resolvedPath = path.resolve(path.dirname(projectPath), decodedPath);
     if (!(await pathExists(resolvedPath))) {
       errors.push(`PROJECT.md local reference does not exist: ${target}`);
     }

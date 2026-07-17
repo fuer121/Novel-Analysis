@@ -102,6 +102,25 @@ test("accepts a complete project source fixture", async (t) => {
   assert.deepEqual(await validateProjectSource(root, { checkGit: false }), []);
 });
 
+test("accepts a percent-encoded local reference", async (t) => {
+  const root = await createFixture(t);
+  await fs.writeFile(path.join(root, "docs/project/decisions/decision 001.md"), "# Decision 001\n");
+  await replaceInProject(
+    root,
+    "./decisions/decision-001.md",
+    "./decisions/decision%20001.md",
+  );
+
+  assert.deepEqual(await validateProjectSource(root, { checkGit: false }), []);
+});
+
+test("accepts blank lines between front matter fields", async (t) => {
+  const root = await createFixture(t);
+  await replaceInProject(root, "source_version: 1\n", "source_version: 1\n\n");
+
+  assert.deepEqual(await validateProjectSource(root, { checkGit: false }), []);
+});
+
 test("rejects missing updated_by, invalid baseline_commit, and invalid baseline_status", async (t) => {
   const cases = [
     ["updated_by", "updated_by: codex\n", ""],
