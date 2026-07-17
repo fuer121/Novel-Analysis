@@ -31,7 +31,8 @@
     "lint:legacy": "eslint src server test/service.test.js",
     "build:legacy": "vite build",
     "verify:legacy": "npm run test:legacy && npm run lint:legacy && npm run build:legacy",
-    "verify": "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check"
+    "project:check": "node scripts/check-project-source.mjs",
+    "verify": "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check && npm run project:check"
   },
   "dependencies": {
     "concurrently": "^9.2.1",

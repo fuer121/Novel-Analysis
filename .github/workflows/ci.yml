@@ -21,7 +21,8 @@ jobs:
           node-version: 26
           cache: npm
       - run: npm ci
-      - run: npm run verify
+      - name: Verify legacy, architecture, Workflow and project contracts
+        run: npm run verify
       - run: npm run lint
       - name: Check committed whitespace
         env:
