@@ -78,7 +78,18 @@ async function pathExists(filePath) {
   }
 }
 
-async function validateLocalLinks(content, projectPath, errors) {
+function isInsideRepository(root, target) {
+  const relativePath = path.relative(root, target);
+  return relativePath === "" || (
+    relativePath !== ".."
+    && !relativePath.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relativePath)
+  );
+}
+
+async function validateLocalLinks(content, projectPath, root, errors) {
+  const repositoryRoot = path.resolve(root);
+  const realRepositoryRoot = await fs.realpath(repositoryRoot);
   const linkPattern = /\[[^\]]*\]\(([^)]+)\)/g;
   for (const match of content.matchAll(linkPattern)) {
     const linkValue = match[1].trim();
@@ -103,9 +114,24 @@ async function validateLocalLinks(content, projectPath, errors) {
       continue;
     }
 
+    if (path.isAbsolute(decodedPath)) {
+      errors.push(`PROJECT.md local reference is outside repository: ${target}`);
+      continue;
+    }
+
     const resolvedPath = path.resolve(path.dirname(projectPath), decodedPath);
+    if (!isInsideRepository(repositoryRoot, resolvedPath)) {
+      errors.push(`PROJECT.md local reference is outside repository: ${target}`);
+      continue;
+    }
     if (!(await pathExists(resolvedPath))) {
       errors.push(`PROJECT.md local reference does not exist: ${target}`);
+      continue;
+    }
+
+    const realTarget = await fs.realpath(resolvedPath);
+    if (!isInsideRepository(realRepositoryRoot, realTarget)) {
+      errors.push(`PROJECT.md local reference is outside repository: ${target}`);
     }
   }
 }
@@ -204,7 +230,7 @@ export async function validateProjectSource(root, { checkGit = true } = {}) {
     }
   }
 
-  await validateLocalLinks(content, projectPath, errors);
+  await validateLocalLinks(content, projectPath, root, errors);
   const checkpoints = await readCheckpoints(root, errors);
   const lastCheckpoint = checkpoints.get(project.last_checkpoint);
   if (!lastCheckpoint) {

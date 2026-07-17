@@ -114,6 +114,58 @@ test("accepts a percent-encoded local reference", async (t) => {
   assert.deepEqual(await validateProjectSource(root, { checkGit: false }), []);
 });
 
+test("rejects project references outside the repository", async (t) => {
+  const targets = [
+    ["absolute path", () => "/etc/passwd"],
+    [
+      "relative traversal",
+      (root, outsidePath) => path.relative(path.join(root, "docs/project"), outsidePath),
+    ],
+    [
+      "encoded traversal",
+      (root, outsidePath) => path
+        .relative(path.join(root, "docs/project"), outsidePath)
+        .replaceAll("..", "%2e%2e"),
+    ],
+  ];
+
+  for (const [name, getTarget] of targets) {
+    await t.test(name, async (subtest) => {
+      const root = await createFixture(subtest);
+      const outsidePath = `${root}-outside.md`;
+      subtest.after(() => fs.rm(outsidePath, { force: true }));
+      await fs.writeFile(outsidePath, "# Outside\n");
+      await replaceInProject(root, "./decisions/decision-001.md", getTarget(root, outsidePath));
+
+      const errors = await validateProjectSource(root, { checkGit: false });
+      assert.match(errors.join("\n"), /outside repository/);
+    });
+  }
+});
+
+test("rejects a project reference through a symlink outside the repository", async (t) => {
+  const root = await createFixture(t);
+  const outsideDirectory = await fs.mkdtemp(path.join(os.tmpdir(), "project-source-outside-"));
+  t.after(() => fs.rm(outsideDirectory, { recursive: true, force: true }));
+  const outsidePath = path.join(outsideDirectory, "decision.md");
+  const linkPath = path.join(root, "docs/project/decisions/outside-link.md");
+  await fs.writeFile(outsidePath, "# Outside\n");
+
+  try {
+    await fs.symlink(outsidePath, linkPath);
+  } catch (error) {
+    if (error.code === "EPERM" || error.code === "EACCES") {
+      t.skip(`symlinks are not supported: ${error.code}`);
+      return;
+    }
+    throw error;
+  }
+
+  await replaceInProject(root, "./decisions/decision-001.md", "./decisions/outside-link.md");
+  const errors = await validateProjectSource(root, { checkGit: false });
+  assert.match(errors.join("\n"), /outside repository/);
+});
+
 test("accepts blank lines between front matter fields", async (t) => {
   const root = await createFixture(t);
   await replaceInProject(root, "source_version: 1\n", "source_version: 1\n\n");
