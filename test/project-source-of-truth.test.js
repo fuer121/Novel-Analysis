@@ -10,7 +10,7 @@ const projectDocument = `---
 project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 0123456789abcdef0123456789abcdef01234567
-baseline_status: accepted
+baseline_status: current
 updated_at: 2026-07-17T10:00:00+08:00
 updated_by: codex
 current_phase: implementation
@@ -99,21 +99,21 @@ async function replaceInProject(root, search, replacement) {
 test("accepts a complete project source fixture", async (t) => {
   const root = await createFixture(t);
 
-  assert.deepEqual(await validateProjectSource(root), []);
+  assert.deepEqual(await validateProjectSource(root, { checkGit: false }), []);
 });
 
 test("rejects missing updated_by, invalid baseline_commit, and invalid baseline_status", async (t) => {
   const cases = [
     ["updated_by", "updated_by: codex\n", ""],
     ["baseline_commit", "baseline_commit: 0123456789abcdef0123456789abcdef01234567", "baseline_commit: not-a-commit"],
-    ["baseline_status", "baseline_status: accepted", "baseline_status: unknown"],
+    ["baseline_status", "baseline_status: current", "baseline_status: unknown"],
   ];
 
   for (const [field, search, replacement] of cases) {
     const root = await createFixture(t);
     await replaceInProject(root, search, replacement);
 
-    const errors = await validateProjectSource(root);
+    const errors = await validateProjectSource(root, { checkGit: false });
     assert.match(errors.join("\n"), new RegExp(field));
   }
 });
@@ -122,7 +122,7 @@ test("rejects a broken local reference in PROJECT.md", async (t) => {
   const root = await createFixture(t);
   await replaceInProject(root, "./decisions/decision-001.md", "./decisions/missing.md");
 
-  const errors = await validateProjectSource(root);
+  const errors = await validateProjectSource(root, { checkGit: false });
   assert.match(errors.join("\n"), /missing\.md|local reference/);
 });
 
@@ -133,7 +133,7 @@ test("rejects duplicate checkpoint_id values", async (t) => {
     checkpointDocument.replace("task_id: task-001", "task_id: task-002"),
   );
 
-  const errors = await validateProjectSource(root);
+  const errors = await validateProjectSource(root, { checkGit: false });
   assert.match(errors.join("\n"), /duplicate.*checkpoint-001|checkpoint-001.*duplicate/i);
 });
 
@@ -142,7 +142,7 @@ test("rejects last_checkpoint when it points to a rejected checkpoint", async (t
   const checkpointPath = path.join(root, "docs/project/checkpoints/checkpoint-001.md");
   await fs.writeFile(checkpointPath, checkpointDocument.replace("status: accepted", "status: rejected"));
 
-  const errors = await validateProjectSource(root);
+  const errors = await validateProjectSource(root, { checkGit: false });
   assert.match(errors.join("\n"), /last_checkpoint.*accepted|checkpoint-001.*rejected/i);
 });
 
@@ -151,6 +151,6 @@ test("rejects an invalid checkpoint status", async (t) => {
   const checkpointPath = path.join(root, "docs/project/checkpoints/checkpoint-001.md");
   await fs.writeFile(checkpointPath, checkpointDocument.replace("status: accepted", "status: pending"));
 
-  const errors = await validateProjectSource(root);
+  const errors = await validateProjectSource(root, { checkGit: false });
   assert.match(errors.join("\n"), /checkpoint.*status|status.*pending/i);
 });
