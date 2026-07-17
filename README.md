@@ -12,9 +12,9 @@
 
 ## 工作区约定
 
-- 唯一正式工作区：`/Users/staff/Desktop/Vibe coding/novel-chapter-gpt-service`
-- 历史重复工作区 `Dify 工作流模板创建` 已归档后不再作为开发目录使用。
-- 如需查看索引存储设计，统一以 `docs/L1_L2_INDEX_STORAGE.md` 为准。
+- 当前重构仓库：`/Users/staff/Desktop/Vibe coding/小说分析-重构`
+- 当前项目状态以 `docs/project/PROJECT.md` 为准
+- `docs/PROJECT_CONTROL_BASELINE.md` 仅供参考旧单机实现，不能作为当前项目状态依据
 
 ## 安全边界
 

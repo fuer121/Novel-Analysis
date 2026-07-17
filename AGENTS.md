@@ -9,8 +9,15 @@
 ## Write Authority
 
 - 只有总控 Agent 能更新 `docs/project/PROJECT.md`
-- 执行 Agent 和审查 Agent 必须使用 `docs/project/templates/checkpoint.md` 返回反馈
+- 执行 Agent 必须使用 `docs/project/templates/checkpoint.md` 返回反馈
+- 审查 Agent 必须返回结构化 findings，每条包含 severity、file/line、evidence 和 verdict，由总控 Agent 决定是否形成 checkpoint
+- 执行 Agent 和审查 Agent 只能提交反馈
 - 执行 Agent 和审查 Agent 不能自行将决策标记为 accepted，也不能自行解锁依赖
+
+## Record Immutability
+
+- accepted checkpoint 和 accepted decision 不得被任何 Agent 原地改写
+- 发现错误时，由总控 Agent 创建新的 correction 记录，通过 `supersedes` 指向旧记录，再更新 `docs/project/PROJECT.md`
 
 ## Task Contract
 
