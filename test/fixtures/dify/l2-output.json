@@ -1,0 +1,20 @@
+{
+  "output": {
+    "chapter_index": 31,
+    "chapter_title": "剑匣",
+    "facts": [
+      {
+        "category": "item",
+        "entity": "剑匣",
+        "aliases": [],
+        "tags": ["武器"],
+        "related_entities": ["宁姚"],
+        "fact_type": "ownership",
+        "fact": "宁姚持有剑匣。",
+        "evidence": ["宁姚取出剑匣"],
+        "importance": 0.8,
+        "confidence": 0.9
+      }
+    ]
+  }
+}

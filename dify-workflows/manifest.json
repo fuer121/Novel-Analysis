@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "workflows": {
+    "analysis_chapter": {
+      "file": "dify-workflows/analysis-chapter.workflow.yml",
+      "sha256": "828378e17489a9bbdcfea061a264eb2e4e4d1c54d1ef3afcb2eea25b4e45fb22"
+    },
+    "analysis_summary": {
+      "file": "dify-workflows/analysis-summary.workflow.yml",
+      "sha256": "dcdf0de57bba12f30be516fb7df1f97b33e7c233ca63002a493c591bdf0fdde7"
+    },
+    "chapter_import": {
+      "file": "dify-workflows/minimal-chapter-fetch.workflow.yml",
+      "sha256": "68bcb0ac2f2e469a25caa385c0c83bcba50a7c9c18f80554ee8070c24c76fb8d"
+    },
+    "l1_index": {
+      "file": "dify-workflows/l1-route-index.workflow.yml",
+      "sha256": "ebd3d3b403e9dd10bc6f5f0a2a16e94c7cfe94dc5c83ed766b34ba9f00190bf9"
+    },
+    "l2_index": {
+      "file": "dify-workflows/l2-fact-index.workflow.yml",
+      "sha256": "6242ceac66358ab44211cb209e5d62b5f0bd94cb0201f7ebcca5990e035ad6d1"
+    }
+  }
+}
