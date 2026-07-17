@@ -11,7 +11,8 @@
 - 只有总控 Agent 能更新 `docs/project/PROJECT.md`
 - 执行 Agent 必须使用 `docs/project/templates/checkpoint.md` 返回反馈
 - 审查 Agent 必须返回结构化 findings，每条包含 severity、file/line、evidence 和 verdict，由总控 Agent 决定是否形成 checkpoint
-- 执行 Agent 和审查 Agent 只能提交反馈
+- 执行 Agent 和审查 Agent 不能直接修改当前治理状态或 accepted 记录，只能向总控 Agent 提交反馈与证据
+- 执行 Agent 仍可在 task contract 的 allowed scope 内实施变更
 - 执行 Agent 和审查 Agent 不能自行将决策标记为 accepted，也不能自行解锁依赖
 
 ## Record Immutability
