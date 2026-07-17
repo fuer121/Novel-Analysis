@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  BookJobScopeSchema,
   JobEventSchema,
   JobScopeSchema,
   PublicJobSchema,
 } from "./job-contract.js";
+import type { JobProgress } from "./job-contract.js";
 
 const validJob = {
   id: "f57f4ce9-a990-40f4-bf93-452b2a4d003a",
@@ -28,6 +30,8 @@ const validJob = {
   updatedAt: "2026-07-16T10:05:00.000Z",
 };
 
+const validProgress: JobProgress = validJob.progress;
+
 describe("job contracts", () => {
   it("accepts a complete public L2 job", () => {
     expect(PublicJobSchema.parse(validJob)).toEqual(validJob);
@@ -39,6 +43,13 @@ describe("job contracts", () => {
       startChapter: 120,
       endChapter: 1,
     })).toThrow(/endChapter/);
+  });
+
+  it("rejects an empty index group selection", () => {
+    expect(() => BookJobScopeSchema.parse({
+      bookId: "215243",
+      indexGroupKeys: [],
+    })).toThrow();
   });
 
   it("rejects a book job without a book id", () => {
@@ -71,5 +82,9 @@ describe("job contracts", () => {
       createdAt: "2026-07-16T10:05:00.000Z",
       payload: { completed: 40, total: 120 },
     }).type).toBe("progress");
+  });
+
+  it("exposes the inferred job progress type", () => {
+    expect(validProgress.completed).toBe(40);
   });
 });

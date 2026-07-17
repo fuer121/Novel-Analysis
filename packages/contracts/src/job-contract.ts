@@ -44,7 +44,7 @@ export const BookJobScopeSchema = z.object({
   startChapter: z.number().int().positive().optional(),
   endChapter: z.number().int().positive().optional(),
   chapterIndexes: z.array(z.number().int().positive()).optional(),
-  indexGroupKeys: z.array(z.string().trim().min(1)).optional(),
+  indexGroupKeys: z.array(z.string().trim().min(1)).min(1).optional(),
   mode: z.enum(["all", "missing", "retry_failed"]).optional(),
 }).superRefine((scope, context) => {
   if (
@@ -81,6 +81,8 @@ export const JobProgressSchema = z.object({
   skipped: z.number().int().nonnegative(),
   current: z.string(),
 });
+
+export type JobProgress = z.infer<typeof JobProgressSchema>;
 
 const PublicJobFields = {
   id: z.string().uuid(),
