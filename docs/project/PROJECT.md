@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-18T21:56:43+08:00
+updated_at: 2026-07-18T22:10:43+08:00
 updated_by: controller-agent
 current_phase: phase-1-implementation
 last_checkpoint: CP-20260718-PHASE1-TASK2-ACCEPTED
@@ -47,6 +47,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 ## Effective Decisions
 
 - [DEC-0001 Controller-Owned Project Source](decisions/DEC-0001-project-governance.md) 确立项目治理信源与权限边界
+- [DEC-0002 Automated Pull Request Authority](decisions/DEC-0002-automated-pull-request-authority.md) 授权总控在全部低风险合并条件满足时自动创建、审查、合并 PR 并推进下一个已批准任务
 - [已批准设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md) 是重构范围和架构的有效依据
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -89,3 +90,4 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 3. 只有状态为 `accepted` 的结果可以推进项目基线和阶段
 4. 证据冲突时将状态设为 `conflicted` 或 `blocked` 并暂停推进
 5. 治理提交不更新 `baseline_commit`，只有实现基线变化时才更新
+6. PR 自动化权限、前置条件和强制暂停边界以 `DEC-0002` 为唯一依据，不得从线程上下文扩张权限
