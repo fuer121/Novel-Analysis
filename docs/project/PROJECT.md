@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-17T17:00:00+08:00
+updated_at: 2026-07-18T20:34:19+08:00
 updated_by: controller-agent
-current_phase: phase-1-planning
-last_checkpoint: CP-20260717-PHASE0-MERGED
-next_gate: GATE-PHASE1-PLAN-APPROVED
+current_phase: phase-1-implementation-ready
+last_checkpoint: CP-20260718-PHASE1-PLAN-APPROVED
+next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -31,7 +31,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 | 阶段 | 状态 | 证据或依赖 |
 | --- | --- | --- |
 | Phase 0 | merged | [CP-20260717-PHASE0-MERGED](checkpoints/CP-20260717-PHASE0-MERGED.md) |
-| Phase 1 | planning | [Novel Analysis Refactor Roadmap](../superpowers/plans/2026-07-16-novel-analysis-refactor-roadmap.md) |
+| Phase 1 | plan approved, awaiting governance merge | [CP-20260718-PHASE1-PLAN-APPROVED](checkpoints/CP-20260718-PHASE1-PLAN-APPROVED.md) |
 | Phase 2 | blocked by Phase 1 | Phase 1 通过后才能推进 |
 | Phase 3 | blocked by Phase 2 | Phase 2 通过后才能推进 |
 
@@ -39,7 +39,8 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | none | be49f4ccd312a269ee4c7419c6d9d08407df2c21 | none | planned | governance source merged | none | write and review plan |
+| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | docs/phase1-plan-ready | 089ecd189c584620a0f9441cbf1a47cfbcd10097 | 39b7c008a8f42e08c0b8a547a261d6e9417fbb01 | accepted | CP-20260718-GOV-POST-MERGE-RECONCILIATION | CP-20260718-PHASE1-PLAN-APPROVED | merge governance PR after user confirmation |
+| PHASE1-TASK1 | phase-1 | Foundation contracts and workspaces | unassigned | none | none | none | blocked | PHASE1-PLAN governance merged to main | none | wait for governance PR merge |
 
 ## Effective Decisions
 
@@ -60,11 +61,11 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 
 ## Pending Feedback
 
-当前无待核验反馈
+- `CP-20260718-PHASE1-PLAN-APPROVED` 已接受，Task 1 等待本治理分支合并到 `main`
 
 ## Next Gate
 
-下一个门禁为 `GATE-PHASE1-PLAN-APPROVED`，Phase 1 详细计划评审通过前不得实施
+下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；当前操作门禁为治理 PR 合并确认，合并前不得开始 Task 1
 
 ## Evidence Index
 
@@ -72,6 +73,9 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 - [重构路线图](../superpowers/plans/2026-07-16-novel-analysis-refactor-roadmap.md)
 - [Phase 0 handoff](../superpowers/handoffs/2026-07-17-phase-0-foundation-handoff.md)
 - [Phase 0 accepted checkpoint](checkpoints/CP-20260717-PHASE0-MERGED.md)
+- [Governance source post-merge reconciliation](checkpoints/CP-20260718-GOV-POST-MERGE-RECONCILIATION.md)
+- [Phase 1 plan submitted checkpoint](checkpoints/CP-20260718-PHASE1-PLAN-SUBMITTED.md)
+- [Phase 1 plan approved checkpoint](checkpoints/CP-20260718-PHASE1-PLAN-APPROVED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
