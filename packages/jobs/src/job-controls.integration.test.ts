@@ -96,6 +96,84 @@ describe("job controls", () => {
     expect(await postgres.db.selectFrom("audit_logs").selectAll().where("target_id", "=", job.id).execute()).toHaveLength(2);
   });
 
+  it("treats the same key on different actions as distinct controls", async () => {
+    const job = await createJob("action-fingerprint");
+    const controls = new JobControls(postgres.db);
+    const paused = await controls.control({
+      jobId: job.id,
+      actor: { userId: ownerId, role: "member" },
+      action: "pause",
+      requestId: "shared-key",
+    });
+    const resumed = await controls.control({
+      jobId: job.id,
+      actor: { userId: ownerId, role: "member" },
+      action: "resume",
+      requestId: "shared-key",
+    });
+
+    expect(paused.status).toBe("paused");
+    expect(resumed.status).toBe("queued");
+    expect((await new JobRepository(postgres.db).getById(job.id))?.status).toBe("queued");
+    expect(await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", job.id).execute()).toHaveLength(3);
+    expect(await postgres.db.selectFrom("audit_logs").selectAll().where("target_id", "=", job.id).execute()).toHaveLength(2);
+    expect(await postgres.db.selectFrom("job_outbox").selectAll().where("job_id", "=", job.id).execute()).toHaveLength(2);
+  });
+
+  it("treats the same action and key from different authorized actors as distinct controls", async () => {
+    const job = await createJob("actor-fingerprint");
+    const controls = new JobControls(postgres.db);
+    await controls.control({
+      jobId: job.id,
+      actor: { userId: ownerId, role: "member" },
+      action: "pause",
+      requestId: "shared-key",
+    });
+    await controls.control({
+      jobId: job.id,
+      actor: { userId: ownerId, role: "member" },
+      action: "resume",
+      requestId: "owner-resume",
+    });
+    const adminPause = await controls.control({
+      jobId: job.id,
+      actor: { userId: adminId, role: "admin" },
+      action: "pause",
+      requestId: "shared-key",
+    });
+
+    expect(adminPause.status).toBe("paused");
+    expect((await new JobRepository(postgres.db).getById(job.id))?.status).toBe("paused");
+    expect(await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", job.id).execute()).toHaveLength(4);
+    expect(await postgres.db.selectFrom("audit_logs").select("actor_user_id")
+      .where("target_id", "=", job.id).orderBy("id").execute()).toEqual([
+      { actor_user_id: ownerId },
+      { actor_user_id: ownerId },
+      { actor_user_id: adminId },
+    ]);
+  });
+
+  it("serializes concurrent exact replays to one control effect", async () => {
+    const job = await createJob("concurrent-control");
+    const controls = new JobControls(postgres.db);
+    const input = {
+      jobId: job.id,
+      actor: { userId: ownerId, role: "member" as const },
+      action: "pause" as const,
+      requestId: "concurrent-pause",
+    };
+    const [first, second] = await Promise.all([
+      controls.control(input),
+      controls.control(input),
+    ]);
+
+    expect(second).toEqual(first);
+    expect(first.status).toBe("paused");
+    expect(await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", job.id).execute()).toHaveLength(2);
+    expect(await postgres.db.selectFrom("audit_logs").selectAll().where("target_id", "=", job.id).execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("job_outbox").selectAll().where("job_id", "=", job.id).execute()).toHaveLength(1);
+  });
+
   it("cancels unfinished steps and an open attempt in the same transaction", async () => {
     const job = await createJob("cancel-steps");
     const steps = await postgres.db.selectFrom("job_steps").select("id")

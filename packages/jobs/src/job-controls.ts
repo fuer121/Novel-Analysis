@@ -66,7 +66,12 @@ export class JobControls {
         throw new JobControlForbiddenError();
       }
 
-      const dedupeKey = `control:${input.requestId}`;
+      const dedupeKey = [
+        "control",
+        input.actor.userId,
+        input.action,
+        input.requestId,
+      ].join(":");
       const prior = await transaction.selectFrom("job_events")
         .select("payload")
         .where("job_id", "=", input.jobId)

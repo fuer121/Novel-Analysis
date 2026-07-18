@@ -62,25 +62,24 @@ export async function selectPublicJob(
 }
 
 function encodeCursor(job: PublicJob): string {
-  return Buffer.from(JSON.stringify({ createdAt: job.createdAt, id: job.id }))
+  return Buffer.from(JSON.stringify({ id: job.id }))
     .toString("base64url");
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function decodeCursor(cursor: string): { createdAt: Date; id: string } {
+function decodeCursor(cursor: string): { id: string } {
   try {
-    const value = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8")) as unknown;
+    const decoded = Buffer.from(cursor, "base64url");
+    if (decoded.toString("base64url") !== cursor) throw new InvalidJobCursorError();
+    const value = JSON.parse(decoded.toString("utf8")) as unknown;
     if (!value || typeof value !== "object") throw new InvalidJobCursorError();
-    const { createdAt, id } = value as Record<string, unknown>;
-    if (typeof createdAt !== "string" || typeof id !== "string") {
+    const record = value as Record<string, unknown>;
+    if (Object.keys(record).length !== 1 || typeof record.id !== "string") {
       throw new InvalidJobCursorError();
     }
-    const date = new Date(createdAt);
-    if (Number.isNaN(date.getTime()) || !UUID_PATTERN.test(id)) {
-      throw new InvalidJobCursorError();
-    }
-    return { createdAt: date, id };
+    if (!UUID_PATTERN.test(record.id)) throw new InvalidJobCursorError();
+    return { id: record.id };
   } catch (error) {
     if (error instanceof InvalidJobCursorError) throw error;
     throw new InvalidJobCursorError();
@@ -157,10 +156,13 @@ export class JobRepository {
     let query = this.database.selectFrom("jobs").select(PUBLIC_JOB_COLUMNS);
     if (input.cursor) {
       const cursor = decodeCursor(input.cursor);
+      const anchorCreatedAt = this.database.selectFrom("jobs as cursor_job")
+        .select("cursor_job.created_at")
+        .where("cursor_job.id", "=", cursor.id);
       query = query.where((expression) => expression.or([
-        expression("created_at", "<", cursor.createdAt),
+        expression("created_at", "<", anchorCreatedAt),
         expression.and([
-          expression("created_at", "=", cursor.createdAt),
+          expression("created_at", "=", anchorCreatedAt),
           expression("id", "<", cursor.id),
         ]),
       ]));
