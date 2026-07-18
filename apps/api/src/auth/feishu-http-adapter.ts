@@ -3,10 +3,22 @@ import { z } from "zod";
 import type { FeishuOAuthAdapter } from "./feishu-adapter.js";
 
 const tokenResponseSchema = z.object({
-  union_id: z.string().min(1),
-  name: z.string().min(1),
-  avatar_url: z.string().url().nullable().optional(),
+  code: z.literal(0),
+  data: z.object({
+    access_token: z.string().min(1),
+  }),
 });
+
+const userInfoResponseSchema = z.object({
+  code: z.literal(0),
+  data: z.object({
+    union_id: z.string().min(1),
+    name: z.string().min(1),
+    avatar_url: z.string().url().nullable().optional(),
+  }),
+});
+
+const PROVIDER_TIMEOUT_MS = 10_000;
 
 export interface FeishuHttpAdapterOptions {
   appId: string;
@@ -35,9 +47,10 @@ export class FeishuHttpOAuthAdapter implements FeishuOAuthAdapter {
 
   async exchangeCode(input: { code: string; redirectUri: string }) {
     try {
-      const response = await this.#fetch("https://open.feishu.cn/open-apis/authen/v2/oauth/token", {
+      const tokenResponse = await this.#fetch("https://open.feishu.cn/open-apis/authen/v2/oauth/token", {
         method: "POST",
         headers: { "content-type": "application/json" },
+        signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         body: JSON.stringify({
           grant_type: "authorization_code",
           client_id: this.#appId,
@@ -46,17 +59,26 @@ export class FeishuHttpOAuthAdapter implements FeishuOAuthAdapter {
           redirect_uri: input.redirectUri,
         }),
       });
-      if (!response.ok) {
-        throw new Error("provider rejected OAuth exchange");
-      }
-      const parsed = tokenResponseSchema.parse(await response.json());
+      if (!tokenResponse.ok) throw new Error("token request failed");
+      const token = tokenResponseSchema.parse(await tokenResponse.json());
+
+      const userInfoResponse = await this.#fetch(
+        "https://open.feishu.cn/open-apis/authen/v1/user_info",
+        {
+          method: "GET",
+          headers: { authorization: `Bearer ${token.data.access_token}` },
+          signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
+        },
+      );
+      if (!userInfoResponse.ok) throw new Error("user info request failed");
+      const userInfo = userInfoResponseSchema.parse(await userInfoResponse.json());
       return {
-        unionId: parsed.union_id,
-        displayName: parsed.name,
-        avatarUrl: parsed.avatar_url ?? null,
+        unionId: userInfo.data.union_id,
+        displayName: userInfo.data.name,
+        avatarUrl: userInfo.data.avatar_url ?? null,
       };
     } catch {
-      throw new Error("Feishu OAuth exchange failed");
+      throw new Error("authentication_failed");
     }
   }
 }

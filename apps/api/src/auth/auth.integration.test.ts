@@ -279,11 +279,149 @@ describe("collaboration authentication", () => {
     }
   });
 
-  it("redacts provider responses and client secrets in the HTTP adapter", async () => {
+  it("exchanges the OAuth code for an access token and then fetches Feishu user info", async () => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
     const adapter = new FeishuHttpOAuthAdapter({
       appId: "app-id",
       appSecret: "client-secret-sensitive",
-      fetch: async () => new globalThis.Response("provider-body-sensitive", { status: 500 }),
+      fetch: async (input, init) => {
+        requests.push({ url: input.toString(), init });
+        if (requests.length === 1) {
+          return new globalThis.Response(JSON.stringify({
+            code: 0,
+            msg: "success",
+            data: {
+              access_token: "access-token-sensitive",
+              refresh_token: "refresh-token-sensitive",
+            },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new globalThis.Response(JSON.stringify({
+          code: 0,
+          msg: "success",
+          data: {
+            union_id: "union-123",
+            name: "Feishu Member",
+            avatar_url: "https://avatar.test/member.png",
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    });
+
+    const identity = await adapter.exchangeCode({
+      code: "sensitive-code",
+      redirectUri: CALLBACK_URL,
+    });
+
+    expect(identity).toEqual({
+      unionId: "union-123",
+      displayName: "Feishu Member",
+      avatarUrl: "https://avatar.test/member.png",
+    });
+    expect(requests).toHaveLength(2);
+    expect(requests[0]).toMatchObject({
+      url: "https://open.feishu.cn/open-apis/authen/v2/oauth/token",
+      init: { method: "POST" },
+    });
+    expect(JSON.parse(String(requests[0]!.init?.body))).toMatchObject({
+      grant_type: "authorization_code",
+      client_id: "app-id",
+      client_secret: "client-secret-sensitive",
+      code: "sensitive-code",
+      redirect_uri: CALLBACK_URL,
+    });
+    expect(requests[1]).toMatchObject({
+      url: "https://open.feishu.cn/open-apis/authen/v1/user_info",
+      init: { method: "GET" },
+    });
+    expect(new Headers(requests[1]!.init?.headers).get("Authorization"))
+      .toBe("Bearer access-token-sensitive");
+    expect(JSON.stringify(identity)).not.toContain("access-token-sensitive");
+    expect(JSON.stringify(identity)).not.toContain("refresh-token-sensitive");
+  });
+
+  it.each([
+    {
+      name: "token provider error",
+      fetch: async () => new globalThis.Response("provider-body-sensitive", { status: 400 }),
+    },
+    {
+      name: "token provider error envelope",
+      fetch: async () => new globalThis.Response(JSON.stringify({
+        code: 10003,
+        msg: "provider-body-sensitive",
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+    },
+    {
+      name: "token non-JSON response",
+      fetch: async () => new globalThis.Response("provider-body-sensitive", { status: 200 }),
+    },
+    {
+      name: "token schema mismatch",
+      fetch: async () => new globalThis.Response(JSON.stringify({ code: 0, data: {} }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    },
+    {
+      name: "user-info provider error",
+      fetch: async (_input: string | URL | Request, init?: RequestInit) => init?.method === "POST"
+        ? new globalThis.Response(JSON.stringify({
+          code: 0,
+          data: { access_token: "access-token-sensitive" },
+        }), { status: 200, headers: { "content-type": "application/json" } })
+        : new globalThis.Response("provider-body-sensitive", { status: 500 }),
+    },
+    {
+      name: "user-info provider error envelope",
+      fetch: async (_input: string | URL | Request, init?: RequestInit) => init?.method === "POST"
+        ? new globalThis.Response(JSON.stringify({
+          code: 0,
+          data: { access_token: "access-token-sensitive" },
+        }), { status: 200, headers: { "content-type": "application/json" } })
+        : new globalThis.Response(JSON.stringify({
+          code: 10003,
+          msg: "provider-body-sensitive",
+        }), { status: 200, headers: { "content-type": "application/json" } }),
+    },
+    {
+      name: "user-info non-JSON response",
+      fetch: async (_input: string | URL | Request, init?: RequestInit) => init?.method === "POST"
+        ? new globalThis.Response(JSON.stringify({
+          code: 0,
+          data: { access_token: "access-token-sensitive" },
+        }), { status: 200, headers: { "content-type": "application/json" } })
+        : new globalThis.Response("provider-body-sensitive", { status: 200 }),
+    },
+    {
+      name: "user-info schema mismatch",
+      fetch: async (_input: string | URL | Request, init?: RequestInit) => init?.method === "POST"
+        ? new globalThis.Response(JSON.stringify({
+          code: 0,
+          data: { access_token: "access-token-sensitive" },
+        }), { status: 200, headers: { "content-type": "application/json" } })
+        : new globalThis.Response(JSON.stringify({ code: 0, data: {} }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        }),
+    },
+    {
+      name: "network error",
+      fetch: async () => {
+        throw new Error("sensitive-code access-token-sensitive client-secret-sensitive provider-body-sensitive");
+      },
+    },
+    {
+      name: "timeout error",
+      fetch: async () => {
+        throw new DOMException("provider-body-sensitive", "TimeoutError");
+      },
+    },
+  ])("maps $name to a redacted authentication failure", async ({ fetch }) => {
+    const adapter = new FeishuHttpOAuthAdapter({
+      appId: "app-id",
+      appSecret: "client-secret-sensitive",
+      fetch,
     });
     let serialized = "";
     try {
@@ -291,9 +429,11 @@ describe("collaboration authentication", () => {
     } catch (error) {
       serialized = JSON.stringify(error, Object.getOwnPropertyNames(error));
     }
-    expect(serialized).toContain("Feishu OAuth exchange failed");
+    expect(serialized).toContain("authentication_failed");
     for (const secret of [
       "sensitive-code",
+      "access-token-sensitive",
+      "refresh-token-sensitive",
       "provider-body-sensitive",
       "client-secret-sensitive",
     ]) {
