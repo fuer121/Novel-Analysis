@@ -4,12 +4,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "start": "node src/main.ts",
+    "start": "node --import tsx src/main.ts",
     "test": "vitest run --root ../.. apps/worker/src",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@novel-analysis/database": "*",
-    "@novel-analysis/jobs": "*"
+    "@novel-analysis/jobs": "*",
+    "tsx": "4.20.6"
   }
 }

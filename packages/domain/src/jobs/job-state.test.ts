@@ -23,7 +23,6 @@ const allowedTransitions = [
   ["paused", "queued"],
   ["paused", "running"],
   ["paused", "cancelled"],
-  ["failed", "queued"],
 ] as const satisfies ReadonlyArray<readonly [JobStatus, JobStatus]>;
 
 const allowedTransitionKeys = new Set(
@@ -38,8 +37,8 @@ const rejectedTransitions = JOB_STATUSES.flatMap((from) => (
 
 describe("job state transitions", () => {
   it("covers the complete 7 by 7 transition matrix", () => {
-    expect(allowedTransitions).toHaveLength(16);
-    expect(rejectedTransitions).toHaveLength(33);
+    expect(allowedTransitions).toHaveLength(15);
+    expect(rejectedTransitions).toHaveLength(34);
     expect(allowedTransitions.length + rejectedTransitions.length).toBe(
       JOB_STATUSES.length ** 2,
     );

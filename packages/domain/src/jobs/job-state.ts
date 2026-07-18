@@ -6,7 +6,7 @@ const transitions: Readonly<Record<JobStatus, ReadonlySet<JobStatus>>> = {
   retrying: new Set(["running", "paused", "failed", "cancelled"]),
   paused: new Set(["queued", "running", "cancelled"]),
   completed: new Set(),
-  failed: new Set(["queued"]),
+  failed: new Set(),
   cancelled: new Set(),
 };
 
