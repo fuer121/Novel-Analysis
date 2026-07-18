@@ -26,6 +26,7 @@ export const JOB_EVENT_TYPES = [
   "warning",
   "retrying",
   "paused",
+  "resumed",
   "completed",
   "failed",
   "cancelled",
@@ -121,6 +122,25 @@ export const PublicJobSchema = z.discriminatedUnion("type", [
 ]);
 
 export type PublicJob = z.infer<typeof PublicJobSchema>;
+
+export const JobListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  cursor: z.string().trim().min(1).optional(),
+}).strict();
+
+export type JobListQuery = z.infer<typeof JobListQuerySchema>;
+
+export const JobResponseSchema = z.object({
+  job: PublicJobSchema,
+});
+
+export const JobListResponseSchema = z.object({
+  jobs: z.array(PublicJobSchema),
+  nextCursor: z.string().min(1).nullable(),
+});
+
+export type JobResponse = z.infer<typeof JobResponseSchema>;
+export type JobListResponse = z.infer<typeof JobListResponseSchema>;
 
 export const JobEventSchema = z.object({
   id: z.number().int().positive(),
