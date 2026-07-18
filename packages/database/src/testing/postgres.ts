@@ -16,6 +16,44 @@ export interface DisposablePostgres {
   destroy(): Promise<void>;
 }
 
+const NATURAL_CONNECTION_CLOSE_GRACE_MS = 250;
+const FORCED_CONNECTION_CLOSE_TIMEOUT_MS = 1_000;
+const CONNECTION_POLL_INTERVAL_MS = 10;
+
+async function countDatabaseConnections(
+  admin: DatabaseConnection,
+  databaseName: string,
+): Promise<number> {
+  const result = await sql<{ connections: number }>`
+    select count(*)::int as connections
+    from pg_stat_activity
+    where datname = ${databaseName}
+  `.execute(admin);
+
+  return result.rows[0]?.connections ?? 0;
+}
+
+async function waitForDatabaseConnectionsToClose(
+  admin: DatabaseConnection,
+  databaseName: string,
+  timeoutMs: number,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+
+  while (await countDatabaseConnections(admin, databaseName) > 0) {
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) {
+      return false;
+    }
+
+    await new Promise((resolve) => {
+      setTimeout(resolve, Math.min(CONNECTION_POLL_INTERVAL_MS, remainingMs));
+    });
+  }
+
+  return true;
+}
+
 function readAdminUrl(): URL {
   const value = process.env.TEST_DATABASE_URL;
   if (!value) {
@@ -63,11 +101,26 @@ export async function createDisposablePostgres(): Promise<DisposablePostgres> {
       if (!databaseDropped) {
         admin ??= createDatabase(adminUrl.toString());
         try {
-          await sql`
-            select pg_terminate_backend(pid)
-            from pg_stat_activity
-            where datname = ${databaseName} and pid <> pg_backend_pid()
-          `.execute(admin);
+          const closedNaturally = await waitForDatabaseConnectionsToClose(
+            admin,
+            databaseName,
+            NATURAL_CONNECTION_CLOSE_GRACE_MS,
+          );
+          if (!closedNaturally) {
+            await sql`
+              select pg_terminate_backend(pid)
+              from pg_stat_activity
+              where datname = ${databaseName} and pid <> pg_backend_pid()
+            `.execute(admin);
+            const closedAfterTermination = await waitForDatabaseConnectionsToClose(
+              admin,
+              databaseName,
+              FORCED_CONNECTION_CLOSE_TIMEOUT_MS,
+            );
+            if (!closedAfterTermination) {
+              throw new Error("Timed out closing disposable PostgreSQL connections");
+            }
+          }
           await sql`drop database if exists ${sql.id(databaseName)}`.execute(admin);
           databaseDropped = true;
         } catch (error) {
