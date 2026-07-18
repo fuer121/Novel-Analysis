@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-18T21:06:51+08:00
+updated_at: 2026-07-18T21:56:43+08:00
 updated_by: controller-agent
 current_phase: phase-1-implementation
-last_checkpoint: CP-20260718-PHASE1-TASK1-MERGED
+last_checkpoint: CP-20260718-PHASE1-TASK2-ACCEPTED
 next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -41,7 +41,8 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | main | 089ecd189c584620a0f9441cbf1a47cfbcd10097 | 4ad103ca48442820904842047cd95b8924d44590 | merged | CP-20260718-GOV-POST-MERGE-RECONCILIATION | CP-20260718-PHASE1-PLAN-MERGED | complete |
 | PHASE1-TASK1 | phase-1 | Foundation contracts and workspaces | controller-agent | main | 4ad103ca48442820904842047cd95b8924d44590 | 8f4f56728f6b3cc395bcf5f07f576aba48d3a275 | merged | CP-20260718-PHASE1-PLAN-MERGED | CP-20260718-PHASE1-TASK1-MERGED | complete |
-| PHASE1-TASK2 | phase-1 | PostgreSQL schema and Kysely migrations | unassigned | none | 8f4f56728f6b3cc395bcf5f07f576aba48d3a275 | none | ready | CP-20260718-PHASE1-TASK1-MERGED | none | create task contract and isolated worktree |
+| PHASE1-TASK2 | phase-1 | PostgreSQL schema and Kysely migrations | controller-agent | refactor/phase1-task2-database | 8f4f56728f6b3cc395bcf5f07f576aba48d3a275 | ee580d41fe51a6dc819389733adfd98341bd6b7a | accepted | CP-20260718-PHASE1-TASK1-MERGED | CP-20260718-PHASE1-TASK2-ACCEPTED | create PR and await merge confirmation |
+| PHASE1-TASK3 | phase-1 | OAuth, session, RBAC and audit | unassigned | none | none | none | blocked | PHASE1-TASK2 merged to main | none | wait for Task 2 PR merge |
 
 ## Effective Decisions
 
@@ -60,11 +61,11 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- 无
+- `PHASE1-TASK2` 已接受，等待 PR 合并确认
 
 ## Next Gate
 
-下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；当前可执行任务为 `PHASE1-TASK2`，应基于 `8f4f56728f6b3cc395bcf5f07f576aba48d3a275` 创建独立 worktree
+下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；当前操作门禁为 Task 2 PR 合并确认，合并前不得开始 Task 3
 
 ## Evidence Index
 
@@ -78,6 +79,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 - [Phase 1 plan merged checkpoint](checkpoints/CP-20260718-PHASE1-PLAN-MERGED.md)
 - [Phase 1 Task 1 accepted checkpoint](checkpoints/CP-20260718-PHASE1-TASK1-ACCEPTED.md)
 - [Phase 1 Task 1 merged checkpoint](checkpoints/CP-20260718-PHASE1-TASK1-MERGED.md)
+- [Phase 1 Task 2 accepted checkpoint](checkpoints/CP-20260718-PHASE1-TASK2-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
