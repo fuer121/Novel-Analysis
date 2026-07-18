@@ -2,1147 +2,518 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 交付可用测试飞书身份登录、由 PostgreSQL 持久化并由独立 Worker 可恢复执行示例任务的新 API、Worker 与最小 Web 任务中心
+**Goal:** 交付可通过测试飞书身份登录、由 PostgreSQL 持久化、由独立 Worker 可恢复执行示例任务的新 API、Worker 与最小 Web 任务中心
 
-**Architecture:** 保持模块化单体和单一 PostgreSQL 数据源，API 只通过 application service 调用 repository，domain 不依赖 HTTP、SQL 或 pg-boss。`jobs`、`job_steps`、`job_attempts`、`job_events` 是产品任务状态唯一真相源；任务与 `job_outbox` 同事务提交，dispatcher 只向 pg-boss 投递唤醒消息，Worker 通过数据库租约和幂等键领取步骤。Web 只消费共享 Zod 契约和 API/SSE，不读取队列内部状态
+**Architecture:** 系统保持模块化单体与单一 PostgreSQL 数据源，API 负责身份、权限与 HTTP 映射，domain 负责规则，database 负责 Kysely 事务与 migration，jobs 负责任务生命周期，Worker 只消费唤醒消息并执行持久化步骤。`jobs`、`job_steps`、`job_attempts`、`job_events` 是产品任务状态唯一真相源，pg-boss 不向前端提供状态
 
-**Tech Stack:** Node.js、TypeScript 6、Express 5、Zod 4、Kysely、PostgreSQL 17、pg-boss、React 19、React Router 7、TanStack Query 5、Vitest、Supertest、Playwright
+**Tech Stack:** Node.js、TypeScript、Express、Zod、Kysely、PostgreSQL、pg-boss、React、React Router、TanStack Query、Vitest、Supertest
 
 ---
 
-## 1. Scope And Success Boundary
+## 1. Approval And Execution Order
 
-本计划只实现 Phase 1。共享契约增加专用 `system-demo` 类型和固定 scope `{ scenario: "phase-1-recovery" }`，执行器只等待数据库内可控的两个步骤并写入事件，不读取 SQLite、不调用 Dify、不创建书籍或索引数据。它不会复用 `migration` 类型，避免提前引入 Phase 5 语义
+本文件当前只用于计划审查，禁止据此提前实施
 
-阶段结束时必须可独立演示以下闭环
+执行顺序固定为：本计划审查 → 用户确认且总控接受 `GATE-PHASE1-PLAN-APPROVED` → 按顺序实施 8 个任务 → Task 8 汇总 Phase 1 implementation acceptance checkpoint evidence → 总控核验后再决定是否进入 Phase 2
 
-1. 使用测试飞书身份完成 OAuth state 校验并登录已启用本地成员
-2. 成员创建一个无外部模型依赖的示例任务
-3. 浏览器刷新和 API 进程重启后，任务仍由 PostgreSQL 查询得到
-4. Worker 在第一步持有租约时被终止，租约到期后由新 Worker 恢复第二次 attempt 并完成，且步骤效果只写入一次
-5. 重复 outbox 投递和重复 pg-boss 消息不产生重复步骤效果或重复终态事件
-6. 成员不能访问成员管理接口，也不能控制他人任务；管理员可以，并且暂停、继续、取消均产生审计记录
-7. 新 API、Worker、集成测试和演示脚本完全不导入 `server/db.js`，不打开任何 SQLite 文件
+Task 8 不是兜底修复任务。任何验证失败都必须返回引入该行为的原任务修复、重新提交并重跑其 focused verification，不能在 Task 8 跨文件补丁式修复
 
-明确排除以下内容
+## 2. Phase Boundary
 
-- `books`、`chapters`、`index_groups`、L1、L2、query session、analysis 数据模型与页面
-- Dify client、五条 Workflow 的新执行器或在线配置管理
-- SQLite 迁移器、双写、旧任务 Map 适配
-- 旧根目录应用重构、旧 112 个测试修改、五个 `dify-workflows/*.yml` 修改
-- npm 安全公告修复、GitHub Actions SHA 固定或无关依赖升级
+Phase 1 独立演示必须完成
 
-## 2. Dependency Direction
+- 测试飞书身份登录已映射且启用的本地成员，并创建无外部模型依赖的示例任务
+- 浏览器刷新与 API 重启后任务仍可查询同一 job
+- Worker 在持有步骤 lease 时终止，lease 到期后新 Worker 创建新 attempt 并恢复完成
+- 重复 outbox 投递、重复队列消息和迟到完成只产生一次步骤效果与一次终态事件
+- member 不能管理成员或控制他人任务，admin 可以且控制操作产生审计
+
+本阶段明确不做
+
+- books/chapters/L1/L2/query/analysis 数据模型与页面，以及 Dify adapter/Workflow/模型配置
+- SQLite 迁移、双写、旧任务 Map、旧根目录重构、旧 112 测试或五个 Workflow YAML 修改
+- 浏览器视觉验收、部署拓扑设计、npm 安全公告、供应链或无关依赖升级
+
+## 3. Dependency Direction
 
 ```text
 apps/web -> packages/contracts
-apps/api -> packages/contracts -> packages/domain
-apps/api -> packages/database + packages/jobs
-apps/worker -> packages/database + packages/jobs -> packages/domain
-packages/jobs -> packages/database + packages/domain + packages/contracts
-packages/database -> Kysely/pg only
-packages/domain -> packages/contracts only
+apps/api -> packages/contracts + packages/domain + packages/database + packages/jobs
+apps/worker -> packages/database + packages/jobs
+packages/jobs -> packages/contracts + packages/domain + packages/database
+packages/database -> Kysely + pg
+packages/domain -> packages/contracts
 ```
 
-禁止反向依赖：`packages/domain` 不导入 Express/Kysely/pg-boss，`packages/database` 不导入 apps，`packages/jobs` 不导入 API 路由，Web 不导入 database/jobs。OAuth adapter 位于 `apps/api`，其 fake 通过依赖注入替换，不在生产代码里根据任意请求参数绕过认证
+禁止反向依赖：domain 不导入 Express、Kysely 或 pg-boss，database/jobs 不导入 apps，Web 不导入 database/jobs，API/Worker 不导入 `server/db.js` 或任何 SQLite 模块
 
-## 3. File Responsibility Map
+## 4. Cross-Task Invariants
 
-| Path | Responsibility |
-| --- | --- |
-| `compose.yaml` | 固定本地和测试 PostgreSQL 服务与健康检查 |
-| `.env.phase1.example` | 新 API/Worker/Web 所需的非密钥示例配置 |
-| `packages/database/src/db.ts` | Kysely 数据库类型、连接创建与销毁 |
-| `packages/database/src/migrate.ts` | 唯一 migration runner |
-| `packages/database/src/migrations/001_collaboration.ts` | users、identity、session、audit schema |
-| `packages/database/src/migrations/002_jobs.ts` | jobs、steps、attempts、events、outbox schema |
-| `packages/database/src/testing/postgres.ts` | 真实 PostgreSQL 测试库创建、迁移、清理 |
-| `packages/domain/src/auth/rbac.ts` | admin/member 权限决策 |
-| `packages/contracts/src/job-contract.ts` | progress 总量不变量与公开 API 契约 |
-| `packages/jobs/src/job-repository.ts` | 任务查询、创建、状态迁移和事件原子写入 |
-| `packages/jobs/src/outbox-dispatcher.ts` | outbox claim、pg-boss send、delivered 标记 |
-| `packages/jobs/src/step-leases.ts` | 步骤领取、续租、完成、过期恢复和 attempt |
-| `packages/jobs/src/example-executor.ts` | Phase 1 两步示例任务，不依赖任何外部模型 |
-| `apps/api/src/auth/*` | OAuth adapter、state、session cookie、CSRF 与鉴权 middleware |
-| `apps/api/src/routes/*` | auth、admin members、jobs、SSE HTTP 映射 |
-| `apps/api/src/app.ts` | Express composition root，不包含业务规则 |
-| `apps/worker/src/main.ts` | pg-boss consumer、dispatcher 与 lease recovery 生命周期 |
-| `apps/web/src/features/auth/*` | 登录和当前用户查询 |
-| `apps/web/src/features/task-center/*` | 任务列表、详情、控制和 SSE 缓存投影 |
-| `apps/web/src/app/*` | Router、QueryClient、全局壳与权限导航 |
-| `test/phase1/*` | 跨进程 PostgreSQL、API、Worker、重启与安全集成测试 |
+### 4.1 Authentication And CSRF
 
-## 4. Security And Transaction Boundaries
+- OAuth state 使用 32 字节随机值，数据库只存 SHA-256，5 分钟过期且只能消费一次
+- OAuth callback 只在飞书身份映射到 active 本地用户后创建 session
+- session token 使用 32 字节随机值，数据库只存 SHA-256
+- 生产 session Cookie 固定 `HttpOnly + Secure + SameSite=Lax + Path=/`；HTTP 集成测试使用独立测试 Cookie 名，不能伪造不合规的 `__Host-` Cookie
+- callback 不生成或传递 CSRF 原始值，只设置 session Cookie 并跳转固定站内路径，URL 与日志不含 code、session 或 CSRF token
+- callback 后 Web 调用同源 `GET /api/auth/me`，服务端锁 session 行，生成新的 CSRF 原始值、覆盖其 hash，并通过 `Cache-Control: no-store` JSON 返回；浏览器只保存在内存
+- 每次 `/me` 都轮换 CSRF hash，旧 token 失效；服务端永远不从 hash 还原原始值
+- `/me` 不开放 CORS，拒绝 `Sec-Fetch-Site: cross-site`，存在 Origin 时必须与 `APP_ORIGIN` 相等，因此跨站请求不能读取或轮换 token
+- 所有写接口校验 Origin，并对 `X-CSRF-Token` 做 SHA-256 后 timing-safe compare
+- 重新登录仅在新身份验证成功后撤销浏览器携带的旧 session；注销校验当前 CSRF 后撤销 session 并清 Cookie
+- OAuth code、Cookie、token、client secret、完整 provider body 不进入 URL、错误响应、审计或普通日志
 
-- OAuth `state` 为 32 字节随机值，只在服务端保存其 SHA-256，5 分钟过期、单次消费，并把回跳路径限制为站内相对路径
-- OAuth adapter 只返回飞书稳定身份 `unionId`、显示名和头像；只有 `auth_identities(provider, subject)` 已映射且 `users.status = 'active'` 才可创建 session
-- session token 使用 32 字节随机值，数据库只存 SHA-256；生产 Cookie 名为 `__Host-na_session`，属性固定 `HttpOnly; Secure; SameSite=Lax; Path=/`。纯 HTTP 集成测试显式使用 `na_session_test` 且关闭 `Secure`，不能以生产 Cookie 名发送不符合 `__Host-` 规则的 Cookie
-- 所有写接口要求同源 `Origin`，并要求 `X-CSRF-Token` 与 session 行内的 CSRF token hash 匹配；OAuth callback 只接受 state/code，不接受 session cookie 作为授权依据
-- RBAC 在 application service 入口执行，路由隐藏不能代替服务端校验；成员只能控制 `requested_by` 为自己的任务，管理员可控制全部任务
-- 成员变更与任务控制在同一个数据库事务内写业务状态和 `audit_logs`；审计 metadata 只存 ID、动作、from/to，不存 Cookie、OAuth code、正文或密钥
-- 创建任务事务只写 `jobs`、初始 `job_steps`、`job_events(created)`、`job_outbox`。事务提交后 dispatcher 才调用 pg-boss；任何数据库事务都不跨网络调用
-- dispatcher 以 `FOR UPDATE SKIP LOCKED` claim outbox；`pg-boss.send` 使用稳定 singleton key `outbox:<outbox_id>`。投递后更新 `delivered_at`，崩溃导致重投时仍由 singleton key 和步骤 claim 双重去重
-- Worker 收到消息后只把它视为唤醒信号。步骤效果以 `job_steps.idempotency_key` 唯一，领取时原子设置 lease；完成步骤、完成 attempt、写 progress/event、必要时推进 job 均在同一事务
-- Worker 网络外调用在 Phase 1 不存在；未来外部调用必须位于租约事务之外。Phase 1 recovery 只证明过期 lease 可重新领取并产生新 attempt，完成效果不重复
-- SSE 的游标是 `job_events.id`。初次连接从 `Last-Event-ID` 或 `after` 恢复数据库事件，再通过短轮询读取新行；API 内存只保存连接，不保存产品进度
+### 4.2 Job State And Locking
 
-## 5. Dependency Selection Rule
+- 控制与步骤完成都先锁 `jobs` 行，再锁 `job_steps`，禁止相反锁序
+- 完成事务持锁后重查 job 状态
+- paused 只允许提交当前已完成步骤边界，不推进 job、不创建下一步 outbox
+- cancelled 丢弃迟到完成，不增加 progress，不覆盖取消状态
+- completed、failed、cancelled 均为不可覆盖终态
+- pause 不中断当前外部请求，只在步骤边界生效；cancel 保留已提交步骤效果但阻止未提交效果
 
-只添加 Phase 1 直接使用的包。实施当天先运行 `npm view <package> version`，把结果与本计划记录的已核验版本比较；若仍一致，使用 `npm install --save-exact`，若不同则停下记录差异，不自动选择更新版本。2026-07-18 已核验版本为 Kysely `0.29.4`、pg `8.22.0`、pg-boss `12.26.1`、cookie-parser `1.4.7`、helmet `8.3.0`、React Router DOM `7.18.1`、TanStack Query `5.101.2`、Supertest `7.2.2`、`@types/express` `5.0.6`、tsx `4.23.1`、Testing Library React `16.3.2`、Testing Library jest-dom `6.9.1`、jsdom `29.1.1`、Playwright Test `1.61.1`。保留现有 React `19.2.6`、React DOM `19.2.6`、Express `5.2.1`、Zod `4.4.3`、Lucide React `1.16.0`、TypeScript、Vite、Vitest 版本，不运行 `npm update` 或 `npm audit fix`
+### 4.3 Queue And Transaction Boundaries
 
-PostgreSQL 使用 `postgres:17.5-bookworm`，首次拉取后以 `docker image inspect postgres:17.5-bookworm --format '{{index .RepoDigests 0}}'` 记录本机解析出的 digest；若 tag 不可用则停止，不静默换 major/minor
+- 创建任务时 jobs、steps、created event、outbox 必须同一事务提交
+- dispatcher 的 claim、send、mark 分为三个边界，pg-boss 网络调用不在数据库事务内
+- outbox ID、步骤 idempotency key、event dedupe key 都稳定且唯一
+- pg-boss 消息只是唤醒信号，Worker 必须回到产品表领取步骤
+- lease 领取、attempt 创建、步骤完成、progress 与 event 更新使用显式 PostgreSQL 事务
 
-## 6. Task Sequence
+### 4.4 Test Database
 
-### Task 1: Close Phase 0 Contract Invariants
+- 所有 integration test 使用真实 PostgreSQL，不使用 SQLite 或内存数据库替身
+- `TEST_DATABASE_URL` 统一指向内置管理库 `/postgres`
+- 测试 harness 从管理连接创建随机 disposable database，运行全部 Kysely migrations，结束时终止连接并删除数据库
+- compose 只创建开发库 `novel_analysis`；`postgres` 管理库由 PostgreSQL 自带
+- 默认 Vitest unit config 排除 `*.integration.test.ts`、`*.e2e.test.ts` 与 `test/phase1/**`
+- 每个预期失败的 integration test 先确认 `pg_isready` 成功，失败必须来自目标模块或行为尚未实现，不能把连接失败当作红灯
 
+## 5. File Responsibility Map
+
+| Area | Files | Responsibility |
+| --- | --- | --- |
+| Contracts | `packages/contracts/src/job-contract.ts` | 公开 job/progress/event/API Zod 契约 |
+| Domain | `packages/domain/src/jobs/job-state.ts`, `packages/domain/src/auth/rbac.ts` | 状态迁移和权限规则 |
+| Database | `packages/database/src/**` | Kysely 类型、连接、migrations、测试 harness |
+| Jobs | `packages/jobs/src/**` | repository、controls、outbox、lease、executor |
+| API | `apps/api/src/**` | OAuth/session/CSRF、RBAC、jobs、SSE 路由 |
+| Worker | `apps/worker/src/**` | dispatcher、consumer、recovery 生命周期 |
+| Web | `apps/web/src/app/**`, `apps/web/src/features/**` | 全局壳、登录、任务中心、最小成员管理 |
+| Acceptance | `test/phase1/**` | 真实进程重启和恢复演示 |
+
+## 6. Implementation Tasks
+
+### Task 1: Foundation Contracts And Workspaces
+
+**Scope:** 补齐 Phase 0 延迟契约并建立 Phase 1 workspace/toolchain，不实现数据库或运行时行为
 **Files:**
-- Modify: `packages/contracts/src/job-contract.ts`
-- Modify: `packages/contracts/src/job-contract.test.ts`
-- Modify: `packages/contracts/src/index.ts`
+- Modify: `packages/contracts/src/job-contract.ts`, `packages/contracts/src/job-contract.test.ts`, `packages/contracts/src/index.ts`
 - Modify: `packages/domain/src/jobs/job-state.test.ts`
-
-- [ ] **Step 1: Write the failing progress and exhaustive transition tests**
-
-Add these cases to `packages/contracts/src/job-contract.test.ts`
-
-```ts
-it.each([
-  { total: 1, completed: 2, failed: 0, skipped: 0, current: "" },
-  { total: 3, completed: 2, failed: 1, skipped: 1, current: "" },
-])("rejects progress counters beyond total: %o", (progress) => {
-  expect(() => JobProgressSchema.parse(progress)).toThrow(/completed \+ failed \+ skipped/);
-});
-
-it("accepts progress whose accounted counters equal total", () => {
-  expect(JobProgressSchema.parse({
-    total: 3, completed: 1, failed: 1, skipped: 1, current: "完成",
-  })).toMatchObject({ total: 3, completed: 1, failed: 1, skipped: 1 });
-});
-```
-
-Also add the dedicated Phase 1 demo contract and a parsing test
-
-```ts
-export const SystemDemoJobScopeSchema = z.strictObject({
-  scenario: z.literal("phase-1-recovery"),
-});
-
-expect(PublicJobSchema.parse({
-  ...validJob,
-  type: "system-demo",
-  scope: { scenario: "phase-1-recovery" },
-}).type).toBe("system-demo");
-```
-
-Add `"system-demo"` to `JOB_TYPES`, add `SystemDemoJobScopeSchema` to `JobScopeSchema`, add a `system-demo` branch to `PublicJobSchema`, and re-export its inferred `SystemDemoJobScope` type from `packages/contracts/src/index.ts`. Do not weaken either existing strict scope schema
-
-Replace the five rejected pairs in `packages/domain/src/jobs/job-state.test.ts` with a generated exhaustive matrix and explicit diagnostic assertions
-
-```ts
-const statuses = [
-  "queued", "running", "retrying", "paused", "completed", "failed", "cancelled",
-] as const;
-const allowed = new Set([
-  "queued:running", "queued:paused", "queued:cancelled",
-  "running:retrying", "running:paused", "running:completed", "running:failed", "running:cancelled",
-  "retrying:running", "retrying:paused", "retrying:failed", "retrying:cancelled",
-  "paused:queued", "paused:running", "paused:cancelled", "failed:queued",
-]);
-const rejected = statuses.flatMap((from) =>
-  statuses.filter((to) => !allowed.has(`${from}:${to}`)).map((to) => [from, to] as const),
-);
-
-it("enumerates exactly 33 rejected transitions", () => {
-  expect(rejected).toHaveLength(33);
-});
-
-it.each(rejected)("rejects %s -> %s with stable diagnostics", (from, to) => {
-  expect(canTransitionJob(from, to)).toBe(false);
-  try {
-    assertJobTransition(from, to);
-    throw new Error("expected assertJobTransition to throw");
-  } catch (error) {
-    expect(error).toBeInstanceOf(InvalidJobTransitionError);
-    expect(error).toMatchObject({
-      name: "InvalidJobTransitionError",
-      from,
-      to,
-      message: `Invalid job transition: ${from} -> ${to}`,
-    });
-  }
-});
-```
-
-- [ ] **Step 2: Run the focused tests and confirm the progress cases fail**
-
-Run: `npm run test:new -- packages/contracts/src/job-contract.test.ts packages/domain/src/jobs/job-state.test.ts`
-
-Expected: progress cases fail because `JobProgressSchema` accepts accounted counters greater than `total`; the matrix reports 33 rejected pairs
-
-- [ ] **Step 3: Add the minimal progress invariant**
-
-Replace `JobProgressSchema` with
-
-```ts
-export const JobProgressSchema = z.object({
-  total: z.number().int().nonnegative(),
-  completed: z.number().int().nonnegative(),
-  failed: z.number().int().nonnegative(),
-  skipped: z.number().int().nonnegative(),
-  current: z.string(),
-}).superRefine((progress, context) => {
-  if (progress.completed + progress.failed + progress.skipped > progress.total) {
-    context.addIssue({
-      code: "custom",
-      path: ["completed"],
-      message: "completed + failed + skipped must be less than or equal to total",
-    });
-  }
-});
-```
-
-- [ ] **Step 4: Verify contracts and domain**
-
-Run: `npm run typecheck:new && npm run test:new`
-
-Expected: typecheck exits 0; all contract/domain tests pass, including 33 rejected transitions and error fields
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/contracts/src/job-contract.ts packages/contracts/src/job-contract.test.ts packages/contracts/src/index.ts packages/domain/src/jobs/job-state.test.ts
-git commit -m "fix: enforce job progress invariants"
-```
-
-### Task 2: Add Phase 1 Workspaces And PostgreSQL Environment
-
-**Files:**
-- Create: `compose.yaml`
-- Create: `.env.phase1.example`
-- Create: `packages/database/package.json`
-- Create: `packages/database/tsconfig.json`
-- Create: `packages/jobs/package.json`
-- Create: `packages/jobs/tsconfig.json`
-- Create: `apps/api/package.json`
-- Create: `apps/api/tsconfig.json`
-- Create: `apps/worker/package.json`
-- Create: `apps/worker/tsconfig.json`
-- Create: `apps/web/package.json`
-- Create: `apps/web/tsconfig.json`
-- Modify: `package.json`
-- Modify: `package-lock.json`
+- Create: `packages/database/package.json`, `packages/database/tsconfig.json`, `packages/jobs/package.json`, `packages/jobs/tsconfig.json`
+- Create: `apps/api/package.json`, `apps/api/tsconfig.json`, `apps/worker/package.json`, `apps/worker/tsconfig.json`
+- Create: `apps/web/package.json`, `apps/web/tsconfig.json`, `vitest.integration.config.ts`
 - Modify: `vitest.config.ts`
-- Create: `vitest.integration.config.ts`
 - Modify: `eslint.config.js`
+- Modify: `package.json`, `package-lock.json`
+
+**Contracts And Rules:**
+
+- `JobProgress.completed + failed + skipped <= total`
+- 状态迁移测试枚举 7×7 全矩阵，16 个 allowed 与 33 个 rejected 精确覆盖
+- 每个 rejected case 断言 error `name`、`from`、`to`、`message`
+- 示例任务只要求属于共享 job 契约、无外部依赖且可由测试 executor 执行，不在本计划锁死长期公开类型名
+- 只增加 Kysely、pg、pg-boss、API/Web 测试与运行所需直接依赖
+- 实施时记录每个新增包的精确版本并使用 `--save-exact`，审查 lock diff；复用现有 React、Express、Zod、TypeScript、Vite、Vitest，不运行 `npm update` 或 `npm audit fix`
+- `test:new` 只收集 unit tests，`test:integration` 显式设置 `/postgres` 管理 URL
+
+- [ ] **Write failing tests:** progress 超总量和 33 个拒绝迁移
+- [ ] **Confirm failure:** `npm run test:new -- packages/contracts/src/job-contract.test.ts packages/domain/src/jobs/job-state.test.ts`
+- [ ] **Implement minimum:** 收紧 Zod invariant，建立 workspace/config/scripts，安装精确依赖
+- [ ] **Focused verification:**
+
+```bash
+npm run typecheck:new
+npm run test:new
+node --test test/contracts/*.test.js
+npm ls --workspaces --depth=0
+```
+
+**Acceptance:** progress 越界被拒绝；16/33 状态对完整；unit 不收集 integration/e2e；workspace graph 无 invalid dependency
+
+**Commit boundary:** `git commit -m "chore: establish phase 1 workspaces"`
+
+### Task 2: PostgreSQL Schema And Kysely Migrations
+
+**Scope:** 建立开发/测试 PostgreSQL、Kysely 连接、版本化 migrations 与 disposable database harness
+**Files:**
+- Create: `compose.yaml`, `.env.phase1.example`
 - Modify: `.gitignore`
-- Create: `test/contracts/phase1-workspaces.contract.test.js`
+- Create: `packages/database/src/db.ts`, `packages/database/src/migrate.ts`, `packages/database/src/index.ts`
+- Create: `packages/database/src/migrations/index.ts`, `packages/database/src/migrations/001_collaboration.ts`, `packages/database/src/migrations/002_jobs.ts`
+- Create: `packages/database/src/testing/postgres.ts`, `packages/database/src/schema.integration.test.ts`
 
-- [ ] **Step 1: Add a failing workspace contract test**
-
-Create `test/contracts/phase1-workspaces.contract.test.js`
-
-```js
-import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import test from "node:test";
-
-test("phase 1 workspaces expose required verification scripts", async () => {
-  const root = JSON.parse(await readFile(new URL("../../package.json", import.meta.url)));
-  for (const script of ["db:migrate", "test:integration", "typecheck:phase1", "verify:phase1"]) {
-    assert.equal(typeof root.scripts[script], "string", `missing ${script}`);
-  }
-  for (const path of ["../../apps/api/package.json", "../../apps/worker/package.json", "../../apps/web/package.json", "../../packages/database/package.json", "../../packages/jobs/package.json"]) {
-    const workspace = JSON.parse(await readFile(new URL(path, import.meta.url)));
-    assert.equal(workspace.private, true);
-  }
-});
-```
-
-- [ ] **Step 2: Confirm the workspace test fails**
-
-Run: `node --test test/contracts/phase1-workspaces.contract.test.js`
-
-Expected: FAIL with `missing db:migrate` or `ENOENT` for the first absent workspace
-
-- [ ] **Step 3: Create workspace manifests, then install only approved exact dependencies**
-
-Create the ten package/tsconfig files listed above before invoking npm. Package names are exactly `@novel-analysis/database`, `@novel-analysis/jobs`, `@novel-analysis/api`, `@novel-analysis/worker`, and `@novel-analysis/web`; each package is private ESM, each has `typecheck: tsc -p tsconfig.json`, and Web additionally has `test: vitest run` and `build: vite build`. The API/Worker/Jobs manifests declare only the workspace packages they import using `"*"`
-
-Run the version checks from section 5, then run
-
-```bash
-npm install --save-exact -w packages/database kysely@0.29.4 pg@8.22.0
-npm install --save-exact -D -w packages/database @types/pg@8.20.0
-npm install --save-exact -w packages/jobs pg-boss@12.26.1
-npm install --save-exact -w apps/api express@5.2.1 zod@4.4.3 cookie-parser@1.4.7 helmet@8.3.0
-npm install --save-exact -D -w apps/api @types/express@5.0.6 @types/cookie-parser@1.4.10 supertest@7.2.2 @types/supertest@7.2.1
-npm install --save-exact -w apps/web react@19.2.6 react-dom@19.2.6 react-router-dom@7.18.1 @tanstack/react-query@5.101.2 lucide-react@1.16.0
-npm install --save-exact -D -w apps/web @testing-library/react@16.3.2 @testing-library/jest-dom@6.9.1 jsdom@29.1.1
-npm install --save-exact -D tsx@4.23.1 @playwright/test@1.61.1
-```
-
-Each new workspace uses `"type": "module"`, `"private": true`, local workspace dependencies as `"*"`, and `tsconfig.json` extending `../../tsconfig.base.json`. Add root scripts
-
-```json
-{
-  "db:migrate": "tsx packages/database/src/migrate.ts",
-  "test:integration": "vitest run --config vitest.integration.config.ts",
-  "typecheck:phase1": "npm run typecheck -w packages/database && npm run typecheck -w packages/jobs && npm run typecheck -w apps/api && npm run typecheck -w apps/worker && npm run typecheck -w apps/web",
-  "verify:phase1": "npm run typecheck:phase1 && npm run test:new && npm run test:integration && npm run build -w apps/web"
-}
-```
-
-Extend ESLint TypeScript files to `['packages/**/*.ts', 'apps/**/*.{ts,tsx}']`, browser globals only for `apps/web`, and Vitest unit includes to `packages/**/*.test.ts` plus `apps/**/*.test.ts`
-
-Create `vitest.integration.config.ts`
-
-```ts
-import { defineConfig } from "vitest/config";
-
-export default defineConfig({
-  test: {
-    environment: "node",
-    include: [
-      "packages/**/*.integration.test.ts",
-      "apps/**/*.integration.test.ts",
-    ],
-    fileParallelism: false,
-    testTimeout: 30_000,
-    hookTimeout: 30_000,
-  },
-});
-```
-
-- [ ] **Step 4: Add the isolated PostgreSQL service**
-
-Create `compose.yaml`
-
-```yaml
-services:
-  postgres:
-    image: postgres:17.5-bookworm
-    environment:
-      POSTGRES_USER: novel
-      POSTGRES_PASSWORD: novel_dev_only
-      POSTGRES_DB: novel_analysis
-    ports:
-      - "127.0.0.1:55432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U novel -d novel_analysis"]
-      interval: 2s
-      timeout: 3s
-      retries: 20
-    volumes:
-      - phase1-postgres:/var/lib/postgresql/data
-volumes:
-  phase1-postgres:
-```
-
-Create `.env.phase1.example` with `DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/novel_analysis`, `TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/postgres`, `APP_ORIGIN=https://novel.test`, `SESSION_COOKIE_SECURE=true`, `FEISHU_AUTHORIZE_URL=https://accounts.feishu.cn/open-apis/authen/v1/authorize`, `FEISHU_TOKEN_URL=https://open.feishu.cn/open-apis/authen/v2/oauth/token`, `FEISHU_CLIENT_ID=cli_replace_me`, and `FEISHU_CLIENT_SECRET=replace_me`. These are inert example values, not real secrets. Add `.env.phase1` and Playwright artifacts to `.gitignore`
-
-- [ ] **Step 5: Verify clean workspace resolution and PostgreSQL health**
-
-Run: `npm ci && npm ls --workspaces --depth=0 && docker compose up -d postgres && docker compose exec -T postgres pg_isready -U novel -d novel_analysis`
-
-Expected: all commands exit 0; final output contains `accepting connections`; `npm ls` has no invalid peer/dependency markers
-
-Run: `node --test test/contracts/phase1-workspaces.contract.test.js`
-
-Expected: PASS
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add compose.yaml .env.phase1.example .gitignore package.json package-lock.json vitest.config.ts eslint.config.js vitest.integration.config.ts test/contracts/phase1-workspaces.contract.test.js apps packages/database packages/jobs
-git commit -m "chore: add phase 1 runtime workspaces"
-```
-
-### Task 3: Build Real PostgreSQL Migration And Test Harness
-
-**Files:**
-- Create: `packages/database/src/db.ts`
-- Create: `packages/database/src/migrate.ts`
-- Create: `packages/database/src/migrations/index.ts`
-- Create: `packages/database/src/migrations/001_collaboration.ts`
-- Create: `packages/database/src/testing/postgres.ts`
-- Create: `packages/database/src/collaboration.integration.test.ts`
-- Create: `packages/database/src/index.ts`
-
-- [ ] **Step 1: Write the failing real-database migration test**
-
-```ts
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createIsolatedDatabase } from "./testing/postgres.js";
-
-const testDb = createIsolatedDatabase("collaboration");
-beforeAll(() => testDb.start());
-afterAll(() => testDb.stop());
-
-describe("collaboration migration", () => {
-  it("creates collaboration tables and rejects duplicate identities", async () => {
-    const names = await testDb.tableNames();
-    expect(names).toEqual(expect.arrayContaining(["users", "auth_identities", "sessions", "oauth_states", "audit_logs"]));
-    const userId = await testDb.insertUser({ role: "member", status: "active" });
-    await testDb.insertIdentity(userId, "feishu", "union-1");
-    await expect(testDb.insertIdentity(userId, "feishu", "union-1")).rejects.toMatchObject({ code: "23505" });
-  });
-});
-```
-
-- [ ] **Step 2: Confirm migration test fails before tables exist**
-
-Run: `TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/novel_analysis_test npm run test:integration -- packages/database/src/collaboration.integration.test.ts`
-
-Expected: FAIL because `createIsolatedDatabase` or migration `001_collaboration` is absent
-
-- [ ] **Step 3: Implement connection, isolation and collaboration migration**
-
-`createIsolatedDatabase(name)` must connect to the admin database, create a random database named `na_test_<name>_<hex>`, run Kysely `Migrator`, and terminate all connections before dropping it in `stop()`. Never fall back to SQLite or an in-memory adapter
-
-Migration `001_collaboration.ts` must emit the equivalent of this complete schema
+**Schema Contract:**
 
 ```sql
-create type user_role as enum ('admin', 'member');
-create type user_status as enum ('active', 'disabled');
-create table users (
-  id uuid primary key,
-  display_name text not null,
-  avatar_url text,
-  role user_role not null,
-  status user_status not null default 'active',
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-create table auth_identities (
-  id uuid primary key,
-  user_id uuid not null references users(id) on delete cascade,
-  provider text not null check (provider = 'feishu'),
-  subject text not null,
-  created_at timestamptz not null default now(),
-  unique (provider, subject)
-);
-create table sessions (
-  id uuid primary key,
-  user_id uuid not null references users(id) on delete cascade,
-  token_hash text not null unique,
-  csrf_token_hash text not null,
-  expires_at timestamptz not null,
-  revoked_at timestamptz,
-  created_at timestamptz not null default now(),
-  last_seen_at timestamptz not null default now()
-);
-create index sessions_active_lookup on sessions(token_hash, expires_at) where revoked_at is null;
-create table oauth_states (
-  state_hash text primary key,
-  return_to text not null check (return_to like '/%'),
-  expires_at timestamptz not null,
-  consumed_at timestamptz,
-  created_at timestamptz not null default now()
-);
-create table audit_logs (
-  id bigint generated always as identity primary key,
-  actor_user_id uuid references users(id),
-  action text not null,
-  target_type text not null,
-  target_id text not null,
-  metadata jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now()
-);
-create index audit_logs_created_at on audit_logs(created_at desc);
+users(id, display_name, avatar_url, role, status, created_at, updated_at)
+auth_identities(id, user_id, provider, subject, created_at, unique(provider, subject))
+sessions(id, user_id, token_hash unique, csrf_token_hash nullable, expires_at, revoked_at, created_at, last_seen_at)
+audit_logs(id bigint identity, actor_user_id, action, target_type, target_id, metadata jsonb, created_at)
+jobs(id, type, status, requested_by, request_id, scope jsonb, config_snapshot jsonb,
+     concurrency_key, progress jsonb, created_at, updated_at, unique(requested_by, request_id))
+job_steps(id, job_id, position, kind, status, input_signature, idempotency_key unique,
+          output_ref jsonb, lease_owner, lease_expires_at, attempt_count, created_at, updated_at,
+          unique(job_id, position))
+job_attempts(id, step_id, attempt_no, worker_id, status, error_code, error_message,
+             started_at, finished_at, unique(step_id, attempt_no))
+job_events(id bigint identity, job_id, type, dedupe_key, payload jsonb, created_at,
+           unique(job_id, dedupe_key))
+job_outbox(id, job_id, topic, payload jsonb, available_at, claimed_by,
+           claim_expires_at, delivered_at, created_at)
 ```
 
-The down migration drops tables in reverse foreign-key order and then drops both enum types. `migrate.ts` exits nonzero on migration error and always destroys the pool
+`role` 只允许 admin/member，用户 status 只允许 active/disabled，job status 与共享契约一致。active concurrency key 使用 partial unique index。session、event cursor、step claim、pending outbox 建必要索引。down migration 按外键逆序删除并清理 enum/type
 
-- [ ] **Step 4: Verify migration up, down, and fresh up**
+**Transaction And Harness Rules:**
 
-Run: `npm run test:integration -- packages/database/src/collaboration.integration.test.ts`
+- `createDatabase(url)` 只接受 PostgreSQL URL并显式 destroy pool
+- migration runner 使用 Kysely Migrator，失败非零退出，重复执行无变更
+- harness 拒绝非 `/postgres` 的 `TEST_DATABASE_URL`
+- 每个 integration file 使用独立随机数据库，不共享表清理状态
+- 测试覆盖 up、down、fresh up、唯一约束、外键和 partial unique index
 
-Expected: PASS against a real PostgreSQL database
-
-Run: `DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/novel_analysis npm run db:migrate`
-
-Expected: exit 0 and report migration `001_collaboration` applied; a second run reports no pending migration
-
-- [ ] **Step 5: Commit**
+- [ ] **Write failing test:** 断言全部表、约束与 migration round trip
+- [ ] **Confirm environment:** `docker compose up -d postgres && docker compose exec -T postgres pg_isready -U novel -d postgres`
+- [ ] **Confirm failure:** `npm run test:integration -- packages/database/src/schema.integration.test.ts`
+- [ ] **Implement minimum:** compose、连接、两条 migration、harness
+- [ ] **Focused verification:**
 
 ```bash
-git add packages/database/src
-git commit -m "feat: add collaboration database schema"
+npm run test:integration -- packages/database/src/schema.integration.test.ts
+DATABASE_URL="$DATABASE_URL" npm run db:migrate
+DATABASE_URL="$DATABASE_URL" npm run db:migrate
 ```
 
-### Task 4: Implement Sessions, OAuth State, And Feishu Adapter
+**Acceptance:** 真实 PostgreSQL 从空库完成 migration；第二次无 pending migration；测试库创建/销毁无残留连接；没有 SQLite import
 
+**Commit boundary:** `git commit -m "feat: add phase 1 PostgreSQL schema"`
+
+### Task 3: OAuth, Session, RBAC And Audit
+
+**Scope:** 实现飞书 adapter/fake、白名单登录、server-side session、CSRF/Origin、admin/member RBAC、成员管理与审计
 **Files:**
-- Create: `apps/api/src/config.ts`
-- Create: `apps/api/src/auth/crypto-tokens.ts`
-- Create: `apps/api/src/auth/feishu-adapter.ts`
-- Create: `apps/api/src/auth/feishu-http-adapter.ts`
-- Create: `apps/api/src/auth/feishu-fake.ts`
-- Create: `apps/api/src/auth/auth-service.ts`
-- Create: `apps/api/src/auth/session-middleware.ts`
-- Create: `apps/api/src/routes/auth.ts`
-- Create: `apps/api/src/app.ts`
-- Create: `apps/api/src/auth/auth.integration.test.ts`
-
-- [ ] **Step 1: Write failing OAuth security tests**
-
-Use Supertest with `FeishuFake({ "valid-code": { unionId: "union-admin", displayName: "测试管理员" } })`. Insert one active mapped admin and assert
-
-```ts
-it("consumes state once and issues only hashed server-side sessions", async () => {
-  const start = await request(app).get("/api/auth/feishu/start?returnTo=/tasks").expect(302);
-  const state = new URL(start.headers.location).searchParams.get("state");
-  const callback = await request(app).get(`/api/auth/feishu/callback?code=valid-code&state=${state}`).expect(302);
-  expect(callback.headers["set-cookie"][0]).toMatch(/^na_session_test=.*HttpOnly.*SameSite=Lax/);
-  await request(app).get(`/api/auth/feishu/callback?code=valid-code&state=${state}`).expect(400);
-  expect(await db.selectFrom("sessions").select("token_hash").executeTakeFirstOrThrow())
-    .not.toMatchObject({ token_hash: callback.headers["set-cookie"][0].split("=")[1].split(";")[0] });
-});
-
-it.each(["unknown-code", "disabled-code", "unmapped-code"])("rejects %s without a session", async (code) => {
-  const state = await issueState(app);
-  const response = await request(app).get(`/api/auth/feishu/callback?code=${code}&state=${state}`);
-  expect([401, 403]).toContain(response.status);
-  expect(response.headers["set-cookie"]).toBeUndefined();
-});
-```
-
-Also assert an expired state, altered state, absolute `returnTo`, revoked session, and expired session are rejected
-
-- [ ] **Step 2: Confirm authentication tests fail**
-
-Run: `npm run test:integration -- apps/api/src/auth/auth.integration.test.ts`
-
-Expected: FAIL because the auth application and adapter interfaces do not exist
-
-- [ ] **Step 3: Implement the adapter and service boundary**
-
-Use this interface exactly
-
-```ts
-export interface FeishuIdentity {
-  unionId: string;
-  displayName: string;
-  avatarUrl: string | null;
-}
-export interface FeishuOAuthAdapter {
-  authorizationUrl(input: { state: string; redirectUri: string }): URL;
-  exchangeCode(input: { code: string; redirectUri: string }): Promise<FeishuIdentity>;
-}
-```
-
-`AuthService.startLogin(returnTo)` validates `returnTo` with `/^\/(?!\/)/`, creates 32 random bytes, stores only `sha256(state)`, and returns the adapter URL. `finishLogin` atomically consumes a live state with the following predicate and returning column, exchanges the code, joins identity to active user, creates random session and CSRF values, stores only their hashes, and returns raw values once to the route
-
-```sql
-update oauth_states
-set consumed_at = now()
-where state_hash = $1 and consumed_at is null and expires_at > now()
-returning return_to;
-```
-
-`FeishuHttpAdapter` uses configured endpoints, `client_id`, `client_secret`, an AbortSignal timeout, checks `response.ok`, validates response JSON with a local Zod schema, and throws sanitized error codes without embedding code, secret, or provider response body. `FeishuFake` exists only as a constructor-injected test utility; production `main.ts` always constructs the HTTP adapter
-
-- [ ] **Step 4: Set cookie and CSRF-safe session middleware**
-
-The callback derives `cookieName` as `__Host-na_session` when `sessionCookieSecure` is true and `na_session_test` otherwise, then sets
-
-```ts
-response.cookie(cookieName, result.sessionToken, {
-  httpOnly: true,
-  secure: config.sessionCookieSecure,
-  sameSite: "lax",
-  path: "/",
-  maxAge: config.sessionTtlMs,
-});
-response.redirect(303, result.returnTo);
-```
-
-`GET /api/auth/me` returns `{ user: { id, displayName, role }, csrfToken }`; logout requires CSRF, revokes the row, clears the same cookie attributes, and returns 204. `createApp(dependencies)` initially composes Helmet, a `64kb` JSON limit, cookie parsing, request ID, auth middleware, and auth routes; later tasks extend this same composition root
-
-- [ ] **Step 5: Verify auth and secret redaction**
-
-Run: `npm run test:integration -- apps/api/src/auth/auth.integration.test.ts`
-
-Expected: PASS; only active mapped identity logs in, state cannot be replayed, raw session token is absent from PostgreSQL, and error bodies contain no OAuth code/client secret
-
-- [ ] **Step 6: Commit**
-
-```bash
-git add apps/api/src/config.ts apps/api/src/auth apps/api/src/routes/auth.ts apps/api/src/app.ts
-git commit -m "feat: add secure Feishu session authentication"
-```
-
-### Task 5: Add RBAC, Member Administration, And Audit
-
-**Files:**
-- Create: `packages/domain/src/auth/rbac.ts`
-- Create: `packages/domain/src/auth/rbac.test.ts`
+- Create: `packages/domain/src/auth/rbac.ts`, `packages/domain/src/auth/rbac.test.ts`
 - Modify: `packages/domain/src/index.ts`
-- Create: `apps/api/src/auth/authorize.ts`
-- Create: `apps/api/src/bootstrap-admin.ts`
-- Create: `apps/api/src/routes/admin-members.ts`
-- Create: `apps/api/src/routes/admin-members.integration.test.ts`
-- Modify: `apps/api/src/app.ts`
+- Create: `apps/api/src/config.ts`, `apps/api/src/app.ts`, `apps/api/src/bootstrap-admin.ts`
+- Create: `apps/api/src/auth/feishu-adapter.ts`, `apps/api/src/auth/feishu-http-adapter.ts`, `apps/api/src/auth/feishu-fake.ts`
+- Create: `apps/api/src/auth/auth-service.ts`, `apps/api/src/auth/session-middleware.ts`, `apps/api/src/auth/csrf.ts`, `apps/api/src/auth/authorize.ts`
+- Create: `apps/api/src/routes/auth.ts`, `apps/api/src/routes/admin-members.ts`
+- Create: `apps/api/src/auth/auth.integration.test.ts`, `apps/api/src/routes/admin-members.integration.test.ts`
 
-- [ ] **Step 1: Write failing domain and HTTP authorization tests**
-
-```ts
-it.each([
-  ["member", "members:manage", false],
-  ["member", "system:configure", false],
-  ["member", "audit:read", false],
-  ["admin", "members:manage", true],
-  ["admin", "system:configure", true],
-  ["admin", "audit:read", true],
-] as const)("%s / %s => %s", (role, permission, expected) => {
-  expect(hasPermission(role, permission)).toBe(expected);
-});
-```
-
-Integration tests assert unauthenticated `401`, member `403`, admin `201` when creating a mapped member, duplicate Feishu subject `409`, and that role/status changes produce one audit row with actor, target and before/after only. Bootstrap tests assert an empty database creates exactly one active admin mapped to the configured Feishu union ID, rerunning with the same ID is idempotent, and running with a different ID after any user exists exits nonzero without changes
-
-- [ ] **Step 2: Confirm tests fail**
-
-Run: `npm run test:new -- packages/domain/src/auth/rbac.test.ts && npm run test:integration -- apps/api/src/routes/admin-members.integration.test.ts`
-
-Expected: first command FAIL because RBAC module is absent; after adding only the domain module, HTTP test still FAIL because admin routes are absent
-
-- [ ] **Step 3: Implement explicit permission matrix and transaction**
+**OAuth And Session Contract:**
 
 ```ts
-export const PERMISSIONS = ["members:manage", "system:configure", "audit:read", "jobs:control:any"] as const;
-export type Permission = typeof PERMISSIONS[number];
-export type UserRole = "admin" | "member";
-const matrix: Record<UserRole, ReadonlySet<Permission>> = {
-  admin: new Set(PERMISSIONS),
-  member: new Set(),
-};
-export const hasPermission = (role: UserRole, permission: Permission) => matrix[role].has(permission);
+interface FeishuOAuthAdapter {
+  authorizationUrl(input: { state: string; redirectUri: string }): URL;
+  exchangeCode(input: { code: string; redirectUri: string }): Promise<{
+    unionId: string; displayName: string; avatarUrl: string | null;
+  }>;
+}
+
+interface AuthService {
+  startLogin(returnTo: string): Promise<URL>;
+  finishLogin(code: string, state: string, priorSessionToken?: string): Promise<{
+    sessionToken: string; returnTo: string;
+  }>;
+  currentUserAndRotateCsrf(sessionToken: string): Promise<{
+    user: { id: string; displayName: string; role: "admin" | "member" };
+    csrfToken: string;
+  }>;
+  logout(sessionToken: string): Promise<void>;
+}
 ```
 
-Implement `GET /api/admin/members`, `POST /api/admin/members`, and `PATCH /api/admin/members/:id`. All require `members:manage`; both writes additionally require same-origin and CSRF. User/identity changes and `audit_logs` insert share one Kysely transaction; disabling a user also revokes all active sessions in that transaction. The GET response returns only user ID, display name, role, status, masked Feishu subject, and timestamps
+`finishLogin` 单次消费 state，交换 code，查询 `auth_identities -> users` 且要求 active，生成 session 原始值并只存 hash。callback 只设置 session Cookie 后 303 到校验过的站内 `returnTo`，不把 token 写进 URL
 
-Implement `bootstrap-admin.ts` as a one-time deployment command requiring `BOOTSTRAP_FEISHU_UNION_ID` and `BOOTSTRAP_ADMIN_NAME`. It takes PostgreSQL advisory transaction lock `71006101`, counts users, creates one active admin plus its Feishu identity only when the count is zero, returns success when the sole matching admin already exists, and refuses every other nonempty state. It writes `system.bootstrap_admin` audit metadata without storing environment values beyond the mapped subject already required by `auth_identities`
+`GET /api/auth/me` 锁有效 session，生成新 CSRF 原始值，覆盖 hash并返回用户与原始值。任何写请求都校验 Origin 与当前 hash。旧 token、过期/revoked session、disabled 用户一律拒绝
 
-- [ ] **Step 4: Verify service-side denial and audit atomicity**
+**RBAC And Audit Contract:**
 
-Run: `npm run test:new -- packages/domain/src/auth/rbac.test.ts && npm run test:integration -- apps/api/src/routes/admin-members.integration.test.ts`
+- member 可查看共享任务、创建任务、控制自己的任务
+- admin 额外拥有 members:manage、jobs:control:any、audit:read
+- `GET/POST/PATCH /api/admin/members` 服务端要求 admin
+- 成员变更、session 强制撤销和 audit insert 同事务
+- 首个管理员脚本仅在 users 为空时创建配置中的飞书 identity；同一 identity 重跑幂等，任何其他非空状态拒绝
 
-Expected: PASS; member request changes zero rows and writes zero audit rows, admin changes one target and writes one audit row
-
-- [ ] **Step 5: Commit**
+- [ ] **Write failing tests:** state replay、未映射/disabled、session hash、Cookie 属性、/me CSRF 轮换、旧 token、Origin、重登/注销、日志脱敏、member 403、admin 审计原子性
+- [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
+- [ ] **Confirm failure:** `npm run test:integration -- apps/api/src/auth/auth.integration.test.ts apps/api/src/routes/admin-members.integration.test.ts`
+- [ ] **Implement minimum:** adapter/service/middleware/routes/bootstrap 与显式事务
+- [ ] **Focused verification:**
 
 ```bash
-git add packages/domain/src/auth packages/domain/src/index.ts apps/api/src/auth/authorize.ts apps/api/src/bootstrap-admin.ts apps/api/src/routes/admin-members.ts apps/api/src/routes/admin-members.integration.test.ts apps/api/src/app.ts
-git commit -m "feat: enforce member administration RBAC"
+npm run test:new -- packages/domain/src/auth/rbac.test.ts
+npm run test:integration -- apps/api/src/auth/auth.integration.test.ts apps/api/src/routes/admin-members.integration.test.ts
+npm run typecheck -w apps/api
 ```
 
-### Task 6: Add Persistent Job Schema And Atomic Repository
+**Acceptance:** OAuth state 与白名单边界有效；数据库只有 token hash；callback URL/日志无 token；/me 能轮换且不从 hash 还原；member 无管理权限；成功管理操作有且仅有一条审计，失败操作无审计
 
+**Commit boundary:** `git commit -m "feat: add secure collaboration authentication"`
+
+### Task 4: Persistent Job API And Audited Controls
+
+**Scope:** 实现示例任务创建、列表/详情、状态控制、事件和审计事务，不接入 pg-boss
 **Files:**
-- Create: `packages/database/src/migrations/002_jobs.ts`
-- Modify: `packages/database/src/migrations/index.ts`
-- Create: `packages/jobs/src/job-repository.ts`
-- Create: `packages/jobs/src/job-repository.integration.test.ts`
-- Create: `packages/jobs/src/index.ts`
-
-- [ ] **Step 1: Write failing repository transaction tests**
-
-Test that `createExampleJob` creates exactly one job, two ordered steps, one `created` event and one pending outbox row. Force an event insert failure inside a test transaction and assert none of the four tables retains rows. Call twice with the same request id and assert the same job is returned
-
-```ts
-const first = await repository.createExampleJob({ requestedBy, requestId: "req-001" });
-const second = await repository.createExampleJob({ requestedBy, requestId: "req-001" });
-expect(second.id).toBe(first.id);
-expect(await counts(db)).toEqual({ jobs: 1, steps: 2, events: 1, outbox: 1 });
-```
-
-- [ ] **Step 2: Confirm the repository test fails**
-
-Run: `npm run test:integration -- packages/jobs/src/job-repository.integration.test.ts`
-
-Expected: FAIL because migration `002_jobs` and repository are absent
-
-- [ ] **Step 3: Implement the complete Phase 1 job schema**
-
-Migration `002_jobs.ts` emits equivalent SQL
-
-```sql
-create type job_status as enum ('queued','running','retrying','paused','completed','failed','cancelled');
-create type job_step_status as enum ('queued','running','completed','failed','cancelled');
-create table jobs (
-  id uuid primary key,
-  type text not null,
-  status job_status not null,
-  requested_by uuid not null references users(id),
-  request_id text not null,
-  scope jsonb not null,
-  config_snapshot jsonb not null default '{}'::jsonb,
-  concurrency_key text not null,
-  progress jsonb not null,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (requested_by, request_id)
-);
-create unique index jobs_active_concurrency on jobs(concurrency_key)
-  where status in ('queued','running','retrying','paused');
-create table job_steps (
-  id uuid primary key,
-  job_id uuid not null references jobs(id) on delete cascade,
-  position integer not null check (position > 0),
-  kind text not null,
-  status job_step_status not null default 'queued',
-  input_signature text not null,
-  idempotency_key text not null unique,
-  output_ref jsonb,
-  lease_owner text,
-  lease_expires_at timestamptz,
-  attempt_count integer not null default 0 check (attempt_count >= 0),
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  unique (job_id, position)
-);
-create index job_steps_claim on job_steps(status, lease_expires_at, position);
-create table job_attempts (
-  id uuid primary key,
-  step_id uuid not null references job_steps(id) on delete cascade,
-  attempt_no integer not null check (attempt_no > 0),
-  worker_id text not null,
-  status text not null check (status in ('running','completed','abandoned','failed')),
-  error_code text,
-  error_message text,
-  started_at timestamptz not null default now(),
-  finished_at timestamptz,
-  unique (step_id, attempt_no)
-);
-create table job_events (
-  id bigint generated always as identity primary key,
-  job_id uuid not null references jobs(id) on delete cascade,
-  type text not null,
-  dedupe_key text not null,
-  payload jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  unique (job_id, dedupe_key)
-);
-create index job_events_resume on job_events(job_id, id);
-create table job_outbox (
-  id uuid primary key,
-  job_id uuid not null references jobs(id) on delete cascade,
-  topic text not null,
-  payload jsonb not null,
-  available_at timestamptz not null default now(),
-  claimed_by text,
-  claim_expires_at timestamptz,
-  delivered_at timestamptz,
-  created_at timestamptz not null default now()
-);
-create index job_outbox_pending on job_outbox(available_at, created_at) where delivered_at is null;
-```
-
-The example job has type `system-demo`, scope `{ scenario: "phase-1-recovery" }`, concurrency key `phase1-demo:<requestedBy>:<requestId>`, progress `{ total: 2, completed: 0, failed: 0, skipped: 0, current: "等待执行" }`, and steps `prepare`/`finish` with SHA-256 input signatures and stable idempotency keys `<jobId>:1` and `<jobId>:2`
-
-- [ ] **Step 4: Verify atomicity and migration rollback**
-
-Run: `npm run test:integration -- packages/jobs/src/job-repository.integration.test.ts`
-
-Expected: PASS; exact counts are 1/2/1/1 after duplicate request, and forced transaction failure leaves 0 rows
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/database/src/migrations packages/jobs/src/job-repository.ts packages/jobs/src/job-repository.integration.test.ts packages/jobs/src/index.ts
-git commit -m "feat: persist jobs events and outbox atomically"
-```
-
-### Task 7: Implement Audited Task Controls
-
-**Files:**
-- Modify: `packages/jobs/src/job-repository.ts`
-- Create: `packages/jobs/src/job-controls.integration.test.ts`
-- Create: `apps/api/src/routes/jobs.ts`
-- Create: `apps/api/src/routes/jobs.integration.test.ts`
+- Modify: `packages/contracts/src/job-contract.ts`, `packages/contracts/src/job-contract.test.ts`, `packages/contracts/src/index.ts`
+- Create: `packages/jobs/src/job-repository.ts`, `packages/jobs/src/job-controls.ts`, `packages/jobs/src/index.ts`
+- Create: `packages/jobs/src/job-repository.integration.test.ts`, `packages/jobs/src/job-controls.integration.test.ts`, `packages/jobs/src/control-completion-race.integration.test.ts`
+- Create: `apps/api/src/routes/jobs.ts`, `apps/api/src/routes/jobs.integration.test.ts`
 - Modify: `apps/api/src/app.ts`
 
-- [ ] **Step 1: Write failing ownership, transition, CSRF and audit tests**
-
-Cover member-own pause/resume/cancel, member-other `403`, admin-other success, invalid transition `409`, missing/wrong Origin `403`, missing/wrong CSRF `403`, missing/blank `Idempotency-Key` `400`, and rollback when audit insert fails. Assert audit actions exactly `job.pause`, `job.resume`, `job.cancel` with `{ from, to, requestId }`
-
-- [ ] **Step 2: Confirm controls fail before implementation**
-
-Run: `npm run test:integration -- packages/jobs/src/job-controls.integration.test.ts apps/api/src/routes/jobs.integration.test.ts`
-
-Expected: FAIL because `controlJob` and `/api/jobs/:id/{pause,resume,cancel}` do not exist
-
-- [ ] **Step 3: Implement control transitions in one transaction**
-
-Lock the job `for update`, authorize owner or `jobs:control:any`, map pause to `paused`, resume to `queued`, and cancel to `cancelled`, call `assertJobTransition`, update job, add deduplicated event key `control:<action>:<Idempotency-Key>`, insert audit log with the same request ID, and enqueue an outbox wake only for resume. Repeating the same control key returns the already recorded result without a second event/audit row. Return 404 without revealing ownership when job does not exist; return structured `409 { code: "INVALID_JOB_TRANSITION", from, to }`
-
-Routes are exactly
+**API Contract:**
 
 ```text
+POST /api/jobs/example
+GET  /api/jobs?limit=<bounded>&cursor=<optional>
+GET  /api/jobs/:id
 POST /api/jobs/:id/pause
 POST /api/jobs/:id/resume
 POST /api/jobs/:id/cancel
 ```
 
-- [ ] **Step 4: Verify all control and audit cases**
+所有写请求要求 session、Origin、CSRF 与 `Idempotency-Key`。创建任务在一个事务写 job、ordered steps、created event、pending outbox。重复创建 key 返回同一 job。公开响应通过共享 Zod schema，不暴露 lease owner、token hash、queue ID、内部错误栈
 
-Run: `npm run test:integration -- packages/jobs/src/job-controls.integration.test.ts apps/api/src/routes/jobs.integration.test.ts`
-
-Expected: PASS; every successful control has one audit row, every denied/failed control has none
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/jobs/src/job-repository.ts packages/jobs/src/job-controls.integration.test.ts apps/api/src/routes/jobs.ts apps/api/src/routes/jobs.integration.test.ts apps/api/src/app.ts
-git commit -m "feat: add audited task controls"
-```
-
-### Task 8: Dispatch Transactional Outbox Through pg-boss
-
-**Files:**
-- Create: `packages/jobs/src/boss.ts`
-- Create: `packages/jobs/src/outbox-dispatcher.ts`
-- Create: `packages/jobs/src/outbox-dispatcher.integration.test.ts`
-- Modify: `packages/jobs/src/index.ts`
-
-- [ ] **Step 1: Write failing duplicate-delivery integration test**
-
-Start real pg-boss against the isolated PostgreSQL database, create one example job, dispatch, clear `delivered_at` to simulate a crash after send, dispatch again, then subscribe and assert one logical wake key
-
-```ts
-expect(await dispatcher.dispatchBatch()).toBe(1);
-await simulateCrashAfterSend(db, job.id);
-expect(await dispatcher.dispatchBatch()).toBe(1);
-expect(await receivedWakeKeys(boss, job.id)).toEqual([`outbox:${outboxId}`]);
-```
-
-- [ ] **Step 2: Confirm dispatcher test fails**
-
-Run: `npm run test:integration -- packages/jobs/src/outbox-dispatcher.integration.test.ts`
-
-Expected: FAIL because boss factory and dispatcher are absent
-
-- [ ] **Step 3: Implement claim/send/mark boundaries**
-
-`dispatchBatch()` claims up to 20 due rows in a short transaction using `for update skip locked`, setting `claimed_by` and a 30-second `claim_expires_at`. After commit it sends each message to queue `job-wake` with `{ jobId, outboxId }`, retry limit 3, expire 5 minutes, and singleton key `outbox:<id>`. A separate transaction marks `delivered_at`; send failure clears the claim and leaves delivery pending
-
-Create pg-boss with schema `pgboss`, `application_name=novel-analysis-worker`, and no destructive schema drop in runtime or test teardown
-
-- [ ] **Step 4: Verify repeated dispatch and queue isolation**
-
-Run: `npm run test:integration -- packages/jobs/src/outbox-dispatcher.integration.test.ts`
-
-Expected: PASS; repeated outbox dispatch yields one logical wake, outbox is marked delivered, and no product status is read from pg-boss tables
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/jobs/src/boss.ts packages/jobs/src/outbox-dispatcher.ts packages/jobs/src/outbox-dispatcher.integration.test.ts packages/jobs/src/index.ts
-git commit -m "feat: dispatch job outbox through pg-boss"
-```
-
-### Task 9: Add Step Leases, Idempotent Example Executor, And Recovery
-
-**Files:**
-- Create: `packages/jobs/src/step-leases.ts`
-- Create: `packages/jobs/src/example-executor.ts`
-- Create: `packages/jobs/src/lease-recovery.integration.test.ts`
-- Modify: `packages/jobs/src/index.ts`
-
-- [ ] **Step 1: Write failing lease recovery test**
-
-Use a controllable clock. Worker A claims step 1 and is terminated without completing. Before expiry Worker B gets no step. After expiry Worker B claims the same step as attempt 2, attempt 1 becomes `abandoned`, completes both steps, and a duplicate wake changes no counts
-
-```ts
-expect(await leases.claimNext(job.id, "worker-a", now)).toMatchObject({ attemptNo: 1, kind: "prepare" });
-expect(await leases.claimNext(job.id, "worker-b", plus(now, 29_000))).toBeNull();
-expect(await leases.claimNext(job.id, "worker-b", plus(now, 31_000))).toMatchObject({ attemptNo: 2, kind: "prepare" });
-await executor.runToBoundary(job.id, "worker-b");
-await executor.runToBoundary(job.id, "worker-b");
-await executor.runToBoundary(job.id, "worker-b");
-expect(await jobSnapshot(job.id)).toMatchObject({ status: "completed", progress: { total: 2, completed: 2 } });
-expect(await attemptStatuses(job.id)).toEqual(["abandoned", "completed", "completed"]);
-expect(await terminalEvents(job.id)).toHaveLength(1);
-```
-
-- [ ] **Step 2: Confirm recovery test fails**
-
-Run: `npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts`
-
-Expected: FAIL because lease claiming and executor are absent
-
-- [ ] **Step 3: Implement atomic lease claims and completions**
-
-`claimNext` locks the first incomplete step only when all earlier positions are completed and job status is queued/running/retrying. A running step is reclaimable only when `lease_expires_at <= now`. Claim updates job to running, increments `attempt_count`, abandons any open prior attempt, inserts the new running attempt and sets a 30-second lease in one transaction
-
-`completeStep` requires matching owner and unexpired lease, sets stable `output_ref = { kind, idempotencyKey }`, completes attempt, increments progress once, and emits dedupe key `step:<stepId>:completed`. If no steps remain it sets job completed and emits `job:completed`; otherwise it writes a wake outbox row. A repeated completion returns the existing output without changing progress
-
-`ExampleExecutor` handles only `prepare` and `finish`, writes no table outside the task tables, and never imports Dify, crypto, legacy server, or SQLite code
-
-- [ ] **Step 4: Verify recovery, idempotency and state source**
-
-Run: `npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts`
-
-Expected: PASS; two completed step effects, three attempts, one abandoned attempt, one completed event, no duplicate progress
-
-Run: `rg -n "server/db|sqlite|better-sqlite|dify" apps/api apps/worker packages/database packages/jobs test/phase1 || true`
-
-Expected: no output
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add packages/jobs/src/step-leases.ts packages/jobs/src/example-executor.ts packages/jobs/src/lease-recovery.integration.test.ts packages/jobs/src/index.ts
-git commit -m "feat: recover expired worker leases"
-```
-
-### Task 10: Compose API And Worker Processes
-
-**Files:**
-- Modify: `apps/api/src/app.ts`
-- Create: `apps/api/src/main.ts`
-- Create: `apps/worker/src/worker.ts`
-- Create: `apps/worker/src/main.ts`
-- Create: `apps/worker/src/worker.integration.test.ts`
-- Modify: `apps/api/package.json`
-- Modify: `apps/worker/package.json`
-- Modify: `package.json`
-
-- [ ] **Step 1: Write failing process-composition test**
-
-Create a job through the API app, start Worker runtime with injected IDs and 100ms dispatcher/recovery intervals, wait for completed status from repository, stop and restart the runtime, and assert no new attempts or events appear. Add a health test proving API health does not require Worker memory
-
-- [ ] **Step 2: Confirm composition test fails**
-
-Run: `npm run test:integration -- apps/worker/src/worker.integration.test.ts`
-
-Expected: FAIL because API and Worker composition roots are absent
-
-- [ ] **Step 3: Implement independent lifecycle roots**
-
-`createApp(dependencies)` wires Helmet, JSON size limit `64kb`, cookie parser, request ID, auth, same-origin/CSRF, auth/admin/jobs routes and an error mapper. `main.ts` builds production dependencies and handles SIGTERM by closing HTTP server and database
-
-`createWorkerRuntime` starts pg-boss, subscribes `job-wake`, runs dispatcher and expired-lease recovery intervals, and exposes idempotent `start()`/`stop()`. Message acknowledgment occurs after `runToBoundary`; unfinished jobs enqueue the next wake through job outbox. SIGTERM stops new claims, waits at most 10 seconds for current boundary, then closes boss/database without changing product status in memory
-
-Add scripts `dev:api`, `dev:worker`, `start:api`, `start:worker`; do not replace legacy `dev` or `start`
-
-- [ ] **Step 4: Verify independent API and Worker**
-
-Run: `npm run test:integration -- apps/worker/src/worker.integration.test.ts`
-
-Expected: PASS; completed task remains completed across runtime restart and health endpoint responds with Worker stopped
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/api/src/app.ts apps/api/src/main.ts apps/api/package.json apps/worker/src apps/worker/package.json package.json
-git commit -m "feat: compose independent API and worker runtimes"
-```
-
-### Task 11: Project SSE From Persisted Job Events
-
-**Files:**
-- Create: `apps/api/src/routes/job-events.ts`
-- Create: `apps/api/src/routes/job-events.integration.test.ts`
-- Modify: `apps/api/src/app.ts`
-
-- [ ] **Step 1: Write failing resume and authorization tests**
-
-Seed event IDs 1 through 4, connect with `Last-Event-ID: 2`, and assert only 3 and 4 arrive in ascending order. Restart the app instance against the same database, append event 5, reconnect after 4, and assert 5 arrives. Assert unauthenticated `401`; all members may read shared task events, while the payload never contains session/OAuth fields
-
-- [ ] **Step 2: Confirm SSE test fails**
-
-Run: `npm run test:integration -- apps/api/src/routes/job-events.integration.test.ts`
-
-Expected: FAIL with 404 for `/api/job-events`
-
-- [ ] **Step 3: Implement database-cursor SSE**
-
-Expose `GET /api/job-events?after=<positive integer>`. Prefer `Last-Event-ID` when both are present. Send headers `text/event-stream`, `no-cache, no-transform`, `X-Accel-Buffering: no`; query `job_events where id > cursor order by id limit 100`, write `id`, `event: job`, and a `JobEventSchema` JSON payload, then poll every 500ms. Send `: keepalive` every 15 seconds and clear both timers on close
-
-No EventEmitter or in-memory replay buffer may be a source. Each poll reads PostgreSQL and applies the authenticated shared-library visibility rule
-
-- [ ] **Step 4: Verify resume across API recreation**
-
-Run: `npm run test:integration -- apps/api/src/routes/job-events.integration.test.ts`
-
-Expected: PASS; no duplicate IDs, correct database order, and event 5 is recovered after creating a new app instance
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add apps/api/src/routes/job-events.ts apps/api/src/routes/job-events.integration.test.ts apps/api/src/app.ts
-git commit -m "feat: stream persisted job events over SSE"
-```
-
-### Task 12: Add Job API Contracts And Persistent Queries
-
-**Files:**
-- Modify: `packages/contracts/src/job-contract.ts`
-- Modify: `packages/contracts/src/job-contract.test.ts`
-- Modify: `packages/contracts/src/index.ts`
-- Modify: `packages/jobs/src/job-repository.ts`
-- Modify: `apps/api/src/routes/jobs.ts`
-- Create: `apps/api/src/routes/job-queries.integration.test.ts`
-
-- [ ] **Step 1: Write failing request/response and restart tests**
-
-Define and test `CreateExampleJobRequestSchema`, `JobListResponseSchema`, and `JobDetailResponseSchema`. Through API create a job with `Idempotency-Key: demo-001`, recreate the Express app with the same database, then assert `GET /api/jobs` and `GET /api/jobs/:id` return the persisted job and ordered events/steps. Reject missing/blank idempotency key with 400
-
-- [ ] **Step 2: Confirm query tests fail**
-
-Run: `npm run test:new -- packages/contracts/src/job-contract.test.ts && npm run test:integration -- apps/api/src/routes/job-queries.integration.test.ts`
-
-Expected: contracts fail before schemas exist; after schemas, integration fails before query routes are complete
-
-- [ ] **Step 3: Add exact API surface**
+**Control Transaction:**
 
 ```text
-POST /api/jobs/example        -> 201 or existing 200, PublicJob
-GET  /api/jobs?limit=50       -> { items: PublicJob[], nextCursor: string | null }
-GET  /api/jobs/:id            -> { job: PublicJob, steps: PublicJobStep[], events: JobEvent[] }
+BEGIN
+SELECT job FOR UPDATE
+authorize owner OR admin
+assert domain transition
+UPDATE job
+INSERT job_event ON CONFLICT(job_id, dedupe_key) DO NOTHING
+INSERT audit_log with actor/action/from/to/request_id
+resume only: INSERT job_outbox
+COMMIT
 ```
 
-List uses keyset `(created_at,id)` descending, maximum limit 100. Public mappers parse every response through shared Zod schemas. They expose no lease owner, token hash, pg-boss ID, OAuth state or internal error stack. Task creation requires authenticated active user, same-origin and CSRF
+pause -> paused，resume -> queued，cancel -> cancelled。cancel 同事务把未完成 step/open attempt 标记 cancelled。控制和未来 `completeStep` 均按 job→step 锁序
 
-- [ ] **Step 4: Verify API restart persistence and response redaction**
+**Race Tests:**
 
-Run: `npm run test:new -- packages/contracts/src/job-contract.test.ts && npm run test:integration -- apps/api/src/routes/job-queries.integration.test.ts`
+- pause 先持 job lock：完成只落当前步骤，job 保持 paused，无 next outbox
+- cancel 先持 job lock：迟到完成返回 discarded，不增加 progress，不覆盖 cancelled
+- completion 先持 job lock：非最终步骤完成后 pause 生效；最终完成后等待中的控制返回 invalid transition
+- completed/failed/cancelled 上的任何控制或迟到完成均不能改变终态
 
-Expected: PASS; recreated API reads the same job, duplicate idempotency key returns same ID, serialized response contains none of `leaseOwner`, `tokenHash`, `clientSecret`, `pgboss`
-
-- [ ] **Step 5: Commit**
+- [ ] **Write failing tests:** 创建原子回滚/重复 key、API 重建后查询、owner/admin matrix、控制审计、四组并发 ordering
+- [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
+- [ ] **Confirm failure:** `npm run test:integration -- packages/jobs/src/job-repository.integration.test.ts packages/jobs/src/job-controls.integration.test.ts`
+- [ ] **Implement minimum:** repository、controls、API mapper 与统一锁序
+- [ ] **Focused verification:**
 
 ```bash
-git add packages/contracts/src packages/jobs/src/job-repository.ts apps/api/src/routes/jobs.ts apps/api/src/routes/job-queries.integration.test.ts
-git commit -m "feat: expose persistent job APIs"
+npm run test:integration -- packages/jobs/src/job-repository.integration.test.ts packages/jobs/src/job-controls.integration.test.ts packages/jobs/src/control-completion-race.integration.test.ts
+npm run test:integration -- apps/api/src/routes/jobs.integration.test.ts
 ```
 
-### Task 13: Build Minimal Web Shell, Login, And Task Center
+**Acceptance:** 产品表是唯一状态源；创建全有或全无；重复请求不重复；refresh/API object recreation 可查询；RBAC 正确；每次成功控制只有一条 audit；终态不可覆盖
 
+**Commit boundary:** `git commit -m "feat: persist jobs and audited controls"`
+
+### Task 5: Transactional Outbox And pg-boss Dispatcher
+
+**Scope:** 将 pending outbox 可靠投递为 pg-boss 唤醒消息，不执行步骤
 **Files:**
-- Create: `apps/web/index.html`
-- Create: `apps/web/vite.config.ts`
-- Create: `apps/web/src/main.tsx`
-- Create: `apps/web/src/app/router.tsx`
-- Create: `apps/web/src/app/AppShell.tsx`
-- Create: `apps/web/src/app/query-client.ts`
-- Create: `apps/web/src/app/styles.css`
-- Create: `apps/web/src/shared/api.ts`
-- Create: `apps/web/src/features/auth/LoginPage.tsx`
-- Create: `apps/web/src/features/auth/useCurrentUser.ts`
-- Create: `apps/web/src/features/task-center/TaskCenterPage.tsx`
-- Create: `apps/web/src/features/task-center/TaskDetailPage.tsx`
-- Create: `apps/web/src/features/task-center/useJobEvents.ts`
-- Create: `apps/web/src/features/task-center/task-center.test.tsx`
-- Create: `apps/web/src/features/admin/AdminMembersPage.tsx`
-- Create: `apps/web/src/features/admin/admin-members.test.tsx`
+- Create: `packages/jobs/src/boss.ts`, `packages/jobs/src/outbox-dispatcher.ts`, `packages/jobs/src/outbox-dispatcher.integration.test.ts`
+- Modify: `packages/jobs/src/index.ts`
 
-- [ ] **Step 1: Write failing task-center behavior tests**
+**Idempotency Boundary:**
 
-With mocked fetch/EventSource assert unauthenticated users see `使用飞书登录`, authenticated members see `任务中心`, list data survives route navigation through TanStack Query, `created/progress/completed` SSE invalidates job queries, members do not see `系统管理`, admins see and can load the masked member list, and the create button sends CSRF plus `Idempotency-Key`
+```text
+claim transaction:
+  SELECT pending outbox FOR UPDATE SKIP LOCKED
+  UPDATE claimed_by, claim_expires_at
+  COMMIT
 
-- [ ] **Step 2: Confirm Web tests fail**
+outside transaction:
+  pg-boss send(topic, { jobId, outboxId }, singletonKey = outbox:<outboxId>)
 
-Run: `npm run test -w apps/web`
+mark transaction:
+  UPDATE delivered_at WHERE id = outboxId
+  COMMIT
+```
 
-Expected: FAIL because router, features and task center do not exist
+send 失败时释放或等待 claim expiry，保留 pending。send 成功后 mark 前崩溃会重投同一 outbox ID；queue singleton 与 Worker 步骤 claim 双重去重。dispatcher 不读写 job status，不从 pg-boss 表投影产品状态，不在数据库事务内做网络调用
 
-- [ ] **Step 3: Implement the feature-organized shell**
-
-Routes are `/login`, `/tasks`, `/tasks/:jobId`, and `/admin/members`. The final route is admin-only and renders the Phase 1 member table from `GET /api/admin/members`, with display name, role, status, masked Feishu identity and enable/disable action wired to the audited PATCH endpoint. Do not add `/books`, `/l1`, `/l2`, query, analysis, book cards, sample books or Dify controls
-
-The shell is a restrained light workbench: 56px header, 220px desktop navigation, thin borders, cobalt primary action, semantic green/amber/red statuses, 8px maximum radius, stable table columns and no gradients. At 768px navigation collapses to an icon menu; at 390px task rows become labeled key/value rows without horizontal text overlap
-
-`TaskCenterPage` renders type, creator, state, `completed + failed + skipped / total`, current step, created time, and failure summary. It provides `创建示例任务`; detail provides pause/resume/cancel only when the current role/owner allows it. All writes use the current session CSRF token, same-origin credentials, and a fresh UUID `Idempotency-Key` retained for that mutation's retries
-
-- [ ] **Step 4: Verify tests, typecheck and production build**
-
-Run: `npm run test -w apps/web && npm run typecheck -w apps/web && npm run build -w apps/web`
-
-Expected: all exit 0; Vite produces `apps/web/dist`; tests confirm role-aware navigation and SSE cache refresh
-
-- [ ] **Step 5: Commit**
+- [ ] **Write failing tests:** 并发 dispatcher 不重复 claim、send failure 保留 pending、send 后 mark 前崩溃重投、重复 wake 保持同一 logical outbox key
+- [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
+- [ ] **Confirm failure:** `npm run test:integration -- packages/jobs/src/outbox-dispatcher.integration.test.ts`
+- [ ] **Implement minimum:** boss factory 与 claim/send/mark dispatcher
+- [ ] **Focused verification:**
 
 ```bash
-git add apps/web
-git commit -m "feat: add collaboration shell and task center"
+npm run test:integration -- packages/jobs/src/outbox-dispatcher.integration.test.ts
+npm run typecheck -w packages/jobs
 ```
 
-### Task 14: Add Full Cross-Process Recovery Demo And Playwright Smoke
+**Acceptance:** job/outbox 原子创建；网络不在事务；重复 dispatcher 不产生不同逻辑消息；失败可重试；产品状态不依赖 pg-boss schema
 
+**Commit boundary:** `git commit -m "feat: dispatch transactional job outbox"`
+
+### Task 6: Lease Recovery And Worker Runtime
+
+**Scope:** 实现步骤 lease、attempt、幂等完成、示例 executor、独立 Worker 与确定性中断测试
 **Files:**
-- Create: `test/phase1/fixtures/feishu-users.ts`
-- Create: `test/phase1/helpers/processes.ts`
-- Create: `test/phase1/recovery.e2e.test.ts`
-- Create: `test/phase1/task-center.spec.ts`
-- Create: `playwright.config.ts`
-- Create: `vitest.e2e.config.ts`
-- Modify: `package.json`
-- Modify: `package-lock.json`
+- Create: `packages/jobs/src/step-leases.ts`, `packages/jobs/src/example-executor.ts`, `packages/jobs/src/lease-recovery.integration.test.ts`
+- Modify: `packages/jobs/src/index.ts`
+- Create: `apps/worker/src/worker.ts`, `apps/worker/src/main.ts`, `apps/worker/src/worker.integration.test.ts`
+- Modify: `apps/worker/package.json`
 
-- [ ] **Step 1: Write the failing independent demo**
+**Lease Contract:**
 
-The e2e test creates a fresh PostgreSQL database, migrates, seeds a mapped admin and configures the API with a test-only composition root using `FeishuFake`. It starts API and Web, logs in through the fake OAuth redirect, creates a task, pauses and resumes it to prove controls before Worker startup, captures its ID, reloads, terminates API and starts a new API, verifies the same ID, starts Worker, terminates it after attempt 1 begins, advances/waits past the 30-second lease, starts a new Worker, and waits for completed
+```ts
+interface ExecutionBarrier {
+  afterAttemptStarted(input: {
+    jobId: string; stepId: string; attemptId: string; attemptNo: number;
+  }): Promise<void>;
+}
 
-Assert final database facts: 1 job, 2 completed steps, 3 attempts with one abandoned, 1 `job:completed` event, no pending outbox, and exactly one `job.pause` plus one `job.resume` audit row. Search captured logs for session token, fake OAuth code, client secret and reject any match
-
-- [ ] **Step 2: Confirm the demo fails before orchestration exists**
-
-Run: `npm run test:phase1:e2e`
-
-Expected: FAIL because Playwright config/process helpers are absent
-
-- [ ] **Step 3: Implement deterministic process controls**
-
-Add root scripts
-
-```json
-{
-  "test:phase1:e2e": "vitest run --config vitest.e2e.config.ts test/phase1/recovery.e2e.test.ts",
-  "test:phase1:ui": "playwright test test/phase1/task-center.spec.ts"
+interface StepLeaseService {
+  claimNext(jobId: string, workerId: string, now: Date): Promise<ClaimedStep | null>;
+  completeStep(claim: ClaimedStep, output: unknown): Promise<{
+    disposition: "completed" | "already-completed" | "paused-boundary" |
+      "discarded-cancelled" | "terminal-noop";
+  }>;
 }
 ```
 
-Run: `npx playwright install chromium`
+claim 事务先锁 job，再选择第一个满足前序完成的 step。未过期 running lease 不可领取；过期 lease 可由新 worker 领取，旧 running attempt 标 abandoned，新 attempt_no 加一
 
-Expected: Chromium for Playwright `1.61.1` installs successfully; do not install unrelated browser projects
+complete 事务先锁 job 再锁 step，验证 owner/lease/idempotency。running 状态完成 step、attempt、progress、event并按需 outbox；paused 只提交当前边界；cancelled 丢弃迟到输出；终态 no-op；重复 complete 返回已有结果且计数不变
 
-Helpers allocate unused localhost ports, wait on `/api/health`, send SIGTERM then SIGKILL only after 10 seconds, capture bounded redacted logs, and always stop processes/drop the test database in `finally`. The fake adapter is passed by the e2e-only launcher; `apps/api/src/main.ts` remains wired to `FeishuHttpAdapter`
+示例 executor 只执行数据库内可控步骤，不导入 Dify、旧 server、crypto 或 SQLite。Worker 启动 boss consumer、dispatcher 与 expired lease recovery，SIGTERM 停止新 claim 并在当前步骤边界关闭
 
-Playwright checks login, create, refresh, task detail, and admin/member navigation at desktop 1440x900 and mobile 390x844. It asserts no horizontal document overflow and no overlapping header/navigation/task controls
+确定性中断测试通过构造参数注入 `ExecutionBarrier`：attempt 与 lease 提交后 barrier 通知测试父进程并阻塞，父进程确认 attempt 1 已持久化后终止 Worker。生产 `main.ts` 始终注入 no-op barrier，不读取测试开关，不暴露 HTTP 控制入口
 
-- [ ] **Step 4: Run the independent recovery and UI demos**
-
-Run: `npm run test:phase1:e2e`
-
-Expected: PASS after a real Worker termination and lease expiry; final task is completed with exactly one terminal event
-
-Run: `npm run test:phase1:ui`
-
-Expected: PASS for Chromium desktop and mobile projects; screenshots/traces are retained only on failure
-
-- [ ] **Step 5: Commit**
+- [ ] **Write failing tests:** 未过期拒领、过期新 attempt、旧 attempt abandoned、重复完成单效果、paused/cancelled/terminal 迟到完成、runtime restart 无新增效果
+- [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
+- [ ] **Confirm failure:** `npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts apps/worker/src/worker.integration.test.ts`
+- [ ] **Implement minimum:** lease service、executor、runtime 与 test-only barrier injection
+- [ ] **Focused verification:**
 
 ```bash
-git add test/phase1 playwright.config.ts vitest.e2e.config.ts package.json package-lock.json
-git commit -m "test: prove phase 1 restart recovery"
+npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts
+npm run test:integration -- packages/jobs/src/control-completion-race.integration.test.ts apps/worker/src/worker.integration.test.ts
+npm run typecheck -w apps/worker
 ```
 
-### Task 15: Run Phase Gate And Scope Audit
+**Acceptance:** attempt 1 中断后只有过期 lease 可恢复；attempt 2 完成；迟到 attempt 1 不覆盖；每个步骤一个 output/event/progress 效果；Worker restart 后完成任务；生产无测试控制入口
 
+**Commit boundary:** `git commit -m "feat: recover jobs from expired worker leases"`
+
+### Task 7: Persisted SSE And Minimal Web
+
+**Scope:** 从 job_events 投影 SSE，并交付登录完成页、全局壳、任务中心、任务详情和最小成员管理，不建设书库/L1/L2 页面
 **Files:**
-- Modify only if a preceding verification exposes a Phase 1 defect: files already named in Tasks 1-14
+- Create: `apps/api/src/routes/job-events.ts`, `apps/api/src/routes/job-events.integration.test.ts`, `apps/api/src/main.ts`
+- Modify: `apps/api/src/app.ts`
+- Modify: `apps/api/package.json`
+- Create: `apps/web/index.html`, `apps/web/vite.config.ts`, `apps/web/src/main.tsx`
+- Create: `apps/web/src/app/router.tsx`, `apps/web/src/app/AppShell.tsx`, `apps/web/src/app/query-client.ts`, `apps/web/src/app/styles.css`
+- Create: `apps/web/src/shared/api.ts`, `apps/web/src/shared/csrf-memory.ts`
+- Create: `apps/web/src/features/auth/LoginPage.tsx`, `apps/web/src/features/auth/AuthCompletePage.tsx`, `apps/web/src/features/auth/useCurrentUser.ts`
+- Create: `apps/web/src/features/task-center/TaskCenterPage.tsx`, `apps/web/src/features/task-center/TaskDetailPage.tsx`, `apps/web/src/features/task-center/useJobEvents.ts`
+- Create: `apps/web/src/features/admin/AdminMembersPage.tsx`
+- Create: `apps/web/src/features/task-center/task-center.test.tsx`
 
-- [ ] **Step 1: Prove migrations on a fresh real database**
+**SSE Contract:**
 
-Run: `docker compose down -v && docker compose up -d postgres && docker compose exec -T postgres pg_isready -U novel -d novel_analysis && DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/novel_analysis npm run db:migrate`
+- `GET /api/job-events` 需要 active session
+- 游标来自 `Last-Event-ID` 或 query `after`，读取 `job_events where id > cursor order by id`
+- 每个事件通过共享 `JobEventSchema` 映射，内部 lease/token/queue 字段不进入 payload
+- API 内存只保存连接，不保存 replay buffer或任务进度
+- API object/process 重建后同一 cursor 从 PostgreSQL 继续，不重复已确认 ID
 
-Expected: PostgreSQL reports accepting connections and migrations `001_collaboration` and `002_jobs` complete from an empty volume; the pg-boss schema is created later only when the Worker runtime starts
+**Web Contract:**
 
-- [ ] **Step 2: Run Phase 0 and Phase 1 verification**
+- 路由仅 `/login`、`/auth/complete`、`/tasks`、`/tasks/:id`、`/admin/members`
+- `/auth/complete` 调用 `/api/auth/me` 获取并内存保存轮换后的 CSRF，再 replace 到校验过的 returnTo
+- 所有 API 使用相对 `/api`、same-origin credentials；写请求带当前 CSRF 与稳定 Idempotency-Key
+- 收到 `CSRF_STALE` 只允许重新 `/me` 一次，并使用同一个 Idempotency-Key 重放
+- SSE 事件使 TanStack Query 的 jobs/detail cache 失效，页面刷新仍以 API 数据为准
+- member 不渲染 admin 导航且服务端仍强制 RBAC
+- 任务中心显示类型、创建人、状态、progress、当前步骤、时间、失败摘要与允许的控制
+- 不添加 books、L1、L2、query、analysis、Dify 配置或样例业务数据
+
+- [ ] **Write failing tests:** SSE cursor/API recreation/unauthorized，登录完成 CSRF、任务创建/刷新/cache invalidation、admin/member 导航
+- [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
+- [ ] **Confirm failure:** `npm run test:integration -- apps/api/src/routes/job-events.integration.test.ts && npm run test -w apps/web`
+- [ ] **Implement minimum:** persisted projection、API main、feature-organized Web
+- [ ] **Focused verification:**
+
+```bash
+npm run test:integration -- apps/api/src/routes/job-events.integration.test.ts
+npm run test -w apps/web
+npm run typecheck -w apps/api
+npm run typecheck -w apps/web
+npm run build -w apps/web
+```
+
+**Acceptance:** SSE 从 DB cursor 恢复；API 重启不丢事件；Web 刷新可见任务；CSRF 只在内存；角色导航正确；生产 build 通过；没有 Phase 2 页面
+
+**Commit boundary:** `git commit -m "feat: add persisted task center projection"`
+
+### Task 8: Independent Recovery Demo And Phase 1 Acceptance
+
+**Scope:** 只新增独立进程 demo/test 与汇总证据，不修改 Tasks 1-7 的实现文件
+**Files:**
+- Create: `test/phase1/fixtures/feishu-users.ts`, `test/phase1/recovery.e2e.test.ts`
+- Create: `test/phase1/helpers/processes.ts`, `test/phase1/helpers/test-api-main.ts`, `test/phase1/helpers/controlled-worker-main.ts`
+- Create: `vitest.e2e.config.ts`
+- Modify: `package.json`
+
+**Deterministic Demo Sequence:**
+
+1. 从 `/postgres` 创建随机数据库并运行 migrations
+2. seed 一个 mapped active admin 与一个 mapped active member
+3. test-only API composition 注入 Feishu fake；生产 main 仍固定 HTTP adapter
+4. 登录 admin，创建恢复任务并 pause/resume；创建第二任务并 cancel；登录 member 验证管理和他人控制被拒绝，记录恢复 job ID
+5. 重建 API 进程，使用同一 PostgreSQL 查询到同一 job ID
+6. 启动带 test-only barrier 的 Worker A
+7. barrier 在 attempt 1 与 lease 提交后通过父进程握手报告 started，父进程随后终止 Worker A
+8. 数据库确认 lease 已过期后启动生产构图等价、no-op barrier 的 Worker B
+9. Worker B 创建 attempt 2 并完成全部步骤，再重放相同 outbox/wake 验证无新增效果
+10. 查询最终表与日志，验证单效果、审计和脱敏
+
+测试握手只存在 `test/phase1` composition，不能由环境变量让生产 main 切换 adapter/barrier，也不能通过任意 HTTP 请求触发 Worker 阻塞或终止
+
+**Final Assertions:**
+
+- refresh/API restart 后 job 可见且 ID 不变
+- attempt 1 abandoned，恢复 attempt 为新记录
+- 每个 step 只有一个 output_ref、一个 completed event、一次 progress 增量
+- job 只有一个 completed 终态事件
+- 重复 wake/outbox 不增加 attempt 或效果
+- member 管理成员与控制他人任务均被拒绝
+- pause/resume/cancel 成功控制各自有准确 audit；失败控制无 audit
+- 捕获日志不含 OAuth code、session/CSRF token、Cookie、client secret
+
+- [ ] **Write failing demo:** 先写完整进程生命周期与最终 SQL assertions
+- [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
+- [ ] **Confirm failure:** `npm run test:phase1:e2e` 因 test process composition 尚不存在而失败，不接受连接失败
+- [ ] **Implement minimum:** 只实现 `test/phase1/**`、e2e config 与 script
+- [ ] **Run focused demo:** `npm run test:phase1:e2e`
+
+**Acceptance:** 测试飞书登录、API restart visibility、Worker kill/recovery、outbox/lease 幂等、RBAC/audit、日志脱敏在一个真实 PostgreSQL 独立 demo 中通过
+
+**Commit boundary:** `git commit -m "test: prove phase 1 restart recovery"`
+
+## 7. Phase 1 Implementation Acceptance
+
+Task 8 通过后，在同一 implementation head 收集新鲜证据
 
 ```bash
 npm run verify:legacy
@@ -1150,57 +521,29 @@ npm run verify:new
 npm run dify:manifest:check
 npm run test:project-source
 npm run project:check
-npm run verify:phase1
+npm run test:integration
 npm run test:phase1:e2e
-npm run test:phase1:ui
 npm run lint
+npm run typecheck:phase1
+npm run build -w apps/web
 git diff --check
 ```
 
-Expected: every command exits 0; legacy reports exactly 112 passing tests; five Workflow manifest checks stay unchanged; PostgreSQL integration, recovery e2e, Playwright, typecheck, lint and production Web build pass
+Expected results
 
-- [ ] **Step 3: Prove forbidden dependencies and legacy assets are unchanged**
+- legacy 恰好 112 tests passed；contracts/domain unit、真实 PostgreSQL integration、独立 recovery demo 全部通过
+- typecheck、lint、Web build、migration 与 Workflow manifest check 通过，五个 YAML byte-unchanged
+- API/Worker/database/jobs 无 `server/db`、SQLite 或 Dify import；legacy 路径与项目治理记录未修改
+
+Scope commands
 
 ```bash
+test -n "$PHASE1_BASE"
 if rg -n "server/db|sqlite|better-sqlite|dify" apps/api apps/worker packages/database packages/jobs test/phase1; then exit 1; fi
-git diff 089ecd189c584620a0f9441cbf1a47cfbcd10097 -- test/service.test.js dify-workflows/*.yml
-git diff --name-only 089ecd189c584620a0f9441cbf1a47cfbcd10097 -- server src
+git diff --exit-code "$PHASE1_BASE" HEAD -- server src test/service.test.js dify-workflows/*.yml
+git diff --exit-code "$PHASE1_BASE" HEAD -- docs/project/PROJECT.md docs/project/checkpoints docs/project/decisions
 ```
 
-Expected: all three commands exit 0 and produce no output. The first proves Phase 1 runtime has no old SQLite or Dify dependency; the second proves the legacy 112-test file and five YAML exports are byte-unchanged; the third proves legacy implementation directories are untouched
+`PHASE1_BASE` 必须取自总控批准实施时 task contract 的完整 base commit SHA，不由执行 Agent 自行推断
 
-- [ ] **Step 4: Review acceptance evidence against this matrix**
-
-| Acceptance | Primary evidence |
-| --- | --- |
-| 产品任务表是唯一状态源 | Tasks 6, 9, 11, 12 integration tests; pg-boss never serialized to API |
-| 重复投递幂等 | Tasks 6, 8, 9 duplicate request/outbox/wake tests |
-| lease recovery | Tasks 9 and 14 with abandoned attempt and single effect |
-| admin/member RBAC | Tasks 5, 7 and 13 domain/HTTP/UI tests |
-| task control audit | Task 7 atomic audit assertions |
-| refresh/API restart visibility | Tasks 11, 12 and 14 recreated-app/process evidence |
-| Worker restart completion | Tasks 9, 10 and 14 process recovery evidence |
-| Feishu whitelist and session security | Task 4 state replay, hash, cookie, revoke tests |
-| CSRF/origin boundary | Tasks 4 and 7 rejection matrix |
-| no legacy SQLite | Task 15 import scan and legacy diff |
-| Phase 0 deferred invariants | Task 1 progress and all 33 rejected pairs |
-| legacy 112 and five YAML unchanged | Task 15 fresh verification and base diff |
-
-Expected: each row has a passing command artifact from the same final commit; any missing or conflicting evidence stops the gate and is reported to the controller
-
-- [ ] **Step 5: Commit verification-only fixes, if any**
-
-If verification required scoped fixes, stage only the named Phase 1 files and commit
-
-```bash
-git add apps packages test package.json package-lock.json compose.yaml .env.phase1.example .gitignore eslint.config.js vitest.config.ts vitest.integration.config.ts vitest.e2e.config.ts playwright.config.ts
-git commit -m "fix: satisfy phase 1 acceptance gate"
-```
-
-If no fix was required, do not create an empty commit
-
-## 7. Implementation Handoff Requirements
-
-Each implementing agent must report the exact task number, base commit, changed paths, fresh command output, `git status --short`, `git diff --check`, and commit SHA. The controller must reject a task if it changes `docs/project/PROJECT.md`, any accepted checkpoint/decision, legacy `server/` or `src/`, `test/service.test.js`, or the five Workflow YAML files
-
-Do not begin Phase 2 from this plan. After Task 15 passes, return evidence for `GATE-PHASE1-PLAN-APPROVED` and the subsequent Phase 1 implementation acceptance process; only the controller may update project source or unlock the next phase
+若任一命令失败，停止 acceptance，回到负责该行为的 Task 1-7 修复并重新提交，Task 8 不得修改实现文件；所有命令通过后，执行 Agent 向总控提交 Phase 1 implementation acceptance checkpoint evidence，包括每个 task commit SHA、changed paths、fresh command output、scope audit 与已知风险，只有总控核验该 checkpoint 后才能决定 Phase 2 是否解锁
