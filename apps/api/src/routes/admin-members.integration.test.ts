@@ -65,6 +65,21 @@ describe("admin member management", () => {
     return { agent, csrfToken: me.body.csrfToken };
   }
 
+  async function waitForBlockedRequest() {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = await sql<{ count: string }>`
+        select count(*)::text as count
+        from pg_stat_activity
+        where datname = current_database()
+          and pid <> pg_backend_pid()
+          and wait_event_type = 'Lock'
+      `.execute(postgres.db);
+      if (Number(result.rows[0]?.count) > 0) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error("admin request did not block on the actor lock");
+  }
+
   it("returns 403 for member GET, POST, and PATCH requests", async () => {
     const memberId = await addUser("member", "member");
     const { agent, csrfToken } = await login("member");
@@ -140,6 +155,79 @@ describe("admin member management", () => {
     expect(await postgres.db.selectFrom("users").select("status").where("id", "=", memberId).executeTakeFirstOrThrow())
       .toEqual({ status: "active" });
     expect((await memberLogin.agent.get("/api/auth/me")).status).toBe(200);
+  });
+
+  it.each([
+    { change: "session revocation", route: "create" },
+    { change: "session expiry", route: "create" },
+    { change: "user disable", route: "update" },
+    { change: "role downgrade", route: "update" },
+    { change: "CSRF rotation", route: "update" },
+  ] as const)("rejects an in-flight $route after concurrent $change", async ({ change, route }) => {
+    const adminId = await addUser("admin", "admin");
+    const targetId = route === "update" ? await addUser("target", "member") : null;
+    const adminLogin = await login("admin");
+    const actorSession = await postgres.db.selectFrom("sessions")
+      .select("id")
+      .where("user_id", "=", adminId)
+      .executeTakeFirstOrThrow();
+
+    let actorLocked!: () => void;
+    const actorLockedPromise = new Promise<void>((resolve) => {
+      actorLocked = resolve;
+    });
+    let applyConcurrentChange!: () => void;
+    const concurrentChangePromise = new Promise<void>((resolve) => {
+      applyConcurrentChange = resolve;
+    });
+    const blocker = postgres.db.transaction().execute(async (transaction) => {
+      await transaction.selectFrom("sessions").select("id")
+        .where("id", "=", actorSession.id).forUpdate().executeTakeFirstOrThrow();
+      await transaction.selectFrom("users").select("id")
+        .where("id", "=", adminId).forUpdate().executeTakeFirstOrThrow();
+      actorLocked();
+      await concurrentChangePromise;
+      if (change === "session revocation") {
+        await transaction.updateTable("sessions").set({ revoked_at: sql`now()` })
+          .where("id", "=", actorSession.id).execute();
+      } else if (change === "session expiry") {
+        await transaction.updateTable("sessions").set({ expires_at: sql`now() - interval '1 second'` })
+          .where("id", "=", actorSession.id).execute();
+      } else if (change === "user disable") {
+        await transaction.updateTable("users").set({ status: "disabled" })
+          .where("id", "=", adminId).execute();
+      } else if (change === "role downgrade") {
+        await transaction.updateTable("users").set({ role: "member" })
+          .where("id", "=", adminId).execute();
+      } else {
+        await transaction.updateTable("sessions").set({
+          csrf_token_hash: createHash("sha256").update("rotated-csrf-token").digest("hex"),
+        }).where("id", "=", actorSession.id).execute();
+      }
+    });
+    await actorLockedPromise;
+
+    const pendingResponse = route === "create"
+      ? adminLogin.agent.post("/api/admin/members")
+        .set("Origin", APP_ORIGIN).set("X-CSRF-Token", adminLogin.csrfToken)
+        .send({ displayName: "Concurrent Member", unionId: "concurrent-member", role: "member" })
+      : adminLogin.agent.patch(`/api/admin/members/${targetId}`)
+        .set("Origin", APP_ORIGIN).set("X-CSRF-Token", adminLogin.csrfToken)
+        .send({ displayName: "Mutated Target" });
+    const responsePromise = Promise.resolve(pendingResponse);
+    await waitForBlockedRequest();
+    applyConcurrentChange();
+    const [response] = await Promise.all([responsePromise, blocker]);
+
+    expect(response.status).toBe(403);
+    expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toEqual([]);
+    if (route === "create") {
+      expect(await postgres.db.selectFrom("auth_identities").select("subject")
+        .where("subject", "=", "concurrent-member").execute()).toEqual([]);
+    } else {
+      expect(await postgres.db.selectFrom("users").select("display_name")
+        .where("id", "=", targetId!).executeTakeFirstOrThrow()).toEqual({ display_name: "target" });
+    }
   });
 
   it("bootstraps only the first admin, is idempotent for the same identity, and rejects other nonempty state", async () => {

@@ -7,7 +7,7 @@ import type { DatabaseConnection } from "@novel-analysis/database";
 import type { ApiConfig } from "../config.js";
 import { type AuthenticatedRequest, requireSession } from "./session-middleware.js";
 
-function matchesHash(rawToken: string, expectedHash: string): boolean {
+export function matchesCsrfHash(rawToken: string, expectedHash: string): boolean {
   const actual = createHash("sha256").update(rawToken).digest();
   const expected = Buffer.from(expectedHash, "hex");
   return actual.length === expected.length && timingSafeEqual(actual, expected);
@@ -34,7 +34,7 @@ export function requireCsrf(database: DatabaseConnection, config: ApiConfig) {
           .select("csrf_token_hash")
           .where("id", "=", request.auth.sessionId)
           .executeTakeFirst();
-        if (!row?.csrf_token_hash || !matchesHash(rawToken, row.csrf_token_hash)) {
+        if (!row?.csrf_token_hash || !matchesCsrfHash(rawToken, row.csrf_token_hash)) {
           response.status(403).json({ error: "forbidden" });
           return;
         }

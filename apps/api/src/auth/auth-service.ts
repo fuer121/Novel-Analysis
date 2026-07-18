@@ -65,37 +65,33 @@ export class AuthService {
     const tokenHash = sha256(sessionToken);
     const priorHash = priorSessionToken ? sha256(priorSessionToken) : undefined;
 
-    try {
-      await this.#database.transaction().execute(async (transaction) => {
-        const user = await transaction.selectFrom("auth_identities")
-          .innerJoin("users", "users.id", "auth_identities.user_id")
-          .select("users.id")
-          .where("auth_identities.provider", "=", "feishu")
-          .where("auth_identities.subject", "=", identity.unionId)
-          .where("users.status", "=", "active")
-          .forUpdate()
-          .executeTakeFirst();
-        if (!user) throw new AuthError();
+    await this.#database.transaction().execute(async (transaction) => {
+      const user = await transaction.selectFrom("auth_identities")
+        .innerJoin("users", "users.id", "auth_identities.user_id")
+        .select("users.id")
+        .where("auth_identities.provider", "=", "feishu")
+        .where("auth_identities.subject", "=", identity.unionId)
+        .where("users.status", "=", "active")
+        .forUpdate()
+        .executeTakeFirst();
+      if (!user) throw new AuthError();
 
-        await transaction.insertInto("sessions").values({
-          user_id: user.id,
-          token_hash: tokenHash,
-          csrf_token_hash: null,
-          expires_at: new Date(Date.now() + this.#config.sessionTtlMs),
-          revoked_at: null,
-        }).execute();
+      await transaction.insertInto("sessions").values({
+        user_id: user.id,
+        token_hash: tokenHash,
+        csrf_token_hash: null,
+        expires_at: new Date(Date.now() + this.#config.sessionTtlMs),
+        revoked_at: null,
+      }).execute();
 
-        if (priorHash) {
-          await transaction.updateTable("sessions")
-            .set({ revoked_at: sql`now()` })
-            .where("token_hash", "=", priorHash)
-            .where("revoked_at", "is", null)
-            .execute();
-        }
-      });
-    } catch {
-      throw new AuthError();
-    }
+      if (priorHash) {
+        await transaction.updateTable("sessions")
+          .set({ revoked_at: sql`now()` })
+          .where("token_hash", "=", priorHash)
+          .where("revoked_at", "is", null)
+          .execute();
+      }
+    });
 
     return { sessionToken, returnTo };
   }
@@ -105,36 +101,32 @@ export class AuthService {
     csrfToken: string;
   }> {
     const csrfToken = randomBytes(32).toString("base64url");
-    try {
-      return await this.#database.transaction().execute(async (transaction) => {
-        const row = await transaction.selectFrom("sessions")
-          .innerJoin("users", "users.id", "sessions.user_id")
-          .select([
-            "sessions.id as sessionId",
-            "users.id as userId",
-            "users.display_name as displayName",
-            "users.role as role",
-          ])
-          .where("sessions.token_hash", "=", sha256(sessionToken))
-          .where("sessions.revoked_at", "is", null)
-          .where("sessions.expires_at", ">", sql<Date>`now()`)
-          .where("users.status", "=", "active")
-          .forUpdate()
-          .executeTakeFirst();
-        if (!row) throw new AuthError();
+    return this.#database.transaction().execute(async (transaction) => {
+      const row = await transaction.selectFrom("sessions")
+        .innerJoin("users", "users.id", "sessions.user_id")
+        .select([
+          "sessions.id as sessionId",
+          "users.id as userId",
+          "users.display_name as displayName",
+          "users.role as role",
+        ])
+        .where("sessions.token_hash", "=", sha256(sessionToken))
+        .where("sessions.revoked_at", "is", null)
+        .where("sessions.expires_at", ">", sql<Date>`now()`)
+        .where("users.status", "=", "active")
+        .forUpdate()
+        .executeTakeFirst();
+      if (!row) throw new AuthError();
 
-        await transaction.updateTable("sessions")
-          .set({ csrf_token_hash: sha256(csrfToken), last_seen_at: sql`now()` })
-          .where("id", "=", row.sessionId)
-          .execute();
-        return {
-          user: { id: row.userId, displayName: row.displayName, role: row.role },
-          csrfToken,
-        };
-      });
-    } catch {
-      throw new AuthError();
-    }
+      await transaction.updateTable("sessions")
+        .set({ csrf_token_hash: sha256(csrfToken), last_seen_at: sql`now()` })
+        .where("id", "=", row.sessionId)
+        .execute();
+      return {
+        user: { id: row.userId, displayName: row.displayName, role: row.role },
+        csrfToken,
+      };
+    });
   }
 
   async logout(sessionToken: string): Promise<void> {

@@ -91,8 +91,13 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
     }
     try {
       response.json(await service.currentUserAndRotateCsrf(token));
-    } catch {
-      response.status(401).json({ error: "unauthorized" });
+    } catch (error) {
+      if (error instanceof AuthError) {
+        response.status(401).json({ error: "unauthorized" });
+        return;
+      }
+      options.logger.error("Current session lookup failed");
+      response.status(500).json({ error: "internal_error" });
     }
   });
 

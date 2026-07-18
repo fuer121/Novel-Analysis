@@ -2,11 +2,11 @@ import { sql } from "kysely";
 import { Router } from "express";
 import { z } from "zod";
 
-import type { DatabaseConnection } from "@novel-analysis/database";
+import type { DatabaseConnection, DatabaseExecutor } from "@novel-analysis/database";
 
 import type { ApiConfig } from "../config.js";
 import { authorize } from "../auth/authorize.js";
-import { requireCsrf } from "../auth/csrf.js";
+import { matchesCsrfHash, requireCsrf } from "../auth/csrf.js";
 import { type AuthenticatedRequest, requireSession } from "../auth/session-middleware.js";
 
 const createMemberSchema = z.object({
@@ -22,6 +22,41 @@ const updateMemberSchema = z.object({
 }).strict().refine((value) => Object.keys(value).length > 0);
 
 const memberParamsSchema = z.object({ id: z.uuid() }).strict();
+
+class AdminAuthorizationError extends Error {}
+
+async function lockAndAuthorizeAdminMutation(
+  transaction: DatabaseExecutor,
+  request: AuthenticatedRequest,
+): Promise<void> {
+  await sql`select pg_advisory_xact_lock(hashtext('novel-analysis'), hashtext('admin-members'))`
+    .execute(transaction);
+
+  const rawCsrf = request.get("X-CSRF-Token");
+  const actor = request.auth;
+  if (!actor || !rawCsrf) throw new AdminAuthorizationError();
+
+  const session = await transaction.selectFrom("sessions")
+    .select(["user_id", "csrf_token_hash"])
+    .where("id", "=", actor.sessionId)
+    .where("user_id", "=", actor.userId)
+    .where("revoked_at", "is", null)
+    .where("expires_at", ">", sql<Date>`now()`)
+    .forUpdate()
+    .executeTakeFirst();
+  if (!session?.csrf_token_hash || !matchesCsrfHash(rawCsrf, session.csrf_token_hash)) {
+    throw new AdminAuthorizationError();
+  }
+
+  const user = await transaction.selectFrom("users")
+    .select("id")
+    .where("id", "=", session.user_id)
+    .where("status", "=", "active")
+    .where("role", "=", "admin")
+    .forUpdate()
+    .executeTakeFirst();
+  if (!user) throw new AdminAuthorizationError();
+}
 
 function memberJson(row: {
   id: string;
@@ -65,6 +100,7 @@ export function createAdminMembersRouter(database: DatabaseConnection, config: A
     }
     try {
       const member = await database.transaction().execute(async (transaction) => {
+        await lockAndAuthorizeAdminMutation(transaction, request);
         const row = await transaction.insertInto("users").values({
           display_name: parsed.data.displayName,
           avatar_url: null,
@@ -87,7 +123,11 @@ export function createAdminMembersRouter(database: DatabaseConnection, config: A
         return row;
       });
       response.status(201).json({ member: memberJson(member) });
-    } catch {
+    } catch (error) {
+      if (error instanceof AdminAuthorizationError) {
+        response.status(403).json({ error: "forbidden" });
+        return;
+      }
       response.status(409).json({ error: "member_mutation_failed" });
     }
   });
@@ -101,6 +141,13 @@ export function createAdminMembersRouter(database: DatabaseConnection, config: A
     }
     try {
       const member = await database.transaction().execute(async (transaction) => {
+        await lockAndAuthorizeAdminMutation(transaction, request);
+        await transaction.selectFrom("sessions")
+          .select("id")
+          .where("user_id", "=", params.data.id)
+          .orderBy("id", "asc")
+          .forUpdate()
+          .execute();
         const current = await transaction.selectFrom("users")
           .select("id")
           .where("id", "=", params.data.id)
@@ -135,7 +182,11 @@ export function createAdminMembersRouter(database: DatabaseConnection, config: A
         return;
       }
       response.json({ member: memberJson(member) });
-    } catch {
+    } catch (error) {
+      if (error instanceof AdminAuthorizationError) {
+        response.status(403).json({ error: "forbidden" });
+        return;
+      }
       next(new Error("member mutation failed"));
     }
   });

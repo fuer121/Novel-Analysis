@@ -279,6 +279,61 @@ describe("collaboration authentication", () => {
     }
   });
 
+  it("returns a redacted 500 when the login transaction has a database failure", async () => {
+    await addUser({ subject: "member" });
+    const start = await request(app()).get("/api/auth/login");
+    await sql`
+      create function reject_session_insert() returns trigger language plpgsql as $$
+      begin
+        raise exception 'database-secret-sensitive';
+      end
+      $$
+    `.execute(postgres.db);
+    await sql`
+      create trigger reject_session before insert on sessions
+      for each statement execute function reject_session_insert()
+    `.execute(postgres.db);
+    feishu.addCode("database-failure-code", {
+      unionId: "member",
+      displayName: "Member",
+      avatarUrl: null,
+    });
+
+    const response = await request(app()).get(
+      `/api/auth/callback?code=database-failure-code&state=${locationState(start)}`,
+    );
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: "internal_error" });
+    const serialized = JSON.stringify({ body: response.body, logs });
+    expect(serialized).not.toContain("database-secret-sensitive");
+    expect(serialized).not.toContain("database-failure-code");
+  });
+
+  it("returns a redacted 500 when /me cannot query the database", async () => {
+    await addUser({ subject: "member" });
+    const cookie = cookieValue(await login("member"));
+    const failingDatabase = postgres.db.withPlugin({
+      transformQuery() {
+        throw new Error("database-secret-sensitive");
+      },
+      async transformResult(args) {
+        return args.result;
+      },
+    });
+
+    const response = await request(createApp({
+      database: failingDatabase,
+      config,
+      feishu,
+      logger: { error: (message) => logs.push(message) },
+    })).get("/api/auth/me").set("Cookie", cookie);
+
+    expect(response.status).toBe(500);
+    expect(response.body).toEqual({ error: "internal_error" });
+    expect(JSON.stringify({ body: response.body, logs })).not.toContain("database-secret-sensitive");
+  });
+
   it("exchanges the OAuth code for an access token and then fetches Feishu user info", async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const adapter = new FeishuHttpOAuthAdapter({
