@@ -4,6 +4,7 @@ export interface ApiConfig {
   appOrigin: string;
   oauthRedirectUri: string;
   sessionCookieName: string;
+  oauthCorrelationCookieName: string;
   sessionCookieSecure: boolean;
   sessionTtlMs: number;
 }
@@ -33,6 +34,7 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
     appOrigin: parsed.APP_ORIGIN,
     oauthRedirectUri: parsed.FEISHU_REDIRECT_URI,
     sessionCookieName: "__Host-novel_session",
+    oauthCorrelationCookieName: "__Host-novel_oauth_correlation",
     sessionCookieSecure: true,
     sessionTtlMs: parsed.SESSION_TTL_MS,
   };
@@ -40,13 +42,26 @@ export function loadApiConfig(environment: NodeJS.ProcessEnv): ApiConfig {
 
 export function assertCookieConfig(config: ApiConfig): void {
   const productionOrigin = new URL(config.appOrigin).protocol === "https:";
+  if (config.oauthCorrelationCookieName === config.sessionCookieName) {
+    throw new Error("OAuth correlation cookie must be separate from the session cookie");
+  }
   if (
     productionOrigin
     && (config.sessionCookieName !== "__Host-novel_session" || !config.sessionCookieSecure)
   ) {
     throw new Error("Production session cookie must always be Secure");
   }
-  if (!productionOrigin && config.sessionCookieName.startsWith("__Host-")) {
+  if (
+    productionOrigin
+    && (config.oauthCorrelationCookieName !== "__Host-novel_oauth_correlation" || !config.sessionCookieSecure)
+  ) {
+    throw new Error("Production correlation cookie must always be Secure");
+  }
+  if (
+    !productionOrigin
+    && (config.sessionCookieName.startsWith("__Host-")
+      || config.oauthCorrelationCookieName.startsWith("__Host-"))
+  ) {
     throw new Error("HTTP integration must use a separate non-__Host- cookie name");
   }
 }

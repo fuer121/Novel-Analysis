@@ -49,6 +49,7 @@ export class FeishuHttpOAuthAdapter implements FeishuOAuthAdapter {
     try {
       const tokenResponse = await this.#fetch("https://open.feishu.cn/open-apis/authen/v2/oauth/token", {
         method: "POST",
+        redirect: "error",
         headers: { "content-type": "application/json" },
         signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         body: JSON.stringify({
@@ -66,6 +67,7 @@ export class FeishuHttpOAuthAdapter implements FeishuOAuthAdapter {
         "https://open.feishu.cn/open-apis/authen/v1/user_info",
         {
           method: "GET",
+          redirect: "error",
           headers: { authorization: `Bearer ${token.data.access_token}` },
           signal: AbortSignal.timeout(PROVIDER_TIMEOUT_MS),
         },

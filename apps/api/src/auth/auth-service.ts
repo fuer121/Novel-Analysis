@@ -5,6 +5,7 @@ import { sql } from "kysely";
 import type { DatabaseConnection } from "@novel-analysis/database";
 
 import type { ApiConfig } from "../config.js";
+import { matchesCsrfHash } from "./csrf.js";
 import type { FeishuOAuthAdapter } from "./feishu-adapter.js";
 import { OAuthStateRepository, sha256, validateReturnTo } from "./oauth-state-repository.js";
 
@@ -14,6 +15,13 @@ export class AuthError extends Error {
   constructor() {
     super("Authentication failed");
     this.name = "AuthError";
+  }
+}
+
+export class CsrfError extends Error {
+  constructor() {
+    super("CSRF validation failed");
+    this.name = "CsrfError";
   }
 }
 
@@ -142,11 +150,41 @@ export class AuthService {
     });
   }
 
-  async logout(sessionToken: string): Promise<void> {
-    await this.#database.updateTable("sessions")
-      .set({ revoked_at: sql`now()` })
-      .where("token_hash", "=", sha256(sessionToken))
-      .where("revoked_at", "is", null)
-      .execute();
+  async logout(sessionToken: string, csrfToken: string): Promise<void> {
+    const tokenHash = sha256(sessionToken);
+    await this.#database.transaction().execute(async (transaction) => {
+      const locatedSession = await transaction.selectFrom("sessions")
+        .select(["id", "user_id"])
+        .where("token_hash", "=", tokenHash)
+        .executeTakeFirst();
+      if (!locatedSession) throw new AuthError();
+
+      const user = await transaction.selectFrom("users")
+        .select("id")
+        .where("id", "=", locatedSession.user_id)
+        .where("status", "=", "active")
+        .forUpdate()
+        .executeTakeFirst();
+      if (!user) throw new AuthError();
+
+      const session = await transaction.selectFrom("sessions")
+        .select(["id", "csrf_token_hash"])
+        .where("id", "=", locatedSession.id)
+        .where("user_id", "=", user.id)
+        .where("token_hash", "=", tokenHash)
+        .where("revoked_at", "is", null)
+        .where("expires_at", ">", sql<Date>`now()`)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!session) throw new AuthError();
+      if (!session.csrf_token_hash || !matchesCsrfHash(csrfToken, session.csrf_token_hash)) {
+        throw new CsrfError();
+      }
+
+      await transaction.updateTable("sessions")
+        .set({ revoked_at: sql`now()` })
+        .where("id", "=", session.id)
+        .execute();
+    });
   }
 }

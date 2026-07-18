@@ -19,11 +19,13 @@ import { OAuthStateRepository } from "./oauth-state-repository.js";
 const APP_ORIGIN = "http://app.test";
 const CALLBACK_URL = `${APP_ORIGIN}/api/auth/callback`;
 const TEST_COOKIE = "novel_test_session";
+const TEST_CORRELATION_COOKIE = "novel_test_oauth_correlation";
 
 const config: ApiConfig = {
   appOrigin: APP_ORIGIN,
   oauthRedirectUri: CALLBACK_URL,
   sessionCookieName: TEST_COOKIE,
+  oauthCorrelationCookieName: TEST_CORRELATION_COOKIE,
   sessionCookieSecure: false,
   sessionTtlMs: 60 * 60 * 1000,
 };
@@ -37,6 +39,11 @@ function cookieValue(response: Response): string {
 
 function locationState(response: Response): string {
   return new URL(response.headers.location).searchParams.get("state")!;
+}
+
+function setCookie(response: Response, name: string): string | undefined {
+  const header = response.headers["set-cookie"] as unknown as string[] | undefined;
+  return header?.find((value) => value.startsWith(`${name}=`));
 }
 
 describe("collaboration authentication", () => {
@@ -93,10 +100,27 @@ describe("collaboration authentication", () => {
       avatarUrl: null,
     });
     const start = await request(app()).get("/api/auth/login?returnTo=%2Fjobs%3Fmine%3D1");
+    const correlation = setCookie(start, TEST_CORRELATION_COOKIE)?.split(";", 1)[0];
+    if (!correlation) throw new Error("OAuth correlation cookie missing");
     const callback = request(app())
       .get(`/api/auth/callback?code=code-${subject}&state=${encodeURIComponent(locationState(start))}`);
-    if (priorCookie) callback.set("Cookie", priorCookie);
+    callback.set("Cookie", [priorCookie, correlation].filter(Boolean).join("; "));
     return callback;
+  }
+
+  async function waitForBlockedRequests(expectedCount: number) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
+      const result = await sql<{ count: string }>`
+        select count(*)::text as count
+        from pg_stat_activity
+        where datname = current_database()
+          and pid <> pg_backend_pid()
+          and wait_event_type = 'Lock'
+      `.execute(postgres.db);
+      if (Number(result.rows[0]?.count) >= expectedCount) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw new Error(`expected ${expectedCount} blocked database requests`);
   }
 
   it("stores only a state hash, expires it after five minutes, and atomically rejects replay", async () => {
@@ -119,6 +143,69 @@ describe("collaboration authentication", () => {
     expect(await repository.consume(expired.state)).toBeNull();
   });
 
+  it("sets a five-minute browser correlation cookie and clears it on callback success or failure", async () => {
+    await addUser({ subject: "member" });
+    feishu.addCode("member-code", { unionId: "member", displayName: "Member", avatarUrl: null });
+    const browser = request.agent(app());
+    const start = await browser.get("/api/auth/login");
+    const correlation = setCookie(start, TEST_CORRELATION_COOKIE);
+    expect(correlation).toContain("HttpOnly");
+    expect(correlation).toContain("SameSite=Lax");
+    expect(correlation).toContain("Path=/");
+    expect(correlation).toContain("Max-Age=300");
+    expect(correlation).not.toContain("Secure");
+
+    const success = await browser.get(`/api/auth/callback?code=member-code&state=${locationState(start)}`);
+    expect(success.status).toBe(303);
+    expect(setCookie(success, TEST_CORRELATION_COOKIE)).toContain(`${TEST_CORRELATION_COOKIE}=;`);
+
+    const failedBrowser = request.agent(app());
+    await failedBrowser.get("/api/auth/login");
+    const failure = await failedBrowser.get("/api/auth/callback?code=missing-state");
+    expect(failure.status).toBe(401);
+    expect(setCookie(failure, TEST_CORRELATION_COOKIE)).toContain(`${TEST_CORRELATION_COOKIE}=;`);
+  });
+
+  it("rejects a callback transferred to another browser before state consumption or code exchange", async () => {
+    await addUser({ subject: "member" });
+    feishu.addCode("member-code", { unionId: "member", displayName: "Member", avatarUrl: null });
+    const originalBrowser = request.agent(app());
+    const start = await originalBrowser.get("/api/auth/login");
+    const state = locationState(start);
+    const callbackPath = `/api/auth/callback?code=member-code&state=${state}`;
+
+    const foreignBrowser = await request(app()).get(callbackPath);
+    expect(foreignBrowser.status).toBe(401);
+    expect(foreignBrowser.body).toEqual({ error: "authentication_failed" });
+    expect(feishu.exchangedCodes).toEqual([]);
+    expect(await postgres.db.selectFrom("oauth_states").select("consumed_at")
+      .where("state_hash", "=", createHash("sha256").update(state).digest("hex"))
+      .executeTakeFirstOrThrow()).toEqual({ consumed_at: null });
+
+    const originalCallback = await originalBrowser.get(callbackPath);
+    expect(originalCallback.status).toBe(303);
+  });
+
+  it("uses single-active-login semantics when the same browser opens two login tabs", async () => {
+    await addUser({ subject: "member" });
+    feishu.addCode("first-code", { unionId: "member", displayName: "Member", avatarUrl: null });
+    feishu.addCode("second-code", { unionId: "member", displayName: "Member", avatarUrl: null });
+    const browser = request.agent(app());
+    const first = await browser.get("/api/auth/login");
+    const second = await browser.get("/api/auth/login");
+
+    const latestCallback = await browser.get(
+      `/api/auth/callback?code=second-code&state=${locationState(second)}`,
+    );
+    const olderCallback = await browser.get(
+      `/api/auth/callback?code=first-code&state=${locationState(first)}`,
+    );
+
+    expect(latestCallback.status).toBe(303);
+    expect(olderCallback.status).toBe(401);
+    expect(feishu.exchangedCodes).toEqual(["second-code"]);
+  });
+
   it.each([
     "https://evil.test/",
     "//evil.test/path",
@@ -137,15 +224,20 @@ describe("collaboration authentication", () => {
     feishu.addCode("unmapped-code", { unionId: "unmapped", displayName: "Raw Provider Body", avatarUrl: null });
     const start = await request(app()).get("/api/auth/login");
     const state = locationState(start);
-    const first = await request(app()).get(`/api/auth/callback?code=unmapped-code&state=${state}`);
-    const replay = await request(app()).get(`/api/auth/callback?code=unmapped-code&state=${state}`);
+    const correlation = setCookie(start, TEST_CORRELATION_COOKIE)!.split(";", 1)[0]!;
+    const first = await request(app()).get(`/api/auth/callback?code=unmapped-code&state=${state}`)
+      .set("Cookie", correlation);
+    const replay = await request(app()).get(`/api/auth/callback?code=unmapped-code&state=${state}`)
+      .set("Cookie", correlation);
     expect(first.status).toBe(401);
     expect(replay.status).toBe(401);
 
     await addUser({ subject: "disabled", status: "disabled" });
     feishu.addCode("disabled-code", { unionId: "disabled", displayName: "Disabled", avatarUrl: null });
     const disabledStart = await request(app()).get("/api/auth/login");
-    const disabled = await request(app()).get(`/api/auth/callback?code=disabled-code&state=${locationState(disabledStart)}`);
+    const disabled = await request(app())
+      .get(`/api/auth/callback?code=disabled-code&state=${locationState(disabledStart)}`)
+      .set("Cookie", setCookie(disabledStart, TEST_CORRELATION_COOKIE)!.split(";", 1)[0]!);
     expect(disabled.status).toBe(401);
     for (const response of [first, replay, disabled]) {
       expect(response.body).toEqual({ error: "authentication_failed" });
@@ -177,6 +269,7 @@ describe("collaboration authentication", () => {
       appOrigin: "https://novel.test",
       oauthRedirectUri: "https://novel.test/api/auth/callback",
       sessionCookieName: "__Host-novel_session",
+      oauthCorrelationCookieName: "__Host-novel_oauth_correlation",
       sessionCookieSecure: true,
     };
     await addUser({ subject: "production-member" });
@@ -188,13 +281,20 @@ describe("collaboration authentication", () => {
     const productionApp = createApp({ database: postgres.db, config: production, feishu });
     const start = await request(productionApp).get("/api/auth/login");
     const callback = await request(productionApp)
-      .get(`/api/auth/callback?code=production-code&state=${locationState(start)}`);
-    const setCookie = (callback.headers["set-cookie"] as unknown as string[])[0]!;
-    expect(setCookie).toContain("__Host-novel_session=");
-    expect(setCookie).toContain("Secure");
-    expect(setCookie).toContain("HttpOnly");
-    expect(setCookie).toContain("SameSite=Lax");
-    expect(setCookie).toContain("Path=/");
+      .get(`/api/auth/callback?code=production-code&state=${locationState(start)}`)
+      .set("Cookie", setCookie(start, "__Host-novel_oauth_correlation")!.split(";", 1)[0]!);
+    const sessionSetCookie = setCookie(callback, "__Host-novel_session")!;
+    expect(sessionSetCookie).toContain("__Host-novel_session=");
+    expect(sessionSetCookie).toContain("Secure");
+    expect(sessionSetCookie).toContain("HttpOnly");
+    expect(sessionSetCookie).toContain("SameSite=Lax");
+    expect(sessionSetCookie).toContain("Path=/");
+    const startCorrelation = setCookie(start, "__Host-novel_oauth_correlation");
+    expect(startCorrelation).toContain("Secure");
+    expect(startCorrelation).toContain("HttpOnly");
+    expect(startCorrelation).toContain("SameSite=Lax");
+    expect(startCorrelation).toContain("Path=/");
+    expect(startCorrelation).toContain("Max-Age=300");
     expect(() => createApp({
       database: postgres.db,
       config: { ...production, sessionCookieSecure: false },
@@ -205,6 +305,11 @@ describe("collaboration authentication", () => {
       config: { ...production, sessionCookieName: "weakened_session" },
       feishu,
     })).toThrow(/production session cookie/i);
+    expect(() => createApp({
+      database: postgres.db,
+      config: { ...production, oauthCorrelationCookieName: "weakened_correlation" },
+      feishu,
+    })).toThrow(/production correlation cookie/i);
   });
 
   it("rotates CSRF on every same-origin /me call and rejects cross-site reads", async () => {
@@ -233,14 +338,59 @@ describe("collaboration authentication", () => {
       .set("Origin", APP_ORIGIN).set("X-CSRF-Token", firstMe.body.csrfToken);
     const badOrigin = await request(app()).post("/api/auth/logout").set("Cookie", cookie)
       .set("Origin", "http://app.test.evil.test").set("X-CSRF-Token", secondMe.body.csrfToken);
+    const wrongSession = await request(app()).post("/api/auth/logout")
+      .set("Cookie", `${TEST_COOKIE}=wrong-session-token`)
+      .set("Origin", APP_ORIGIN).set("X-CSRF-Token", secondMe.body.csrfToken);
     expect(oldToken.status).toBe(403);
     expect(badOrigin.status).toBe(403);
+    expect(wrongSession.status).toBe(401);
 
     const logout = await request(app()).post("/api/auth/logout").set("Cookie", cookie)
       .set("Origin", APP_ORIGIN).set("X-CSRF-Token", secondMe.body.csrfToken);
     expect(logout.status).toBe(204);
     expect((logout.headers["set-cookie"] as unknown as string[])[0]).toContain(`${TEST_COOKIE}=;`);
     expect((await request(app()).get("/api/auth/me").set("Cookie", cookie)).status).toBe(401);
+  });
+
+  it("rejects logout when a concurrent /me rotates CSRF after preliminary validation", async () => {
+    await addUser({ subject: "member" });
+    const cookie = cookieValue(await login("member"));
+    const me = await request(app()).get("/api/auth/me").set("Cookie", cookie).set("Origin", APP_ORIGIN);
+    const session = await postgres.db.selectFrom("sessions").select("id").executeTakeFirstOrThrow();
+
+    let sessionLocked!: () => void;
+    const sessionLockedPromise = new Promise<void>((resolve) => {
+      sessionLocked = resolve;
+    });
+    let releaseSession!: () => void;
+    const releaseSessionPromise = new Promise<void>((resolve) => {
+      releaseSession = resolve;
+    });
+    const blocker = postgres.db.transaction().execute(async (transaction) => {
+      await transaction.selectFrom("sessions").select("id")
+        .where("id", "=", session.id).forUpdate().executeTakeFirstOrThrow();
+      sessionLocked();
+      await releaseSessionPromise;
+    });
+    await sessionLockedPromise;
+
+    const rotationPromise = Promise.resolve(request(app()).get("/api/auth/me")
+      .set("Cookie", cookie).set("Origin", APP_ORIGIN));
+    await waitForBlockedRequests(1);
+    const logoutPromise = Promise.resolve(request(app()).post("/api/auth/logout")
+      .set("Cookie", cookie)
+      .set("Origin", APP_ORIGIN)
+      .set("X-CSRF-Token", me.body.csrfToken));
+    await waitForBlockedRequests(2);
+    releaseSession();
+
+    const [rotation, logout] = await Promise.all([rotationPromise, logoutPromise, blocker]);
+    expect(rotation.status).toBe(200);
+    expect(logout.status).toBe(403);
+    expect(await postgres.db.selectFrom("sessions").select("revoked_at")
+      .where("id", "=", session.id).executeTakeFirstOrThrow()).toEqual({ revoked_at: null });
+    expect((await request(app()).get("/api/auth/me").set("Cookie", cookie).set("Origin", APP_ORIGIN)).status)
+      .toBe(200);
   });
 
   it("rejects expired sessions", async () => {
@@ -258,7 +408,11 @@ describe("collaboration authentication", () => {
 
     feishu.addCode("bad-code", { unionId: "unknown", displayName: "Unknown", avatarUrl: null });
     const badStart = await request(app()).get("/api/auth/login");
-    await request(app()).get(`/api/auth/callback?code=bad-code&state=${locationState(badStart)}`).set("Cookie", firstCookie);
+    await request(app()).get(`/api/auth/callback?code=bad-code&state=${locationState(badStart)}`)
+      .set("Cookie", [
+        firstCookie,
+        setCookie(badStart, TEST_CORRELATION_COOKIE)!.split(";", 1)[0]!,
+      ].join("; "));
     expect((await request(app()).get("/api/auth/me").set("Cookie", firstCookie)).status).toBe(200);
 
     const replacement = await login("member", firstCookie);
@@ -271,7 +425,9 @@ describe("collaboration authentication", () => {
     await addUser({ subject: "member" });
     feishu.failCode("sensitive-code", new Error("provider-body-sensitive client-secret-sensitive"));
     const start = await request(app()).get("/api/auth/login");
-    const response = await request(app()).get(`/api/auth/callback?code=sensitive-code&state=${locationState(start)}`);
+    const response = await request(app())
+      .get(`/api/auth/callback?code=sensitive-code&state=${locationState(start)}`)
+      .set("Cookie", setCookie(start, TEST_CORRELATION_COOKIE)!.split(";", 1)[0]!);
     const serialized = JSON.stringify({ body: response.body, logs });
     expect(response.status).toBe(401);
     for (const secret of ["sensitive-code", "provider-body-sensitive", "client-secret-sensitive"]) {
@@ -301,7 +457,7 @@ describe("collaboration authentication", () => {
 
     const response = await request(app()).get(
       `/api/auth/callback?code=database-failure-code&state=${locationState(start)}`,
-    );
+    ).set("Cookie", setCookie(start, TEST_CORRELATION_COOKIE)!.split(";", 1)[0]!);
 
     expect(response.status).toBe(500);
     expect(response.body).toEqual({ error: "internal_error" });
@@ -376,7 +532,7 @@ describe("collaboration authentication", () => {
     expect(requests).toHaveLength(2);
     expect(requests[0]).toMatchObject({
       url: "https://open.feishu.cn/open-apis/authen/v2/oauth/token",
-      init: { method: "POST" },
+      init: { method: "POST", redirect: "error" },
     });
     expect(JSON.parse(String(requests[0]!.init?.body))).toMatchObject({
       grant_type: "authorization_code",
@@ -387,12 +543,51 @@ describe("collaboration authentication", () => {
     });
     expect(requests[1]).toMatchObject({
       url: "https://open.feishu.cn/open-apis/authen/v1/user_info",
-      init: { method: "GET" },
+      init: { method: "GET", redirect: "error" },
     });
     expect(new Headers(requests[1]!.init?.headers).get("Authorization"))
       .toBe("Bearer access-token-sensitive");
     expect(JSON.stringify(identity)).not.toContain("access-token-sensitive");
     expect(JSON.stringify(identity)).not.toContain("refresh-token-sensitive");
+  });
+
+  it.each([
+    { stage: "token", status: 307 },
+    { stage: "user info", status: 308 },
+  ])("rejects a $status redirect from the $stage endpoint without forwarding secrets", async ({ stage, status }) => {
+    const requests: Array<{ url: string; init?: RequestInit }> = [];
+    const adapter = new FeishuHttpOAuthAdapter({
+      appId: "app-id",
+      appSecret: "client-secret-sensitive",
+      fetch: async (input, init) => {
+        requests.push({ url: input.toString(), init });
+        if (stage === "user info" && requests.length === 1) {
+          return new globalThis.Response(JSON.stringify({
+            code: 0,
+            data: { access_token: "access-token-sensitive" },
+          }), { status: 200, headers: { "content-type": "application/json" } });
+        }
+        return new globalThis.Response(null, {
+          status,
+          headers: { location: "https://redirect-attacker.test/collect" },
+        });
+      },
+    });
+
+    let serialized = "";
+    try {
+      await adapter.exchangeCode({ code: "sensitive-code", redirectUri: CALLBACK_URL });
+    } catch (error) {
+      serialized = JSON.stringify(error, Object.getOwnPropertyNames(error));
+    }
+
+    expect(requests).toHaveLength(stage === "token" ? 1 : 2);
+    expect(requests.at(-1)?.init?.redirect).toBe("error");
+    expect(requests.some((entry) => entry.url.includes("redirect-attacker"))).toBe(false);
+    expect(serialized).toContain("authentication_failed");
+    for (const secret of ["sensitive-code", "client-secret-sensitive", "access-token-sensitive"]) {
+      expect(serialized).not.toContain(secret);
+    }
   });
 
   it.each([

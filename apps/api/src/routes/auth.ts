@@ -1,11 +1,12 @@
+import { createHash, timingSafeEqual } from "node:crypto";
+
 import { Router, type CookieOptions } from "express";
 import { z } from "zod";
 
 import type { DatabaseConnection } from "@novel-analysis/database";
 
 import type { ApiConfig } from "../config.js";
-import { AuthError, AuthService } from "../auth/auth-service.js";
-import { requireCsrf } from "../auth/csrf.js";
+import { AuthError, AuthService, CsrfError } from "../auth/auth-service.js";
 import type { FeishuOAuthAdapter } from "../auth/feishu-adapter.js";
 import { readCookie } from "../auth/session-middleware.js";
 
@@ -39,6 +40,16 @@ function cookieOptions(config: ApiConfig): CookieOptions {
   return { ...baseCookieOptions(config), maxAge: config.sessionTtlMs };
 }
 
+function correlationCookieOptions(config: ApiConfig): CookieOptions {
+  return { ...baseCookieOptions(config), maxAge: 5 * 60 * 1000 };
+}
+
+function matchesCorrelation(state: string, correlation: string): boolean {
+  const stateHash = createHash("sha256").update(state).digest();
+  const correlationHash = createHash("sha256").update(correlation).digest();
+  return timingSafeEqual(stateHash, correlationHash);
+}
+
 export function createAuthRouter(options: AuthRouterOptions): Router {
   const router = Router();
   const service = new AuthService(options);
@@ -47,6 +58,13 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
     try {
       const parsed = loginQuerySchema.safeParse(request.query);
       const url = await service.startLogin(parsed.success ? parsed.data.returnTo ?? "/" : "/");
+      const state = url.searchParams.get("state");
+      if (!state) throw new Error("authorization URL missing state");
+      response.cookie(
+        options.config.oauthCorrelationCookieName,
+        state,
+        correlationCookieOptions(options.config),
+      );
       response.redirect(302, url.toString());
     } catch {
       next(new Error("login initialization failed"));
@@ -54,8 +72,13 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
   });
 
   router.get("/callback", async (request, response) => {
+    const correlation = readCookie(request, options.config.oauthCorrelationCookieName);
+    response.clearCookie(
+      options.config.oauthCorrelationCookieName,
+      baseCookieOptions(options.config),
+    );
     const parsed = callbackQuerySchema.safeParse(request.query);
-    if (!parsed.success) {
+    if (!parsed.success || !correlation || !matchesCorrelation(parsed.data.state, correlation)) {
       response.status(401).json({ error: "authentication_failed" });
       return;
     }
@@ -101,13 +124,34 @@ export function createAuthRouter(options: AuthRouterOptions): Router {
     }
   });
 
-  router.post("/logout", ...requireCsrf(options.database, options.config), async (request, response, next) => {
+  router.post("/logout", async (request, response, next) => {
+    if (request.get("Origin") !== options.config.appOrigin) {
+      response.status(403).json({ error: "forbidden" });
+      return;
+    }
     const token = readCookie(request, options.config.sessionCookieName);
+    if (!token) {
+      response.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    const csrfToken = request.get("X-CSRF-Token");
+    if (!csrfToken) {
+      response.status(403).json({ error: "forbidden" });
+      return;
+    }
     try {
-      if (token) await service.logout(token);
+      await service.logout(token, csrfToken);
       response.clearCookie(options.config.sessionCookieName, baseCookieOptions(options.config));
       response.status(204).end();
-    } catch {
+    } catch (error) {
+      if (error instanceof AuthError) {
+        response.status(401).json({ error: "unauthorized" });
+        return;
+      }
+      if (error instanceof CsrfError) {
+        response.status(403).json({ error: "forbidden" });
+        return;
+      }
       next(new Error("logout failed"));
     }
   });

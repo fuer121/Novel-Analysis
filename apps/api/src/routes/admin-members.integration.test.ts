@@ -19,6 +19,7 @@ const config: ApiConfig = {
   appOrigin: APP_ORIGIN,
   oauthRedirectUri: `${APP_ORIGIN}/api/auth/callback`,
   sessionCookieName: "novel_test_session",
+  oauthCorrelationCookieName: "novel_test_oauth_correlation",
   sessionCookieSecure: false,
   sessionTtlMs: 60 * 60 * 1000,
 };
