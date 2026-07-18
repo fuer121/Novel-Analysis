@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-19T02:27:49+08:00
+updated_at: 2026-07-19T04:59:35+08:00
 updated_by: controller-agent
 current_phase: phase-1-implementation
-last_checkpoint: CP-20260719-PHASE1-TASK5-MERGED
+last_checkpoint: CP-20260719-PHASE1-TASK6-ACCEPTED
 next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -45,7 +45,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 | PHASE1-TASK3 | phase-1 | OAuth, session, RBAC and audit | controller-agent | main | 86ec324b373be1de451bef64219360afcfdc75ef | e6d52c93b5bf4b40aeb940d72206599d1ce8780a | merged | CP-20260718-PHASE1-TASK2-MERGED | CP-20260719-PHASE1-TASK3-MERGED | complete |
 | PHASE1-TASK4 | phase-1 | Persistent job API and audited controls | controller-agent | main | e6d52c93b5bf4b40aeb940d72206599d1ce8780a | b4b8c92232d195ba53ae6e18d5f204f95c9cfdd4 | merged | CP-20260719-PHASE1-TASK3-MERGED | CP-20260719-PHASE1-TASK4-MERGED | complete |
 | PHASE1-TASK5 | phase-1 | Transactional outbox and pg-boss dispatcher | controller-agent | main | b4b8c92232d195ba53ae6e18d5f204f95c9cfdd4 | fd51657889a7748bc90a4641f3fa51f6dcb1526a | merged | CP-20260719-PHASE1-TASK4-MERGED | CP-20260719-PHASE1-TASK5-MERGED | complete |
-| PHASE1-TASK6 | phase-1 | Lease recovery and worker runtime | controller-agent | refactor/phase1-task6-worker | fd51657889a7748bc90a4641f3fa51f6dcb1526a | fd51657889a7748bc90a4641f3fa51f6dcb1526a | in_progress | CP-20260719-PHASE1-TASK5-MERGED | none | implement approved Task 6 contract |
+| PHASE1-TASK6 | phase-1 | Lease recovery and worker runtime | controller-agent | refactor/phase1-task6-worker | fd51657889a7748bc90a4641f3fa51f6dcb1526a | 3daab74b8c9c50378a8e5a40074e33b13757dde8 | accepted | CP-20260719-PHASE1-TASK5-MERGED | CP-20260719-PHASE1-TASK6-ACCEPTED | publish implementation PR |
 
 ## Effective Decisions
 
@@ -57,6 +57,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 - 技术路线为 React、TypeScript、模块化单体、PostgreSQL、pg-boss 和 Dify executor
 - 核心分析路径为核心书库 → L1 → L2 → L2 连续提问
 - Task 3 OAuth 使用 5 分钟 browser correlation Cookie、固定飞书 endpoint redirect fail-closed 与事务化 current-CSRF logout；该安全补强由用户于 2026-07-19 明确授权，并以 [Task 3 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK3-ACCEPTED.md) 为证据
+- Task 6 将 `completed`、`failed`、`cancelled` 统一为不可覆盖终态；用户于 2026-07-19 明确授权移除既有 `failed -> queued` 迁移，并以 [Task 6 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK6-ACCEPTED.md) 为证据
 
 ## Risks And Blockers
 
@@ -70,7 +71,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 
 ## Next Gate
 
-下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；`PHASE1-TASK6` 正在基于 `fd51657889a7748bc90a4641f3fa51f6dcb1526a` 的独立 worktree 实施已批准 task contract
+下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；`PHASE1-TASK6` 已通过实现、规格、质量和总控独立验证，可发布实现 PR；`PHASE1-TASK7` 在 Task 6 合并并创建 merged Checkpoint 前保持 blocked
 
 ## Evidence Index
 
@@ -92,6 +93,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 - [Phase 1 Task 4 merged checkpoint](checkpoints/CP-20260719-PHASE1-TASK4-MERGED.md)
 - [Phase 1 Task 5 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK5-ACCEPTED.md)
 - [Phase 1 Task 5 merged checkpoint](checkpoints/CP-20260719-PHASE1-TASK5-MERGED.md)
+- [Phase 1 Task 6 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK6-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
