@@ -1,0 +1,174 @@
+import { createHash } from "node:crypto";
+
+import { sql } from "kysely";
+import request from "supertest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  createDisposablePostgres,
+  type DisposablePostgres,
+} from "../../../../packages/database/src/testing/postgres.js";
+
+import { createApp } from "../app.js";
+import { bootstrapFirstAdmin } from "../bootstrap-admin.js";
+import { type ApiConfig } from "../config.js";
+import { FakeFeishuOAuthAdapter } from "../auth/feishu-fake.js";
+
+const APP_ORIGIN = "http://app.test";
+const config: ApiConfig = {
+  appOrigin: APP_ORIGIN,
+  oauthRedirectUri: `${APP_ORIGIN}/api/auth/callback`,
+  sessionCookieName: "novel_test_session",
+  sessionCookieSecure: false,
+  sessionTtlMs: 60 * 60 * 1000,
+};
+
+describe("admin member management", () => {
+  let postgres: DisposablePostgres;
+  let feishu: FakeFeishuOAuthAdapter;
+
+  beforeEach(async () => {
+    postgres = await createDisposablePostgres();
+    feishu = new FakeFeishuOAuthAdapter();
+  });
+
+  afterEach(async () => {
+    await postgres.destroy();
+  });
+
+  async function addUser(subject: string, role: "admin" | "member") {
+    const user = await postgres.db.insertInto("users").values({
+      display_name: subject,
+      avatar_url: null,
+      role,
+      status: "active",
+    }).returning("id").executeTakeFirstOrThrow();
+    await postgres.db.insertInto("auth_identities").values({
+      user_id: user.id,
+      provider: "feishu",
+      subject,
+    }).execute();
+    return user.id;
+  }
+
+  function app() {
+    return createApp({ database: postgres.db, config, feishu });
+  }
+
+  async function login(subject: string) {
+    feishu.addCode(`${subject}-code`, { unionId: subject, displayName: subject, avatarUrl: null });
+    const agent = request.agent(app());
+    const start = await agent.get("/api/auth/login");
+    const state = new URL(start.headers.location).searchParams.get("state")!;
+    await agent.get(`/api/auth/callback?code=${subject}-code&state=${state}`);
+    const me = await agent.get("/api/auth/me").set("Origin", APP_ORIGIN);
+    return { agent, csrfToken: me.body.csrfToken };
+  }
+
+  it("returns 403 for member GET, POST, and PATCH requests", async () => {
+    const memberId = await addUser("member", "member");
+    const { agent, csrfToken } = await login("member");
+    const headers = { Origin: APP_ORIGIN, "X-CSRF-Token": csrfToken };
+
+    expect((await agent.get("/api/admin/members")).status).toBe(403);
+    expect((await agent.post("/api/admin/members").set(headers).send({ displayName: "Other", unionId: "other", role: "member" })).status).toBe(403);
+    expect((await agent.patch(`/api/admin/members/${memberId}`).set(headers).send({ status: "disabled" })).status).toBe(403);
+  });
+
+  it("lets an admin list and create members with exactly one audit row", async () => {
+    const adminId = await addUser("admin", "admin");
+    const { agent, csrfToken } = await login("admin");
+
+    const list = await agent.get("/api/admin/members");
+    expect(list.status).toBe(200);
+    expect(list.body.members).toEqual([
+      expect.objectContaining({ id: adminId, displayName: "admin", role: "admin", status: "active" }),
+    ]);
+
+    const created = await agent.post("/api/admin/members")
+      .set("Origin", APP_ORIGIN).set("X-CSRF-Token", csrfToken)
+      .send({ displayName: "New Member", unionId: "new-member", role: "member" });
+    expect(created.status).toBe(201);
+    expect(await postgres.db.selectFrom("audit_logs").select(({ fn }) => fn.countAll<number>().as("count")).executeTakeFirstOrThrow())
+      .toEqual({ count: "1" });
+    expect(await postgres.db.selectFrom("audit_logs").selectAll().executeTakeFirstOrThrow())
+      .toMatchObject({ actor_user_id: adminId, action: "member.created", target_type: "user", target_id: created.body.member.id });
+  });
+
+  it("updates a member, revokes all target sessions, and audits in one transaction", async () => {
+    await addUser("admin", "admin");
+    const memberId = await addUser("member", "member");
+    const memberLogin = await login("member");
+    const adminLogin = await login("admin");
+
+    const response = await adminLogin.agent.patch(`/api/admin/members/${memberId}`)
+      .set("Origin", APP_ORIGIN).set("X-CSRF-Token", adminLogin.csrfToken)
+      .send({ status: "disabled" });
+    expect(response.status).toBe(200);
+    expect((await memberLogin.agent.get("/api/auth/me")).status).toBe(401);
+    const sessions = await postgres.db.selectFrom("sessions").select(["user_id", "revoked_at"]).where("user_id", "=", memberId).execute();
+    expect(sessions).not.toHaveLength(0);
+    expect(sessions.every((session) => session.revoked_at !== null)).toBe(true);
+    const audits = await postgres.db.selectFrom("audit_logs").selectAll().execute();
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({ action: "member.updated", target_id: memberId });
+  });
+
+  it("rolls back a failed mutation so it writes no audit and does not revoke sessions", async () => {
+    await addUser("admin", "admin");
+    const memberId = await addUser("member", "member");
+    const memberLogin = await login("member");
+    const adminLogin = await login("admin");
+
+    await sql`
+      create function reject_audit_insert() returns trigger language plpgsql as $$
+      begin
+        raise exception 'forced audit failure';
+      end
+      $$
+    `.execute(postgres.db);
+    await sql`
+      create trigger reject_audit before insert on audit_logs
+      for each statement execute function reject_audit_insert()
+    `.execute(postgres.db);
+
+    const response = await adminLogin.agent.patch(`/api/admin/members/${memberId}`)
+      .set("Origin", APP_ORIGIN).set("X-CSRF-Token", adminLogin.csrfToken)
+      .send({ status: "disabled" });
+    expect(response.status).toBe(500);
+    expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toEqual([]);
+    expect(await postgres.db.selectFrom("users").select("status").where("id", "=", memberId).executeTakeFirstOrThrow())
+      .toEqual({ status: "active" });
+    expect((await memberLogin.agent.get("/api/auth/me")).status).toBe(200);
+  });
+
+  it("bootstraps only the first admin, is idempotent for the same identity, and rejects other nonempty state", async () => {
+    const first = await bootstrapFirstAdmin(postgres.db, {
+      unionId: "first-admin",
+      displayName: "First Admin",
+      avatarUrl: null,
+    });
+    const second = await bootstrapFirstAdmin(postgres.db, {
+      unionId: "first-admin",
+      displayName: "Changed Name",
+      avatarUrl: null,
+    });
+    expect(second).toEqual(first);
+    expect(await postgres.db.selectFrom("users").selectAll().execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("auth_identities").selectAll().execute()).toHaveLength(1);
+
+    await expect(bootstrapFirstAdmin(postgres.db, {
+      unionId: "other-admin",
+      displayName: "Other Admin",
+      avatarUrl: null,
+    })).rejects.toThrow(/nonempty/i);
+  });
+
+  it("stores admin session and CSRF values as hashes only", async () => {
+    await addUser("admin", "admin");
+    const { csrfToken } = await login("admin");
+    const session = await postgres.db.selectFrom("sessions").selectAll().executeTakeFirstOrThrow();
+    expect(session.csrf_token_hash).toBe(createHash("sha256").update(csrfToken).digest("hex"));
+    expect(JSON.stringify(session)).not.toContain(csrfToken);
+  });
+});
