@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   BookJobScopeSchema,
   JobEventSchema,
+  JobProgressSchema,
   JobScopeSchema,
   PublicJobSchema,
 } from "./job-contract.js";
@@ -111,5 +112,15 @@ describe("job contracts", () => {
 
   it("exposes the inferred job progress type", () => {
     expect(validProgress.completed).toBe(40);
+  });
+
+  it("rejects progress counts that exceed the total", () => {
+    expect(() => JobProgressSchema.parse({
+      total: 3,
+      completed: 2,
+      failed: 1,
+      skipped: 1,
+      current: "第 4 章",
+    })).toThrow(/total/);
   });
 });
