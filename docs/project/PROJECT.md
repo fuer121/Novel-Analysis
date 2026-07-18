@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-18T22:13:55+08:00
+updated_at: 2026-07-19T00:57:09+08:00
 updated_by: controller-agent
 current_phase: phase-1-implementation
-last_checkpoint: CP-20260718-PHASE1-TASK2-MERGED
+last_checkpoint: CP-20260719-PHASE1-TASK3-ACCEPTED
 next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -42,7 +42,8 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 | PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | main | 089ecd189c584620a0f9441cbf1a47cfbcd10097 | 4ad103ca48442820904842047cd95b8924d44590 | merged | CP-20260718-GOV-POST-MERGE-RECONCILIATION | CP-20260718-PHASE1-PLAN-MERGED | complete |
 | PHASE1-TASK1 | phase-1 | Foundation contracts and workspaces | controller-agent | main | 4ad103ca48442820904842047cd95b8924d44590 | 8f4f56728f6b3cc395bcf5f07f576aba48d3a275 | merged | CP-20260718-PHASE1-PLAN-MERGED | CP-20260718-PHASE1-TASK1-MERGED | complete |
 | PHASE1-TASK2 | phase-1 | PostgreSQL schema and Kysely migrations | controller-agent | main | fc146c3c5b722ee9659561feef7b278b7d06094a | 86ec324b373be1de451bef64219360afcfdc75ef | merged | CP-20260718-PHASE1-TASK1-MERGED | CP-20260718-PHASE1-TASK2-MERGED | complete |
-| PHASE1-TASK3 | phase-1 | OAuth, session, RBAC and audit | unassigned | none | 86ec324b373be1de451bef64219360afcfdc75ef | none | ready | CP-20260718-PHASE1-TASK2-MERGED | none | create task contract and isolated worktree |
+| PHASE1-TASK3 | phase-1 | OAuth, session, RBAC and audit | controller-agent | refactor/phase1-task3-auth | 86ec324b373be1de451bef64219360afcfdc75ef | 6033c59926333839ff5caed556545348eea6433f | accepted | CP-20260718-PHASE1-TASK2-MERGED | CP-20260719-PHASE1-TASK3-ACCEPTED | publish PR and verify CI |
+| PHASE1-TASK4 | phase-1 | Persistent job API and audited controls | unassigned | none | none | none | blocked | CP-20260719-PHASE1-TASK3-MERGED | none | wait for Task 3 merge |
 
 ## Effective Decisions
 
@@ -53,6 +54,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
 - 技术路线为 React、TypeScript、模块化单体、PostgreSQL、pg-boss 和 Dify executor
 - 核心分析路径为核心书库 → L1 → L2 → L2 连续提问
+- Task 3 OAuth 使用 5 分钟 browser correlation Cookie、固定飞书 endpoint redirect fail-closed 与事务化 current-CSRF logout；该安全补强由用户于 2026-07-19 明确授权，并以 [Task 3 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK3-ACCEPTED.md) 为证据
 
 ## Risks And Blockers
 
@@ -66,7 +68,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 
 ## Next Gate
 
-下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；当前可执行任务为 `PHASE1-TASK3`，应基于 `86ec324b373be1de451bef64219360afcfdc75ef` 创建独立 worktree
+下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；`PHASE1-TASK3` 已 accepted，当前操作为发布 Task 3 PR 并核验 CI；`PHASE1-TASK4` 在 Task 3 merged Checkpoint 前保持 blocked
 
 ## Evidence Index
 
@@ -82,6 +84,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 - [Phase 1 Task 1 merged checkpoint](checkpoints/CP-20260718-PHASE1-TASK1-MERGED.md)
 - [Phase 1 Task 2 accepted checkpoint](checkpoints/CP-20260718-PHASE1-TASK2-ACCEPTED.md)
 - [Phase 1 Task 2 merged checkpoint](checkpoints/CP-20260718-PHASE1-TASK2-MERGED.md)
+- [Phase 1 Task 3 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK3-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
