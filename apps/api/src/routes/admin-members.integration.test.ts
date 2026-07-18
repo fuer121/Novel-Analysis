@@ -66,8 +66,52 @@ describe("admin member management", () => {
     return { agent, csrfToken: me.body.csrfToken };
   }
 
+  async function lockActivitySnapshot() {
+    const result = await sql<{
+      pid: number;
+      state: string | null;
+      wait_event_type: string | null;
+      wait_event: string | null;
+      locktype: string | null;
+      mode: string | null;
+      granted: boolean | null;
+      query: string;
+    }>`
+      select
+        activity.pid,
+        activity.state,
+        activity.wait_event_type,
+        activity.wait_event,
+        locks.locktype,
+        locks.mode,
+        locks.granted,
+        activity.query
+      from pg_stat_activity as activity
+      left join pg_locks as locks on locks.pid = activity.pid
+      where activity.datname = current_database()
+        and activity.pid <> pg_backend_pid()
+        and (activity.wait_event_type = 'Lock' or locks.locktype = 'advisory')
+      order by activity.pid, locks.granted, locks.mode
+    `.execute(postgres.db);
+    return result.rows;
+  }
+
+  async function waitForCondition(
+    condition: () => Promise<boolean>,
+    description: string,
+    timeoutMs = 4_000,
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (await condition()) return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const snapshot = await lockActivitySnapshot();
+    throw new Error(`timed out waiting for ${description}; lock activity: ${JSON.stringify(snapshot)}`);
+  }
+
   async function waitForBlockedRequests(expectedCount = 1) {
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    await waitForCondition(async () => {
       const result = await sql<{ count: string }>`
         select count(*)::text as count
         from pg_stat_activity
@@ -75,10 +119,28 @@ describe("admin member management", () => {
           and pid <> pg_backend_pid()
           and wait_event_type = 'Lock'
       `.execute(postgres.db);
-      if (Number(result.rows[0]?.count) >= expectedCount) return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    throw new Error(`expected ${expectedCount} blocked database requests`);
+      return Number(result.rows[0]?.count) >= expectedCount;
+    }, `${expectedCount} blocked database requests`);
+  }
+
+  async function waitForAdminMembersAdvisoryWaiters(expectedCount: number) {
+    await waitForCondition(async () => {
+      const result = await sql<{ count: string }>`
+        select count(*)::text as count
+        from pg_locks
+        where locktype = 'advisory'
+          and database = (select oid from pg_database where datname = current_database())
+          and classid::bigint = (
+            hashtext('novel-analysis')::bigint + 4294967296
+          ) % 4294967296
+          and objid::bigint = (
+            hashtext('admin-members')::bigint + 4294967296
+          ) % 4294967296
+          and objsubid = 2
+          and not granted
+      `.execute(postgres.db);
+      return Number(result.rows[0]?.count) >= expectedCount;
+    }, `${expectedCount} ungranted admin-members advisory locks`);
   }
 
   it("returns 403 for member GET, POST, and PATCH requests", async () => {
@@ -216,18 +278,23 @@ describe("admin member management", () => {
         .set("Origin", APP_ORIGIN).set("X-CSRF-Token", adminLogin.csrfToken)
         .send({ displayName: "Mutated Target" });
     const responsePromise = Promise.resolve(pendingResponse);
-    await waitForBlockedRequests();
-    applyConcurrentChange();
-    const [response] = await Promise.all([responsePromise, blocker]);
+    try {
+      await waitForBlockedRequests();
+      applyConcurrentChange();
+      const [response] = await Promise.all([responsePromise, blocker]);
 
-    expect(response.status).toBe(403);
-    expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toEqual([]);
-    if (route === "create") {
-      expect(await postgres.db.selectFrom("auth_identities").select("subject")
-        .where("subject", "=", "concurrent-member").execute()).toEqual([]);
-    } else {
-      expect(await postgres.db.selectFrom("users").select("display_name")
-        .where("id", "=", targetId!).executeTakeFirstOrThrow()).toEqual({ display_name: "target" });
+      expect(response.status).toBe(403);
+      expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toEqual([]);
+      if (route === "create") {
+        expect(await postgres.db.selectFrom("auth_identities").select("subject")
+          .where("subject", "=", "concurrent-member").execute()).toEqual([]);
+      } else {
+        expect(await postgres.db.selectFrom("users").select("display_name")
+          .where("id", "=", targetId!).executeTakeFirstOrThrow()).toEqual({ display_name: "target" });
+      }
+    } finally {
+      applyConcurrentChange();
+      await Promise.allSettled([responsePromise, blocker]);
     }
   });
 
@@ -286,43 +353,50 @@ describe("admin member management", () => {
           `/api/auth/callback?code=${replacementCode}&state=${replacementState}`,
         ),
       );
-      await waitForBlockedRequests(1);
+      const pendingResponses: Promise<unknown>[] = [replacementResponsePromise];
+      try {
+        await waitForBlockedRequests(1);
 
-      const mutationResponsePromise = mutation === "create"
-        ? Promise.resolve(actorLogin.agent.post("/api/admin/members")
-          .set("Origin", APP_ORIGIN).set("X-CSRF-Token", actorLogin.csrfToken)
-          .send({ displayName: "Deadlock Member", unionId: "deadlock-member", role: "member" }))
-        : Promise.resolve(actorLogin.agent.patch(`/api/admin/members/${targetId}`)
-          .set("Origin", APP_ORIGIN).set("X-CSRF-Token", actorLogin.csrfToken)
-          .send({ displayName: "Updated During Replacement" }));
-      await waitForBlockedRequests(2);
-      releaseTrigger();
+        const mutationResponsePromise = mutation === "create"
+          ? Promise.resolve(actorLogin.agent.post("/api/admin/members")
+            .set("Origin", APP_ORIGIN).set("X-CSRF-Token", actorLogin.csrfToken)
+            .send({ displayName: "Deadlock Member", unionId: "deadlock-member", role: "member" }))
+          : Promise.resolve(actorLogin.agent.patch(`/api/admin/members/${targetId}`)
+            .set("Origin", APP_ORIGIN).set("X-CSRF-Token", actorLogin.csrfToken)
+            .send({ displayName: "Updated During Replacement" }));
+        pendingResponses.push(mutationResponsePromise);
+        await waitForBlockedRequests(2);
+        releaseTrigger();
 
-      const [replacementResponse, mutationResponse] = await Promise.all([
-        replacementResponsePromise,
-        mutationResponsePromise,
-        triggerBlocker,
-      ]);
+        const [replacementResponse, mutationResponse] = await Promise.all([
+          replacementResponsePromise,
+          mutationResponsePromise,
+          triggerBlocker,
+        ]);
 
-      expect(replacementResponse.status).toBe(303);
-      if (replacement === "actor") {
-        expect(mutationResponse.status).toBe(403);
-        expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toEqual([]);
-        if (mutation === "create") {
-          expect(await postgres.db.selectFrom("auth_identities").select("subject")
-            .where("subject", "=", "deadlock-member").execute()).toEqual([]);
+        expect(replacementResponse.status).toBe(303);
+        if (replacement === "actor") {
+          expect(mutationResponse.status).toBe(403);
+          expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toEqual([]);
+          if (mutation === "create") {
+            expect(await postgres.db.selectFrom("auth_identities").select("subject")
+              .where("subject", "=", "deadlock-member").execute()).toEqual([]);
+          } else {
+            expect(await postgres.db.selectFrom("users").select("display_name")
+              .where("id", "=", actorId).executeTakeFirstOrThrow())
+              .toEqual({ display_name: "actor-admin" });
+          }
         } else {
+          expect(mutationResponse.status).toBe(200);
+          expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toHaveLength(1);
           expect(await postgres.db.selectFrom("users").select("display_name")
-            .where("id", "=", actorId).executeTakeFirstOrThrow())
-            .toEqual({ display_name: "actor-admin" });
+            .where("id", "=", targetId).executeTakeFirstOrThrow())
+            .toEqual({ display_name: "Updated During Replacement" });
+          expect((await targetLogin.agent.get("/api/auth/me")).status).toBe(401);
         }
-      } else {
-        expect(mutationResponse.status).toBe(200);
-        expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toHaveLength(1);
-        expect(await postgres.db.selectFrom("users").select("display_name")
-          .where("id", "=", targetId).executeTakeFirstOrThrow())
-          .toEqual({ display_name: "Updated During Replacement" });
-        expect((await targetLogin.agent.get("/api/auth/me")).status).toBe(401);
+      } finally {
+        releaseTrigger();
+        await Promise.allSettled([...pendingResponses, triggerBlocker]);
       }
     },
   );
@@ -355,22 +429,27 @@ describe("admin member management", () => {
     const secondResponsePromise = Promise.resolve(secondLogin.agent.patch(`/api/admin/members/${firstId}`)
       .set("Origin", APP_ORIGIN).set("X-CSRF-Token", secondLogin.csrfToken)
       .send({ displayName: "Updated By Second" }));
-    await waitForBlockedRequests(2);
-    releaseAdvisory();
+    try {
+      await waitForAdminMembersAdvisoryWaiters(2);
+      releaseAdvisory();
 
-    const [firstResponse, secondResponse] = await Promise.all([
-      firstResponsePromise,
-      secondResponsePromise,
-      blocker,
-    ]);
+      const [firstResponse, secondResponse] = await Promise.all([
+        firstResponsePromise,
+        secondResponsePromise,
+        blocker,
+      ]);
 
-    expect([firstResponse.status, secondResponse.status].sort()).toEqual([200, 403]);
-    expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toHaveLength(1);
-    const users = await postgres.db.selectFrom("users")
-      .select(["id", "display_name"])
-      .orderBy("id", "asc")
-      .execute();
-    expect(users.filter((user) => user.display_name.startsWith("Updated By"))).toHaveLength(1);
+      expect([firstResponse.status, secondResponse.status].sort()).toEqual([200, 403]);
+      expect(await postgres.db.selectFrom("audit_logs").selectAll().execute()).toHaveLength(1);
+      const users = await postgres.db.selectFrom("users")
+        .select(["id", "display_name"])
+        .orderBy("id", "asc")
+        .execute();
+      expect(users.filter((user) => user.display_name.startsWith("Updated By"))).toHaveLength(1);
+    } finally {
+      releaseAdvisory();
+      await Promise.allSettled([firstResponsePromise, secondResponsePromise, blocker]);
+    }
   });
 
   it("bootstraps only the first admin, is idempotent for the same identity, and rejects other nonempty state", async () => {
