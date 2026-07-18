@@ -430,4 +430,41 @@ describe("phase 1 PostgreSQL schema", () => {
       await destroyDatabase(admin);
     }
   });
+
+  test("closes the admin pool when database creation fails", async () => {
+    const adminUrl = process.env.TEST_DATABASE_URL!;
+    const roleName = `novel_no_createdb_${randomUUID().replaceAll("-", "")}`;
+    const applicationName = `novel_create_failure_${randomUUID()}`;
+    const admin = createDatabase(adminUrl);
+
+    await sql`create role ${sql.id(roleName)} login password 'test_cleanup_only'`.execute(admin);
+
+    const restrictedUrl = new URL(adminUrl);
+    restrictedUrl.username = roleName;
+    restrictedUrl.password = "test_cleanup_only";
+    restrictedUrl.searchParams.set("application_name", applicationName);
+    process.env.TEST_DATABASE_URL = restrictedUrl.toString();
+
+    try {
+      await expect(createDisposablePostgres()).rejects.toThrow(
+        "permission denied to create database",
+      );
+
+      const result = await sql<{ connections: number }>`
+        select count(*)::int as connections
+        from pg_stat_activity
+        where application_name = ${applicationName}
+      `.execute(admin);
+      expect(result.rows[0]?.connections).toBe(0);
+    } finally {
+      process.env.TEST_DATABASE_URL = adminUrl;
+      await sql`
+        select pg_terminate_backend(pid)
+        from pg_stat_activity
+        where application_name = ${applicationName}
+      `.execute(admin);
+      await sql`drop role if exists ${sql.id(roleName)}`.execute(admin);
+      await destroyDatabase(admin);
+    }
+  });
 });

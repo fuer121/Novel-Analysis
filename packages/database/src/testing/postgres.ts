@@ -35,43 +35,88 @@ function readAdminUrl(): URL {
 
 export async function createDisposablePostgres(): Promise<DisposablePostgres> {
   const adminUrl = readAdminUrl();
-  const admin = createDatabase(adminUrl.toString());
+  let admin: DatabaseConnection | undefined = createDatabase(adminUrl.toString());
   const databaseName = `novel_test_${randomUUID().replaceAll("-", "")}`;
   const databaseUrl = new URL(adminUrl);
   databaseUrl.pathname = `/${databaseName}`;
-
-  await sql`create database ${sql.id(databaseName)}`.execute(admin);
-  const db = createDatabase(databaseUrl.toString());
+  let db: DatabaseConnection | undefined;
+  let databaseDropped = true;
+  let dbDestroyed = true;
   let destroyed = false;
 
   async function destroy() {
     if (destroyed) {
       return;
     }
-    destroyed = true;
 
-    await destroyDatabase(db);
-    await sql`
-      select pg_terminate_backend(pid)
-      from pg_stat_activity
-      where datname = ${databaseName} and pid <> pg_backend_pid()
-    `.execute(admin);
-    await sql`drop database if exists ${sql.id(databaseName)}`.execute(admin);
-    await destroyDatabase(admin);
+    const errors: unknown[] = [];
+    try {
+      if (!dbDestroyed && db) {
+        try {
+          await destroyDatabase(db);
+          dbDestroyed = true;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+
+      if (!databaseDropped) {
+        admin ??= createDatabase(adminUrl.toString());
+        try {
+          await sql`
+            select pg_terminate_backend(pid)
+            from pg_stat_activity
+            where datname = ${databaseName} and pid <> pg_backend_pid()
+          `.execute(admin);
+          await sql`drop database if exists ${sql.id(databaseName)}`.execute(admin);
+          databaseDropped = true;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+    } finally {
+      if (admin) {
+        try {
+          await destroyDatabase(admin);
+          admin = undefined;
+        } catch (error) {
+          errors.push(error);
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      throw new AggregateError(errors, "Failed to destroy disposable PostgreSQL database");
+    }
+
+    destroyed = dbDestroyed && databaseDropped && admin === undefined;
   }
 
   try {
+    await sql`create database ${sql.id(databaseName)}`.execute(admin);
+    databaseDropped = false;
+    db = createDatabase(databaseUrl.toString());
+    dbDestroyed = false;
+
     const migration = await migrateToLatest(db);
     if (migration.error) {
       throw migration.error;
     }
   } catch (error) {
-    await destroy();
+    try {
+      await destroy();
+    } catch (cleanupError) {
+      throw new AggregateError(
+        [error, cleanupError],
+        "Failed to create disposable PostgreSQL database",
+        { cause: cleanupError },
+      );
+    }
     throw error;
   }
 
   return {
-    db,
+    db: db!,
     databaseName,
     databaseUrl: databaseUrl.toString(),
     destroy,
