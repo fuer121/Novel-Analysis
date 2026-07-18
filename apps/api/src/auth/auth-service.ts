@@ -102,28 +102,41 @@ export class AuthService {
   }> {
     const csrfToken = randomBytes(32).toString("base64url");
     return this.#database.transaction().execute(async (transaction) => {
-      const row = await transaction.selectFrom("sessions")
-        .innerJoin("users", "users.id", "sessions.user_id")
+      const locatedSession = await transaction.selectFrom("sessions")
+        .select(["id", "user_id"])
+        .where("token_hash", "=", sha256(sessionToken))
+        .executeTakeFirst();
+      if (!locatedSession) throw new AuthError();
+
+      const user = await transaction.selectFrom("users")
         .select([
-          "sessions.id as sessionId",
-          "users.id as userId",
-          "users.display_name as displayName",
-          "users.role as role",
+          "id",
+          "display_name",
+          "role",
         ])
-        .where("sessions.token_hash", "=", sha256(sessionToken))
-        .where("sessions.revoked_at", "is", null)
-        .where("sessions.expires_at", ">", sql<Date>`now()`)
-        .where("users.status", "=", "active")
+        .where("id", "=", locatedSession.user_id)
+        .where("status", "=", "active")
         .forUpdate()
         .executeTakeFirst();
-      if (!row) throw new AuthError();
+      if (!user) throw new AuthError();
+
+      const currentSession = await transaction.selectFrom("sessions")
+        .select("id")
+        .where("id", "=", locatedSession.id)
+        .where("user_id", "=", user.id)
+        .where("token_hash", "=", sha256(sessionToken))
+        .where("revoked_at", "is", null)
+        .where("expires_at", ">", sql<Date>`now()`)
+        .forUpdate()
+        .executeTakeFirst();
+      if (!currentSession) throw new AuthError();
 
       await transaction.updateTable("sessions")
         .set({ csrf_token_hash: sha256(csrfToken), last_seen_at: sql`now()` })
-        .where("id", "=", row.sessionId)
+        .where("id", "=", currentSession.id)
         .execute();
       return {
-        user: { id: row.userId, displayName: row.displayName, role: row.role },
+        user: { id: user.id, displayName: user.display_name, role: user.role },
         csrfToken,
       };
     });

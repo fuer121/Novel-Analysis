@@ -28,7 +28,8 @@ class AdminAuthorizationError extends Error {}
 async function lockAndAuthorizeAdminMutation(
   transaction: DatabaseExecutor,
   request: AuthenticatedRequest,
-): Promise<void> {
+  targetUserId?: string,
+): Promise<boolean> {
   await sql`select pg_advisory_xact_lock(hashtext('novel-analysis'), hashtext('admin-members'))`
     .execute(transaction);
 
@@ -36,8 +37,26 @@ async function lockAndAuthorizeAdminMutation(
   const actor = request.auth;
   if (!actor || !rawCsrf) throw new AdminAuthorizationError();
 
+  const user = await transaction.selectFrom("users")
+    .select("id")
+    .where("id", "=", actor.userId)
+    .where("status", "=", "active")
+    .where("role", "=", "admin")
+    .forUpdate()
+    .executeTakeFirst();
+  if (!user) throw new AdminAuthorizationError();
+
+  let targetExists = true;
+  if (targetUserId && targetUserId !== actor.userId) {
+    targetExists = Boolean(await transaction.selectFrom("users")
+      .select("id")
+      .where("id", "=", targetUserId)
+      .forUpdate()
+      .executeTakeFirst());
+  }
+
   const session = await transaction.selectFrom("sessions")
-    .select(["user_id", "csrf_token_hash"])
+    .select("csrf_token_hash")
     .where("id", "=", actor.sessionId)
     .where("user_id", "=", actor.userId)
     .where("revoked_at", "is", null)
@@ -48,14 +67,15 @@ async function lockAndAuthorizeAdminMutation(
     throw new AdminAuthorizationError();
   }
 
-  const user = await transaction.selectFrom("users")
-    .select("id")
-    .where("id", "=", session.user_id)
-    .where("status", "=", "active")
-    .where("role", "=", "admin")
-    .forUpdate()
-    .executeTakeFirst();
-  if (!user) throw new AdminAuthorizationError();
+  if (targetUserId && targetExists) {
+    await transaction.selectFrom("sessions")
+      .select("id")
+      .where("user_id", "=", targetUserId)
+      .orderBy("id", "asc")
+      .forUpdate()
+      .execute();
+  }
+  return targetExists;
 }
 
 function memberJson(row: {
@@ -141,19 +161,12 @@ export function createAdminMembersRouter(database: DatabaseConnection, config: A
     }
     try {
       const member = await database.transaction().execute(async (transaction) => {
-        await lockAndAuthorizeAdminMutation(transaction, request);
-        await transaction.selectFrom("sessions")
-          .select("id")
-          .where("user_id", "=", params.data.id)
-          .orderBy("id", "asc")
-          .forUpdate()
-          .execute();
-        const current = await transaction.selectFrom("users")
-          .select("id")
-          .where("id", "=", params.data.id)
-          .forUpdate()
-          .executeTakeFirst();
-        if (!current) return null;
+        const targetExists = await lockAndAuthorizeAdminMutation(
+          transaction,
+          request,
+          params.data.id,
+        );
+        if (!targetExists) return null;
 
         const row = await transaction.updateTable("users").set({
           ...(body.data.displayName === undefined ? {} : { display_name: body.data.displayName }),
