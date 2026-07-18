@@ -30,7 +30,7 @@ export default defineConfig([
     },
   },
   {
-    files: ['packages/**/*.ts'],
+    files: ['packages/**/*.ts', 'apps/**/*.{ts,tsx}'],
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
     languageOptions: {
       parser: tseslint.parser,

@@ -1,0 +1,15 @@
+{
+  "name": "@novel-analysis/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "vitest run --root ../.. apps/worker/src",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@novel-analysis/database": "*",
+    "@novel-analysis/jobs": "*"
+  }
+}

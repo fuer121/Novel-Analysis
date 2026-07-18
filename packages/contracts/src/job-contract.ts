@@ -80,6 +80,14 @@ export const JobProgressSchema = z.object({
   failed: z.number().int().nonnegative(),
   skipped: z.number().int().nonnegative(),
   current: z.string(),
+}).superRefine((progress, context) => {
+  if (progress.completed + progress.failed + progress.skipped > progress.total) {
+    context.addIssue({
+      code: "custom",
+      path: ["total"],
+      message: "completed, failed, and skipped must not exceed total",
+    });
+  }
 });
 
 export type JobProgress = z.infer<typeof JobProgressSchema>;

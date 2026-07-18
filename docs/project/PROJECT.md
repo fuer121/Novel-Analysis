@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-18T20:34:19+08:00
+updated_at: 2026-07-18T20:59:50+08:00
 updated_by: controller-agent
-current_phase: phase-1-implementation-ready
-last_checkpoint: CP-20260718-PHASE1-PLAN-APPROVED
+current_phase: phase-1-implementation
+last_checkpoint: CP-20260718-PHASE1-TASK1-ACCEPTED
 next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -31,7 +31,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 | 阶段 | 状态 | 证据或依赖 |
 | --- | --- | --- |
 | Phase 0 | merged | [CP-20260717-PHASE0-MERGED](checkpoints/CP-20260717-PHASE0-MERGED.md) |
-| Phase 1 | plan approved, awaiting governance merge | [CP-20260718-PHASE1-PLAN-APPROVED](checkpoints/CP-20260718-PHASE1-PLAN-APPROVED.md) |
+| Phase 1 | implementation | [CP-20260718-PHASE1-PLAN-MERGED](checkpoints/CP-20260718-PHASE1-PLAN-MERGED.md) |
 | Phase 2 | blocked by Phase 1 | Phase 1 通过后才能推进 |
 | Phase 3 | blocked by Phase 2 | Phase 2 通过后才能推进 |
 
@@ -39,8 +39,9 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | docs/phase1-plan-ready | 089ecd189c584620a0f9441cbf1a47cfbcd10097 | 39b7c008a8f42e08c0b8a547a261d6e9417fbb01 | accepted | CP-20260718-GOV-POST-MERGE-RECONCILIATION | CP-20260718-PHASE1-PLAN-APPROVED | merge governance PR after user confirmation |
-| PHASE1-TASK1 | phase-1 | Foundation contracts and workspaces | unassigned | none | none | none | blocked | PHASE1-PLAN governance merged to main | none | wait for governance PR merge |
+| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | main | 089ecd189c584620a0f9441cbf1a47cfbcd10097 | 4ad103ca48442820904842047cd95b8924d44590 | merged | CP-20260718-GOV-POST-MERGE-RECONCILIATION | CP-20260718-PHASE1-PLAN-MERGED | complete |
+| PHASE1-TASK1 | phase-1 | Foundation contracts and workspaces | controller-agent | refactor/phase1-task1-foundation | e2bf859c3d03bb770cb8299b0749660a856c9cb0 | eff81bc4580485e71bee6e090ccb13a4fb974ad9 | accepted | CP-20260718-PHASE1-PLAN-MERGED | CP-20260718-PHASE1-TASK1-ACCEPTED | create PR and await merge confirmation |
+| PHASE1-TASK2 | phase-1 | PostgreSQL schema and Kysely migrations | unassigned | none | none | none | blocked | PHASE1-TASK1 merged to main | none | wait for Task 1 PR merge |
 
 ## Effective Decisions
 
@@ -61,7 +62,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- `CP-20260718-PHASE1-PLAN-APPROVED` 已接受，Task 1 等待本治理分支合并到 `main`
+- `PHASE1-TASK1` 已接受，等待 PR 合并确认
 
 ## Next Gate
 
@@ -76,6 +77,8 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 - [Governance source post-merge reconciliation](checkpoints/CP-20260718-GOV-POST-MERGE-RECONCILIATION.md)
 - [Phase 1 plan submitted checkpoint](checkpoints/CP-20260718-PHASE1-PLAN-SUBMITTED.md)
 - [Phase 1 plan approved checkpoint](checkpoints/CP-20260718-PHASE1-PLAN-APPROVED.md)
+- [Phase 1 plan merged checkpoint](checkpoints/CP-20260718-PHASE1-PLAN-MERGED.md)
+- [Phase 1 Task 1 accepted checkpoint](checkpoints/CP-20260718-PHASE1-TASK1-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
