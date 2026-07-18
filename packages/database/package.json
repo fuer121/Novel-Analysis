@@ -7,7 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "migrate": "node src/migrate.ts",
+    "migrate": "tsc -p tsconfig.json --noEmit false --rootDir src --outDir dist && node dist/migrate.js",
     "test": "vitest run --root ../.. packages/database/src",
     "typecheck": "tsc -p tsconfig.json"
   },
