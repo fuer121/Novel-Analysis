@@ -20,6 +20,15 @@ test("root package declares the new workspace without moving the legacy app", as
   assert.equal(packageJson.scripts["test:legacy"], "node --test test/service.test.js");
   assert.equal(packageJson.scripts["test:new"], "vitest run");
   assert.equal(
+    packageJson.scripts["test:project-source"],
+    "node --test test/project-source-of-truth.test.js",
+  );
+  assert.equal(packageJson.scripts["project:check"], "node scripts/check-project-source.mjs");
+  assert.equal(
+    packageJson.scripts.verify,
+    "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check && npm run test:project-source && npm run project:check",
+  );
+  assert.equal(
     packageJson.scripts["typecheck:new"],
     "tsc -p packages/contracts/tsconfig.json && tsc -p packages/domain/tsconfig.json",
   );

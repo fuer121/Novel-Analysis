@@ -4,19 +4,17 @@
 
 ## 项目基线
 
-当前项目现状、关键决策、安全边界、运行配置和中长期迭代计划统一维护在：
+当前重构状态、有效决策、任务进度、风险和下一验收闸门统一维护在 `docs/project/PROJECT.md`
 
-```text
-docs/PROJECT_CONTROL_BASELINE.md
-```
+该文件是项目级唯一信源
 
-后续任何架构、运行、合规或路线图变化，都以该文件为唯一真实信息源并持续更新。
+旧单机实现细节保留在 `docs/PROJECT_CONTROL_BASELINE.md`，不能用于判断当前重构阶段
 
 ## 工作区约定
 
-- 唯一正式工作区：`/Users/staff/Desktop/Vibe coding/novel-chapter-gpt-service`
-- 历史重复工作区 `Dify 工作流模板创建` 已归档后不再作为开发目录使用。
-- 如需查看索引存储设计，统一以 `docs/L1_L2_INDEX_STORAGE.md` 为准。
+- 当前重构仓库：`/Users/staff/Desktop/Vibe coding/小说分析-重构`
+- 当前项目状态以 `docs/project/PROJECT.md` 为准
+- `docs/PROJECT_CONTROL_BASELINE.md` 仅供参考旧单机实现，不能作为当前项目状态依据
 
 ## 安全边界
 

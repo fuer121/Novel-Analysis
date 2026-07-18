@@ -26,12 +26,14 @@
     "test:contracts": "node --test test/contracts/*.test.js",
     "test:legacy": "node --test test/service.test.js",
     "test:new": "vitest run",
+    "test:project-source": "node --test test/project-source-of-truth.test.js",
     "typecheck:new": "tsc -p packages/contracts/tsconfig.json && tsc -p packages/domain/tsconfig.json",
     "verify:new": "npm run typecheck:new && npm run test:contracts && npm run test:new",
     "lint:legacy": "eslint src server test/service.test.js",
     "build:legacy": "vite build",
     "verify:legacy": "npm run test:legacy && npm run lint:legacy && npm run build:legacy",
-    "verify": "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check"
+    "project:check": "node scripts/check-project-source.mjs",
+    "verify": "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check && npm run test:project-source && npm run project:check"
   },
   "dependencies": {
     "concurrently": "^9.2.1",
