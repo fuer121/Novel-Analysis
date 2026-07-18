@@ -141,6 +141,46 @@ async function expectConstraintViolation(
   await expect(operation).rejects.toMatchObject({ constraint });
 }
 
+async function withDisposablePostgres(
+  count: number,
+  operation: (disposables: DisposablePostgres[]) => Promise<void>,
+): Promise<void> {
+  const disposables: DisposablePostgres[] = [];
+  let operationFailed = false;
+  let operationError: unknown;
+  let cleanupErrors: unknown[];
+
+  try {
+    for (let index = 0; index < count; index += 1) {
+      disposables.push(await createDisposablePostgres());
+    }
+    await operation(disposables);
+  } catch (error) {
+    operationFailed = true;
+    operationError = error;
+  } finally {
+    const cleanupResults = await Promise.allSettled(
+      disposables.map((disposable) => disposable.destroy()),
+    );
+    cleanupErrors = cleanupResults.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+  }
+
+  if (operationFailed && cleanupErrors.length > 0) {
+    throw new AggregateError(
+      [operationError, ...cleanupErrors],
+      "Disposable PostgreSQL operation and cleanup failed",
+    );
+  }
+  if (operationFailed) {
+    throw operationError;
+  }
+  if (cleanupErrors.length > 0) {
+    throw new AggregateError(cleanupErrors, "Disposable PostgreSQL cleanup failed");
+  }
+}
+
 describe("phase 1 PostgreSQL schema", () => {
   let postgres: DisposablePostgres;
 
@@ -432,21 +472,59 @@ describe("phase 1 PostgreSQL schema", () => {
   });
 
   test("drops databases after concurrent multi-client pool teardown", async () => {
-    const disposables = await Promise.all(
-      Array.from({ length: 3 }, () => createDisposablePostgres()),
-    );
-
-    await Promise.all(
-      disposables.flatMap((disposable) =>
-        Array.from({ length: 10 }, () => sql`select pg_sleep(0.01)`.execute(disposable.db)),
-      ),
-    );
-
-    await Promise.all(disposables.map((disposable) => disposable.destroy()));
+    let databaseNames: string[] = [];
+    await withDisposablePostgres(3, async (disposables) => {
+      databaseNames = disposables.map((disposable) => disposable.databaseName);
+      await Promise.all(
+        disposables.flatMap((disposable) =>
+          Array.from({ length: 10 }, () =>
+            sql`select pg_sleep(0.01)`.execute(disposable.db),
+          ),
+        ),
+      );
+    });
 
     const admin = createDatabase(process.env.TEST_DATABASE_URL!);
     try {
-      const databaseNames = disposables.map((disposable) => disposable.databaseName);
+      const result = await sql<{ databases: number; connections: number }>`
+        select
+          (select count(*)::int from pg_database where datname in (${sql.join(databaseNames)})) as databases,
+          (select count(*)::int from pg_stat_activity where datname in (${sql.join(databaseNames)})) as connections
+      `.execute(admin);
+      expect(result.rows[0]).toEqual({ databases: 0, connections: 0 });
+    } finally {
+      await destroyDatabase(admin);
+    }
+  });
+
+  test("cleans up every database while preserving workload and cleanup failures", async () => {
+    const workloadError = new Error("injected multi-client workload failure");
+    const cleanupError = new Error("injected cleanup failure");
+    let databaseNames: string[] = [];
+    let caughtError: unknown;
+
+    try {
+      await withDisposablePostgres(3, async (disposables) => {
+        databaseNames = disposables.map((disposable) => disposable.databaseName);
+        const destroy = disposables[0]!.destroy.bind(disposables[0]);
+        disposables[0]!.destroy = async () => {
+          await destroy();
+          throw cleanupError;
+        };
+        throw workloadError;
+      });
+    } catch (error) {
+      caughtError = error;
+    }
+
+    expect(caughtError).toBeInstanceOf(AggregateError);
+    expect((caughtError as AggregateError).errors).toEqual([
+      workloadError,
+      cleanupError,
+    ]);
+
+    const admin = createDatabase(process.env.TEST_DATABASE_URL!);
+    try {
       const result = await sql<{ databases: number; connections: number }>`
         select
           (select count(*)::int from pg_database where datname in (${sql.join(databaseNames)})) as databases,
