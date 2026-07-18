@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-17T17:00:00+08:00
+updated_at: 2026-07-18T18:06:59+08:00
 updated_by: controller-agent
 current_phase: phase-1-planning
-last_checkpoint: CP-20260717-PHASE0-MERGED
+last_checkpoint: CP-20260718-GOV-POST-MERGE-RECONCILIATION
 next_gate: GATE-PHASE1-PLAN-APPROVED
 ---
 
@@ -39,7 +39,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | none | be49f4ccd312a269ee4c7419c6d9d08407df2c21 | none | planned | governance source merged | none | write and review plan |
+| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | none | 6d982a67d7b2a5730d478ae9ebe062a3a7b84c41 | none | ready | governance source merged via PR #2 at 6d982a67d7b2a5730d478ae9ebe062a3a7b84c41 | none | write and review Phase 1 detailed plan |
 
 ## Effective Decisions
 
@@ -72,6 +72,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 - [重构路线图](../superpowers/plans/2026-07-16-novel-analysis-refactor-roadmap.md)
 - [Phase 0 handoff](../superpowers/handoffs/2026-07-17-phase-0-foundation-handoff.md)
 - [Phase 0 accepted checkpoint](checkpoints/CP-20260717-PHASE0-MERGED.md)
+- [Governance source post-merge reconciliation](checkpoints/CP-20260718-GOV-POST-MERGE-RECONCILIATION.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
