@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-18T18:06:59+08:00
+updated_at: 2026-07-18T19:08:42+08:00
 updated_by: controller-agent
 current_phase: phase-1-planning
 last_checkpoint: CP-20260718-GOV-POST-MERGE-RECONCILIATION
@@ -31,7 +31,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 | 阶段 | 状态 | 证据或依赖 |
 | --- | --- | --- |
 | Phase 0 | merged | [CP-20260717-PHASE0-MERGED](checkpoints/CP-20260717-PHASE0-MERGED.md) |
-| Phase 1 | planning | [Novel Analysis Refactor Roadmap](../superpowers/plans/2026-07-16-novel-analysis-refactor-roadmap.md) |
+| Phase 1 | planning | [Phase 1 implementation plan](../superpowers/plans/2026-07-18-phase-1-collaboration-task-kernel-implementation-plan.md) |
 | Phase 2 | blocked by Phase 1 | Phase 1 通过后才能推进 |
 | Phase 3 | blocked by Phase 2 | Phase 2 通过后才能推进 |
 
@@ -39,7 +39,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | none | 6d982a67d7b2a5730d478ae9ebe062a3a7b84c41 | none | ready | governance source merged via PR #2 at 6d982a67d7b2a5730d478ae9ebe062a3a7b84c41 | none | write and review Phase 1 detailed plan |
+| PHASE1-PLAN | phase-1 | Phase 1 detailed implementation plan | controller-agent | docs/phase1-plan-ready | 089ecd189c584620a0f9441cbf1a47cfbcd10097 | 39b7c008a8f42e08c0b8a547a261d6e9417fbb01 | review | CP-20260718-GOV-POST-MERGE-RECONCILIATION | CP-20260718-PHASE1-PLAN-SUBMITTED | await user approval for GATE-PHASE1-PLAN-APPROVED |
 
 ## Effective Decisions
 
@@ -60,7 +60,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 
 ## Pending Feedback
 
-当前无待核验反馈
+- `CP-20260718-PHASE1-PLAN-SUBMITTED` 已提交，等待用户确认 `GATE-PHASE1-PLAN-APPROVED`
 
 ## Next Gate
 
@@ -73,6 +73,7 @@ next_gate: GATE-PHASE1-PLAN-APPROVED
 - [Phase 0 handoff](../superpowers/handoffs/2026-07-17-phase-0-foundation-handoff.md)
 - [Phase 0 accepted checkpoint](checkpoints/CP-20260717-PHASE0-MERGED.md)
 - [Governance source post-merge reconciliation](checkpoints/CP-20260718-GOV-POST-MERGE-RECONCILIATION.md)
+- [Phase 1 plan submitted checkpoint](checkpoints/CP-20260718-PHASE1-PLAN-SUBMITTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
