@@ -431,6 +431,33 @@ describe("phase 1 PostgreSQL schema", () => {
     }
   });
 
+  test("drops databases after concurrent multi-client pool teardown", async () => {
+    const disposables = await Promise.all(
+      Array.from({ length: 3 }, () => createDisposablePostgres()),
+    );
+
+    await Promise.all(
+      disposables.flatMap((disposable) =>
+        Array.from({ length: 10 }, () => sql`select pg_sleep(0.01)`.execute(disposable.db)),
+      ),
+    );
+
+    await Promise.all(disposables.map((disposable) => disposable.destroy()));
+
+    const admin = createDatabase(process.env.TEST_DATABASE_URL!);
+    try {
+      const databaseNames = disposables.map((disposable) => disposable.databaseName);
+      const result = await sql<{ databases: number; connections: number }>`
+        select
+          (select count(*)::int from pg_database where datname in (${sql.join(databaseNames)})) as databases,
+          (select count(*)::int from pg_stat_activity where datname in (${sql.join(databaseNames)})) as connections
+      `.execute(admin);
+      expect(result.rows[0]).toEqual({ databases: 0, connections: 0 });
+    } finally {
+      await destroyDatabase(admin);
+    }
+  });
+
   test("closes the admin pool when database creation fails", async () => {
     const adminUrl = process.env.TEST_DATABASE_URL!;
     const roleName = `novel_no_createdb_${randomUUID().replaceAll("-", "")}`;
