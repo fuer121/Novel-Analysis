@@ -158,6 +158,7 @@ npm ls --workspaces --depth=0
 ```sql
 users(id, display_name, avatar_url, role, status, created_at, updated_at)
 auth_identities(id, user_id, provider, subject, created_at, unique(provider, subject))
+oauth_states(id, state_hash unique, return_to, expires_at, consumed_at, created_at)
 sessions(id, user_id, token_hash unique, csrf_token_hash nullable, expires_at, revoked_at, created_at, last_seen_at)
 audit_logs(id bigint identity, actor_user_id, action, target_type, target_id, metadata jsonb, created_at)
 jobs(id, type, status, requested_by, request_id, scope jsonb, config_snapshot jsonb,
@@ -173,12 +174,13 @@ job_outbox(id, job_id, topic, payload jsonb, available_at, claimed_by,
            claim_expires_at, delivered_at, created_at)
 ```
 
-`role` 只允许 admin/member，用户 status 只允许 active/disabled，job status 与共享契约一致。active concurrency key 使用 partial unique index。session、event cursor、step claim、pending outbox 建必要索引。down migration 按外键逆序删除并清理 enum/type
+`role` 只允许 admin/member，用户 status 只允许 active/disabled，job status 与共享契约一致。active concurrency key 使用 partial unique index。OAuth state 以 `state_hash` 查询并建立 `expires_at` 清理索引；session、event cursor、step claim、pending outbox 建必要索引。down migration 按外键逆序删除并清理 enum/type
 
 **Transaction And Harness Rules:**
 
 - `createDatabase(url)` 只接受 PostgreSQL URL并显式 destroy pool
 - migration runner 使用 Kysely Migrator，失败非零退出，重复执行无变更
+- OAuth state 消费在单事务内执行 `UPDATE ... WHERE state_hash = ? AND consumed_at IS NULL AND expires_at > now() RETURNING return_to`，并以返回零行表示无效、过期或已消费
 - harness 拒绝非 `/postgres` 的 `TEST_DATABASE_URL`
 - 每个 integration file 使用独立随机数据库，不共享表清理状态
 - 测试覆盖 up、down、fresh up、唯一约束、外键和 partial unique index
@@ -191,11 +193,11 @@ job_outbox(id, job_id, topic, payload jsonb, available_at, claimed_by,
 
 ```bash
 npm run test:integration -- packages/database/src/schema.integration.test.ts
-DATABASE_URL="$DATABASE_URL" npm run db:migrate
-DATABASE_URL="$DATABASE_URL" npm run db:migrate
+DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/novel_analysis npm run db:migrate
+DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/novel_analysis npm run db:migrate
 ```
 
-**Acceptance:** 真实 PostgreSQL 从空库完成 migration；第二次无 pending migration；测试库创建/销毁无残留连接；没有 SQLite import
+**Acceptance:** 真实 PostgreSQL 从空库完成 migration；OAuth state 唯一约束、单次消费与 expiry 索引有效；第二次 migration 命令明确报告无 pending migration；测试库创建/销毁无残留连接；没有 SQLite import
 
 **Commit boundary:** `git commit -m "feat: add phase 1 PostgreSQL schema"`
 
@@ -207,7 +209,7 @@ DATABASE_URL="$DATABASE_URL" npm run db:migrate
 - Modify: `packages/domain/src/index.ts`
 - Create: `apps/api/src/config.ts`, `apps/api/src/app.ts`, `apps/api/src/bootstrap-admin.ts`
 - Create: `apps/api/src/auth/feishu-adapter.ts`, `apps/api/src/auth/feishu-http-adapter.ts`, `apps/api/src/auth/feishu-fake.ts`
-- Create: `apps/api/src/auth/auth-service.ts`, `apps/api/src/auth/session-middleware.ts`, `apps/api/src/auth/csrf.ts`, `apps/api/src/auth/authorize.ts`
+- Create: `apps/api/src/auth/oauth-state-repository.ts`, `apps/api/src/auth/auth-service.ts`, `apps/api/src/auth/session-middleware.ts`, `apps/api/src/auth/csrf.ts`, `apps/api/src/auth/authorize.ts`
 - Create: `apps/api/src/routes/auth.ts`, `apps/api/src/routes/admin-members.ts`
 - Create: `apps/api/src/auth/auth.integration.test.ts`, `apps/api/src/routes/admin-members.integration.test.ts`
 
@@ -241,12 +243,13 @@ interface AuthService {
 **RBAC And Audit Contract:**
 
 - member 可查看共享任务、创建任务、控制自己的任务
-- admin 额外拥有 members:manage、jobs:control:any、audit:read
+- admin 额外拥有 members:manage、jobs:control:any、audit:read、system:configure
+- domain matrix 必须逐项断言 member 拒绝 members:manage、jobs:control:any、audit:read、system:configure，admin 接受全部四项；本阶段不新增 system configuration API 或 UI
 - `GET/POST/PATCH /api/admin/members` 服务端要求 admin
 - 成员变更、session 强制撤销和 audit insert 同事务
 - 首个管理员脚本仅在 users 为空时创建配置中的飞书 identity；同一 identity 重跑幂等，任何其他非空状态拒绝
 
-- [ ] **Write failing tests:** state replay、未映射/disabled、session hash、Cookie 属性、/me CSRF 轮换、旧 token、Origin、重登/注销、日志脱敏、member 403、admin 审计原子性
+- [ ] **Write failing tests:** state replay/expiry、未映射/disabled、session hash、Cookie 属性、/me CSRF 轮换、旧 token、Origin、重登/注销、日志脱敏、admin/member 四权限 domain matrix、member 403、admin 审计原子性
 - [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
 - [ ] **Confirm failure:** `npm run test:integration -- apps/api/src/auth/auth.integration.test.ts apps/api/src/routes/admin-members.integration.test.ts`
 - [ ] **Implement minimum:** adapter/service/middleware/routes/bootstrap 与显式事务
@@ -258,7 +261,7 @@ npm run test:integration -- apps/api/src/auth/auth.integration.test.ts apps/api/
 npm run typecheck -w apps/api
 ```
 
-**Acceptance:** OAuth state 与白名单边界有效；数据库只有 token hash；callback URL/日志无 token；/me 能轮换且不从 hash 还原；member 无管理权限；成功管理操作有且仅有一条审计，失败操作无审计
+**Acceptance:** OAuth state repository 只消费一次且拒绝过期 state；白名单边界有效；数据库只有 token hash；callback URL/日志无 token；/me 能轮换且不从 hash 还原；member 被 domain matrix 拒绝四个 admin 权限；成功管理操作有且仅有一条审计，失败操作无审计
 
 **Commit boundary:** `git commit -m "feat: add secure collaboration authentication"`
 
@@ -268,7 +271,7 @@ npm run typecheck -w apps/api
 **Files:**
 - Modify: `packages/contracts/src/job-contract.ts`, `packages/contracts/src/job-contract.test.ts`, `packages/contracts/src/index.ts`
 - Create: `packages/jobs/src/job-repository.ts`, `packages/jobs/src/job-controls.ts`, `packages/jobs/src/index.ts`
-- Create: `packages/jobs/src/job-repository.integration.test.ts`, `packages/jobs/src/job-controls.integration.test.ts`, `packages/jobs/src/control-completion-race.integration.test.ts`
+- Create: `packages/jobs/src/job-repository.integration.test.ts`, `packages/jobs/src/job-controls.integration.test.ts`
 - Create: `apps/api/src/routes/jobs.ts`, `apps/api/src/routes/jobs.integration.test.ts`
 - Modify: `apps/api/src/app.ts`
 
@@ -299,27 +302,20 @@ resume only: INSERT job_outbox
 COMMIT
 ```
 
-pause -> paused，resume -> queued，cancel -> cancelled。cancel 同事务把未完成 step/open attempt 标记 cancelled。控制和未来 `completeStep` 均按 job→step 锁序
+pause -> paused，resume -> queued，cancel -> cancelled。控制事务锁 job 后校验 owner/admin、状态迁移和 Idempotency-Key；cancel 同事务把未完成 step/open attempt 标记 cancelled。重复控制 key 返回同一结果且不重复 event/audit，终态控制返回 invalid transition
 
-**Race Tests:**
-
-- pause 先持 job lock：完成只落当前步骤，job 保持 paused，无 next outbox
-- cancel 先持 job lock：迟到完成返回 discarded，不增加 progress，不覆盖 cancelled
-- completion 先持 job lock：非最终步骤完成后 pause 生效；最终完成后等待中的控制返回 invalid transition
-- completed/failed/cancelled 上的任何控制或迟到完成均不能改变终态
-
-- [ ] **Write failing tests:** 创建原子回滚/重复 key、API 重建后查询、owner/admin matrix、控制审计、四组并发 ordering
+- [ ] **Write failing tests:** 创建原子回滚/重复 key、API 重建后查询、owner/admin matrix、控制状态/幂等、审计事务回滚
 - [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
 - [ ] **Confirm failure:** `npm run test:integration -- packages/jobs/src/job-repository.integration.test.ts packages/jobs/src/job-controls.integration.test.ts`
-- [ ] **Implement minimum:** repository、controls、API mapper 与统一锁序
+- [ ] **Implement minimum:** repository、controls、API mapper 与控制事务
 - [ ] **Focused verification:**
 
 ```bash
-npm run test:integration -- packages/jobs/src/job-repository.integration.test.ts packages/jobs/src/job-controls.integration.test.ts packages/jobs/src/control-completion-race.integration.test.ts
+npm run test:integration -- packages/jobs/src/job-repository.integration.test.ts packages/jobs/src/job-controls.integration.test.ts
 npm run test:integration -- apps/api/src/routes/jobs.integration.test.ts
 ```
 
-**Acceptance:** 产品表是唯一状态源；创建全有或全无；重复请求不重复；refresh/API object recreation 可查询；RBAC 正确；每次成功控制只有一条 audit；终态不可覆盖
+**Acceptance:** 产品表是唯一状态源；创建全有或全无；重复创建/控制 key 不重复效果；refresh/API object recreation 可查询；RBAC 正确；每次成功控制只有一条 audit；失败或终态控制不改状态且不写 audit
 
 **Commit boundary:** `git commit -m "feat: persist jobs and audited controls"`
 
@@ -365,9 +361,9 @@ npm run typecheck -w packages/jobs
 
 ### Task 6: Lease Recovery And Worker Runtime
 
-**Scope:** 实现步骤 lease、attempt、幂等完成、示例 executor、独立 Worker 与确定性中断测试
+**Scope:** 实现步骤 lease、attempt、幂等完成、控制/完成竞态、示例 executor、独立 Worker 与确定性中断测试
 **Files:**
-- Create: `packages/jobs/src/step-leases.ts`, `packages/jobs/src/example-executor.ts`, `packages/jobs/src/lease-recovery.integration.test.ts`
+- Create: `packages/jobs/src/step-leases.ts`, `packages/jobs/src/example-executor.ts`, `packages/jobs/src/lease-recovery.integration.test.ts`, `packages/jobs/src/control-completion-race.integration.test.ts`
 - Modify: `packages/jobs/src/index.ts`
 - Create: `apps/worker/src/worker.ts`, `apps/worker/src/main.ts`, `apps/worker/src/worker.integration.test.ts`
 - Modify: `apps/worker/package.json`
@@ -398,19 +394,26 @@ complete 事务先锁 job 再锁 step，验证 owner/lease/idempotency。running
 
 确定性中断测试通过构造参数注入 `ExecutionBarrier`：attempt 与 lease 提交后 barrier 通知测试父进程并阻塞，父进程确认 attempt 1 已持久化后终止 Worker。生产 `main.ts` 始终注入 no-op barrier，不读取测试开关，不暴露 HTTP 控制入口
 
-- [ ] **Write failing tests:** 未过期拒领、过期新 attempt、旧 attempt abandoned、重复完成单效果、paused/cancelled/terminal 迟到完成、runtime restart 无新增效果
+**Control/Completion Race Tests:**
+
+- pause 先持 job lock：完成只落当前步骤，job 保持 paused，无 next outbox
+- cancel 先持 job lock：迟到完成返回 discarded，不增加 progress，不覆盖 cancelled
+- completion 先持 job lock：非最终步骤完成后 pause 生效；最终完成后等待中的控制返回 invalid transition
+- completed/failed/cancelled 上的任何控制或迟到完成均不能改变终态
+
+- [ ] **Write failing tests:** 未过期拒领、过期新 attempt、旧 attempt abandoned、重复完成单效果、四组 control/completion ordering、runtime restart 无新增效果
 - [ ] **Confirm environment:** PostgreSQL readiness command from Task 2
-- [ ] **Confirm failure:** `npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts apps/worker/src/worker.integration.test.ts`
-- [ ] **Implement minimum:** lease service、executor、runtime 与 test-only barrier injection
+- [ ] **Confirm failure:** `npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts packages/jobs/src/control-completion-race.integration.test.ts apps/worker/src/worker.integration.test.ts`
+- [ ] **Implement minimum:** lease service、统一 job→step 锁序、executor、runtime 与 test-only barrier injection
 - [ ] **Focused verification:**
 
 ```bash
-npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts
-npm run test:integration -- packages/jobs/src/control-completion-race.integration.test.ts apps/worker/src/worker.integration.test.ts
+npm run test:integration -- packages/jobs/src/lease-recovery.integration.test.ts packages/jobs/src/control-completion-race.integration.test.ts
+npm run test:integration -- apps/worker/src/worker.integration.test.ts
 npm run typecheck -w apps/worker
 ```
 
-**Acceptance:** attempt 1 中断后只有过期 lease 可恢复；attempt 2 完成；迟到 attempt 1 不覆盖；每个步骤一个 output/event/progress 效果；Worker restart 后完成任务；生产无测试控制入口
+**Acceptance:** attempt 1 中断后只有过期 lease 可恢复；attempt 2 完成；迟到 attempt 1 不覆盖；每个步骤一个 output/event/progress 效果；四组并发 ordering 均保持 paused/cancelled/terminal 语义且无重复 event/progress；Worker restart 后完成任务；生产无测试控制入口
 
 **Commit boundary:** `git commit -m "feat: recover jobs from expired worker leases"`
 
