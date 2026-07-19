@@ -6,6 +6,7 @@ export default defineConfig({
     include: [
       "packages/**/*.integration.test.ts",
       "apps/**/*.integration.test.ts",
+      "test/phase2/**/*.integration.test.ts",
     ],
     exclude: ["**/*.unit.test.ts", "**/*.e2e.test.ts", "test/phase1/**"],
     passWithNoTests: true,
