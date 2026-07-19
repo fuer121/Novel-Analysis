@@ -26,6 +26,7 @@
     "test:contracts": "node --test test/contracts/*.test.js",
     "test:legacy": "node --test test/service.test.js",
     "test:new": "vitest run",
+    "test:dify": "npm run test -w packages/dify",
     "test:integration": "TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/postgres vitest run --config vitest.integration.config.ts",
     "test:phase1:e2e": "TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/postgres vitest run --config vitest.e2e.config.ts",
     "typecheck:phase1": "tsc -p packages/contracts/tsconfig.json && tsc -p packages/domain/tsconfig.json && tsc -p packages/database/tsconfig.json && tsc -p packages/jobs/tsconfig.json && tsc -p apps/api/tsconfig.json && tsc -p apps/worker/tsconfig.json && tsc -p apps/web/tsconfig.json && tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --esModuleInterop --skipLibCheck --types node,vitest/globals test/phase1/recovery.e2e.test.ts test/phase1/fixtures/feishu-users.ts test/phase1/helpers/processes.ts test/phase1/helpers/test-api-main.ts test/phase1/helpers/controlled-worker-main.ts vitest.e2e.config.ts",
