@@ -273,7 +273,7 @@ workflow:
       width: 260
     - data:
         code: |
-          def main(text: str):
+          def main(text: str, chapter_index: int, chapter_title: str):
               import json
               import re
 
@@ -283,7 +283,14 @@ workflow:
 
               try:
                   parsed = json.loads(raw)
-                  return {"result": json.dumps(parsed, ensure_ascii=False)}
+                  if not isinstance(parsed, dict) or not isinstance(parsed.get("facts"), list):
+                      return {"result": raw}
+                  result = {
+                      "chapter_index": int(chapter_index),
+                      "chapter_title": chapter_title or "",
+                      "facts": parsed.get("facts"),
+                  }
+                  return {"result": json.dumps(result, ensure_ascii=False)}
               except Exception:
                   return {"result": raw}
         code_language: python3
@@ -300,6 +307,16 @@ workflow:
           - text
           value_type: string
           variable: text
+        - value_selector:
+          - '2000000000101'
+          - chapter_index
+          value_type: number
+          variable: chapter_index
+        - value_selector:
+          - '2000000000101'
+          - chapter_title
+          value_type: string
+          variable: chapter_title
       height: 52
       id: '2000000000103'
       position:

@@ -325,5 +325,5 @@ describe.skipIf(!smokeConfigured)("Dify smoke", () => {
     await client.runChapterImport(inputs["chapter-import"]);
     await client.runL1Index(inputs["l1-index"]);
     await client.runL2Index(inputs["l2-index"]);
-  });
+  }, 200_000);
 });
