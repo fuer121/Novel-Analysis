@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T16:56:20+08:00
+updated_at: 2026-07-19T17:34:43+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260719-PHASE2-TASK0-MERGED
+last_checkpoint: CP-20260719-PHASE2-TASK1-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -50,6 +50,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE1-TASK8 | phase-1 | Independent recovery demo and Phase 1 acceptance evidence | controller-agent | main | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | 820b30a1cfae0b0a19be9fa763f44801742d38e9 | merged | CP-20260719-PHASE1-TASK7-MERGED | CP-20260719-PHASE1-TASK8-MERGED | complete |
 | PHASE2-PLAN | phase-2 | Library, chapter import, L1 and L2 indexing design and implementation plan | controller-agent | main | 201e1e74ee18e1ce08b93211d3652c4c8a90ef21 | fbd944bd85e9eb9e319a22dd547877b42a81ca61 | accepted | CP-20260719-PHASE1-MERGED | CP-20260719-PHASE2-PLAN-APPROVED | merge Gate record, then start Task 0 |
 | PHASE2-TASK0 | phase-2 | Dify contracts, JobStep granularity and freshness matrix | controller-agent | main | 7656951b392ceb72344c29344dffa904bc767294 | 71549b8bfdde91114789594d776b86b4452fc301 | merged | CP-20260719-PHASE2-PLAN-APPROVED | CP-20260719-PHASE2-TASK0-MERGED | complete; start Task 1 |
+| PHASE2-TASK1 | phase-2 | Contract-first Dify HTTP adapter and deterministic fake | controller-agent | refactor/phase2-task1-dify | 90bc45fb1e2327fc9bebc4edfdeea2297c485c0f | e96115152b724eb315640c9b793a84e2991135b6 | accepted | CP-20260719-PHASE2-TASK0-MERGED | CP-20260719-PHASE2-TASK1-ACCEPTED | verify PR #33 CI and merge |
 
 ## Effective Decisions
 
@@ -114,6 +115,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 plan approved checkpoint](checkpoints/CP-20260719-PHASE2-PLAN-APPROVED.md)
 - [Phase 2 Task 0 accepted checkpoint](checkpoints/CP-20260719-PHASE2-TASK0-ACCEPTED.md)
 - [Phase 2 Task 0 merged checkpoint](checkpoints/CP-20260719-PHASE2-TASK0-MERGED.md)
+- [Phase 2 Task 1 accepted checkpoint](checkpoints/CP-20260719-PHASE2-TASK1-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
