@@ -5,7 +5,7 @@ status: accepted
 recorded_at: 2026-07-19T10:35:46+08:00
 branch: refactor/phase1-task7-web
 base_commit: 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc
-head_commit: f1c75a123a7f0f9b7fa5e8331aba82a3150ee4df
+head_commit: 41b35dd13e7bfdba49be3ef7975c1104c7e188c6
 supersedes: none
 ---
 
@@ -33,11 +33,13 @@ supersedes: none
 - 总控合并最新治理 `main` 后验证 API/Auth/Jobs/Admin/SSE integration 69/69、Web 14/14、API/Web typecheck、Web production build、完整 ESLint 与 `git diff --check` 通过
 - 合并后首次四文件 API 组合曾出现一次认证故障注入测试 Location 缺失，结果为 68/69；该单测隔离复跑 1/1、相同组合复跑 69/69，未形成可复现回归
 - immutable base 到实现 head `9e32c3e8162c70050703ab93ba33c8cb4e32500a` 只有一个 `feat: add persisted task center projection` 提交；合并最新治理 main 后 head 为 `f1c75a123a7f0f9b7fa5e8331aba82a3150ee4df`
+- PR #21 首次 CI 因 CSS 回归测试使用 cwd-relative fixture 路径而失败；用户授权后改为基于 `import.meta.url` 定位，根目录与 Web workspace 均通过 14/14
+- CI 修复的独立规格审查与质量审查均 APPROVED，无 finding；修复后完整 `npm run verify` 通过 legacy 112、contracts 5、new 94、manifest 1、project source 40 及构建、lint、项目信源检查
 - 工作树干净，未修改或提交主工作区 `.DS_Store`
 
 ## Accepted Result
 
-`PHASE1-TASK7` 满足批准后的 Task 7 验收标准，branch head `f1c75a123a7f0f9b7fa5e8331aba82a3150ee4df` 被接受，可发布实现 PR
+`PHASE1-TASK7` 满足批准后的 Task 7 验收标准，branch head `41b35dd13e7bfdba49be3ef7975c1104c7e188c6` 被接受，可更新实现 PR
 
 `PHASE1-TASK8` 在 Task 7 合并到 `main` 并创建 merged Checkpoint 前保持 blocked
 

@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-19T10:35:46+08:00
+updated_at: 2026-07-19T10:54:29+08:00
 updated_by: controller-agent
 current_phase: phase-1-implementation
 last_checkpoint: CP-20260719-PHASE1-TASK7-ACCEPTED
@@ -46,7 +46,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 | PHASE1-TASK4 | phase-1 | Persistent job API and audited controls | controller-agent | main | e6d52c93b5bf4b40aeb940d72206599d1ce8780a | b4b8c92232d195ba53ae6e18d5f204f95c9cfdd4 | merged | CP-20260719-PHASE1-TASK3-MERGED | CP-20260719-PHASE1-TASK4-MERGED | complete |
 | PHASE1-TASK5 | phase-1 | Transactional outbox and pg-boss dispatcher | controller-agent | main | b4b8c92232d195ba53ae6e18d5f204f95c9cfdd4 | fd51657889a7748bc90a4641f3fa51f6dcb1526a | merged | CP-20260719-PHASE1-TASK4-MERGED | CP-20260719-PHASE1-TASK5-MERGED | complete |
 | PHASE1-TASK6 | phase-1 | Lease recovery and worker runtime | controller-agent | main | fd51657889a7748bc90a4641f3fa51f6dcb1526a | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | merged | CP-20260719-PHASE1-TASK5-MERGED | CP-20260719-PHASE1-TASK6-MERGED | complete |
-| PHASE1-TASK7 | phase-1 | Persisted SSE and minimal web | controller-agent | refactor/phase1-task7-web | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | f1c75a123a7f0f9b7fa5e8331aba82a3150ee4df | accepted | CP-20260719-PHASE1-TASK6-MERGED | CP-20260719-PHASE1-TASK7-ACCEPTED | publish implementation PR |
+| PHASE1-TASK7 | phase-1 | Persisted SSE and minimal web | controller-agent | refactor/phase1-task7-web | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | 41b35dd13e7bfdba49be3ef7975c1104c7e188c6 | accepted | CP-20260719-PHASE1-TASK6-MERGED | CP-20260719-PHASE1-TASK7-ACCEPTED | update PR and wait for CI |
 
 ## Effective Decisions
 
