@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T22:30:16+08:00
+updated_at: 2026-07-19T22:37:23+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED
+last_checkpoint: CP-20260719-PHASE2-TASK2-STARTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -52,6 +52,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-TASK0 | phase-2 | Dify contracts, JobStep granularity and freshness matrix | controller-agent | main | 7656951b392ceb72344c29344dffa904bc767294 | 71549b8bfdde91114789594d776b86b4452fc301 | merged | CP-20260719-PHASE2-PLAN-APPROVED | CP-20260719-PHASE2-TASK0-MERGED | complete; start Task 1 |
 | PHASE2-TASK1 | phase-2 | Contract-first Dify HTTP adapter and deterministic fake | controller-agent | main | 90bc45fb1e2327fc9bebc4edfdeea2297c485c0f | 3ed06f2c74d3c1be9f59f8d6d5585752afbeba92 | merged | CP-20260719-PHASE2-TASK0-MERGED | CP-20260719-PHASE2-TASK1-MERGED | complete; start Task 2 |
 | PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | main | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 95a73aedb0f41727d82f0058b0106c1f75403dcc | merged | DEC-0005 | CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED | complete; real Dify smoke passed; Task 2 remains unlocked |
+| PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | refactor/phase2-task2-persistence | 153f6464139d579b5835c5bc68658287a18cfeaf | 153f6464139d579b5835c5bc68658287a18cfeaf | in_progress | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-STARTED | implement with PostgreSQL RED/GREEN; Task 3 remains locked |
 
 ## Effective Decisions
 
@@ -78,7 +79,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- 无；Task 2 已解锁，可按批准计划启动
+- Task 2 已启动；等待 PostgreSQL RED/GREEN、双阶段独立审查和总控验收，Task 3 保持锁定
 
 ## Next Gate
 
@@ -126,6 +127,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [L2 Workflow output alignment accepted checkpoint](checkpoints/CP-20260719-PHASE2-L2-DSL-ALIGNMENT-ACCEPTED.md)
 - [L2 Workflow output alignment merged checkpoint](checkpoints/CP-20260719-PHASE2-L2-DSL-ALIGNMENT-MERGED.md)
 - [L2 Workflow real smoke accepted checkpoint](checkpoints/CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED.md)
+- [Phase 2 Task 2 started checkpoint](checkpoints/CP-20260719-PHASE2-TASK2-STARTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
