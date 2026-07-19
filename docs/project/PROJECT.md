@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
 baseline_status: current
-updated_at: 2026-07-19T13:39:37+08:00
+updated_at: 2026-07-19T15:15:59+08:00
 updated_by: controller-agent
 current_phase: phase-1-implementation
 last_checkpoint: CP-20260719-PHASE1-TASK7-MERGED
@@ -47,7 +47,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 | PHASE1-TASK5 | phase-1 | Transactional outbox and pg-boss dispatcher | controller-agent | main | b4b8c92232d195ba53ae6e18d5f204f95c9cfdd4 | fd51657889a7748bc90a4641f3fa51f6dcb1526a | merged | CP-20260719-PHASE1-TASK4-MERGED | CP-20260719-PHASE1-TASK5-MERGED | complete |
 | PHASE1-TASK6 | phase-1 | Lease recovery and worker runtime | controller-agent | main | fd51657889a7748bc90a4641f3fa51f6dcb1526a | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | merged | CP-20260719-PHASE1-TASK5-MERGED | CP-20260719-PHASE1-TASK6-MERGED | complete |
 | PHASE1-TASK7 | phase-1 | Persisted SSE and minimal web | controller-agent | main | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | merged | CP-20260719-PHASE1-TASK6-MERGED | CP-20260719-PHASE1-TASK7-MERGED | complete |
-| PHASE1-TASK8 | phase-1 | Independent recovery demo and Phase 1 acceptance evidence | controller-agent | refactor/phase1-task8-recovery-demo | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | in_progress | CP-20260719-PHASE1-TASK7-MERGED | none | implement approved Task 8 contract without modifying Tasks 1-7 implementation files |
+| PHASE1-TASK8 | phase-1 | Independent recovery demo and Phase 1 acceptance evidence | controller-agent | refactor/phase1-task8-recovery-demo | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | b1593b534a3d58b9a5a674a9a992ea6a32bd2699 | review | CP-20260719-PHASE1-TASK7-MERGED | CP-20260719-PHASE1-TASK8-SUBMITTED | await explicit Phase 1 Gate decision |
 
 ## Effective Decisions
 
@@ -70,11 +70,11 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- 无
+- 等待用户明确判定 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；该判定会更新实现基线并决定是否解锁 Phase 2
 
 ## Next Gate
 
-下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；`PHASE1-TASK8` 正在基于 `28aa15d96c52ad3d571c015fe017eb0172eb5296` 的独立 worktree 实施恢复 demo 与验收证据，正式 Gate 判定仍需用户确认
+下一个阶段门禁为 `GATE-PHASE1-IMPLEMENTATION-ACCEPTED`；Task 8 implementation head `b1593b534a3d58b9a5a674a9a992ea6a32bd2699` 的完整证据已提交，正式 Gate 判定仍需用户确认
 
 ## Evidence Index
 
@@ -100,6 +100,7 @@ next_gate: GATE-PHASE1-IMPLEMENTATION-ACCEPTED
 - [Phase 1 Task 6 merged checkpoint](checkpoints/CP-20260719-PHASE1-TASK6-MERGED.md)
 - [Phase 1 Task 7 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK7-ACCEPTED.md)
 - [Phase 1 Task 7 merged checkpoint](checkpoints/CP-20260719-PHASE1-TASK7-MERGED.md)
+- [Phase 1 Task 8 submitted checkpoint](checkpoints/CP-20260719-PHASE1-TASK8-SUBMITTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
