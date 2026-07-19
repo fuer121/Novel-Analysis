@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T21:26:43+08:00
+updated_at: 2026-07-19T21:38:23+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
 last_checkpoint: CP-20260719-PHASE2-TASK1-MERGED
@@ -71,12 +71,12 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - `npm audit` 当前有 1 low、1 moderate、1 high、2 critical，修复需要单独授权
 - GitHub Actions 依赖尚未固定到完整 SHA
 - `2026-07-17 controller main worktree /api/health observation: Dify and OpenAI are not configured; this is environment-specific and not a project-wide architecture fact`
-- 本地 `dify-workflows/Dify-key.md` 已提供五组 Dify URL/Key，但 target 映射尚未验证，明确映射前禁止执行真实 smoke
+- 本地五组 Dify URL/Key 的 target 映射已验证；2026-07-19 使用合成输入执行 chapter-import、l1-index、l2-index 真实 smoke，三个 target 均返回 HTTP 403，真实连通性仍未通过
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 
 ## Pending Feedback
 
-- `dify-workflows/Dify-key.md` 当前五组凭证只有重复的 `url`/`Key` 字段，需要明确标注每组对应的 manifest target 后才能执行真实 smoke
+- 请确认三组 Phase 2 URL 均为对应 Workflow 的 API endpoint，Key 与 URL 属于同一应用且仍有效，并确认 Dify 网关没有阻止当前开发机来源；修正后重新执行脱敏 smoke
 
 ## Next Gate
 
