@@ -83,12 +83,33 @@ describe("jobs API", () => {
     await addUser("member", "member");
     const { agent, csrfToken } = await login("member");
 
-    expect((await request(app()).post("/api/jobs/example").set(writeHeaders(csrfToken))).status).toBe(401);
+    const missingSession = await request(app()).post("/api/jobs/example").set(writeHeaders(csrfToken));
+    expect(missingSession.status).toBe(401);
+    expect(missingSession.body).toEqual({ error: "unauthorized" });
     expect((await request(app()).get("/api/jobs")).status).toBe(401);
-    expect((await agent.post("/api/jobs/example").set("Origin", "https://evil.test").set("X-CSRF-Token", csrfToken).set("Idempotency-Key", "bad-origin")).status).toBe(403);
-    expect((await agent.post("/api/jobs/example").set("Origin", APP_ORIGIN).set("Idempotency-Key", "no-csrf")).status).toBe(403);
+    const badOrigin = await agent.post("/api/jobs/example").set("Origin", "https://evil.test").set("X-CSRF-Token", csrfToken).set("Idempotency-Key", "bad-origin");
+    expect(badOrigin.status).toBe(403);
+    expect(badOrigin.body).toEqual({ error: "forbidden" });
+    const missingCsrf = await agent.post("/api/jobs/example").set("Origin", APP_ORIGIN).set("Idempotency-Key", "no-csrf");
+    expect(missingCsrf.status).toBe(403);
+    expect(missingCsrf.body).toEqual({ error: "forbidden" });
     expect((await agent.post("/api/jobs/example").set("Origin", APP_ORIGIN).set("X-CSRF-Token", csrfToken)).status).toBe(400);
     expect(await postgres.db.selectFrom("jobs").selectAll().execute()).toEqual([]);
+  });
+
+  it("reports only an authenticated stale CSRF token and accepts the rotated token", async () => {
+    await addUser("member", "member");
+    const loginResult = await login("member");
+    const rotated = await loginResult.agent.get("/api/auth/me").set("Origin", APP_ORIGIN);
+
+    const stale = await loginResult.agent.post("/api/jobs/example")
+      .set(writeHeaders(loginResult.csrfToken, "stale-csrf"));
+    expect(stale.status).toBe(403);
+    expect(stale.body).toEqual({ error: "CSRF_STALE" });
+
+    const created = await loginResult.agent.post("/api/jobs/example")
+      .set(writeHeaders(rotated.body.csrfToken as string, "fresh-csrf"));
+    expect(created.status).toBe(201);
   });
 
   it("creates and replays a public job without exposing internal fields", async () => {

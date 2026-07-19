@@ -35,7 +35,7 @@ export function requireCsrf(database: DatabaseConnection, config: ApiConfig) {
           .where("id", "=", request.auth.sessionId)
           .executeTakeFirst();
         if (!row?.csrf_token_hash || !matchesCsrfHash(rawToken, row.csrf_token_hash)) {
-          response.status(403).json({ error: "forbidden" });
+          response.status(403).json({ error: "CSRF_STALE" });
           return;
         }
         next();
