@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T22:37:23+08:00
+updated_at: 2026-07-19T23:21:04+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260719-PHASE2-TASK2-STARTED
+last_checkpoint: CP-20260719-PHASE2-TASK2-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -52,7 +52,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-TASK0 | phase-2 | Dify contracts, JobStep granularity and freshness matrix | controller-agent | main | 7656951b392ceb72344c29344dffa904bc767294 | 71549b8bfdde91114789594d776b86b4452fc301 | merged | CP-20260719-PHASE2-PLAN-APPROVED | CP-20260719-PHASE2-TASK0-MERGED | complete; start Task 1 |
 | PHASE2-TASK1 | phase-2 | Contract-first Dify HTTP adapter and deterministic fake | controller-agent | main | 90bc45fb1e2327fc9bebc4edfdeea2297c485c0f | 3ed06f2c74d3c1be9f59f8d6d5585752afbeba92 | merged | CP-20260719-PHASE2-TASK0-MERGED | CP-20260719-PHASE2-TASK1-MERGED | complete; start Task 2 |
 | PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | main | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 95a73aedb0f41727d82f0058b0106c1f75403dcc | merged | DEC-0005 | CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED | complete; real Dify smoke passed; Task 2 remains unlocked |
-| PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | refactor/phase2-task2-persistence | 153f6464139d579b5835c5bc68658287a18cfeaf | 153f6464139d579b5835c5bc68658287a18cfeaf | in_progress | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-STARTED | implement with PostgreSQL RED/GREEN; Task 3 remains locked |
+| PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | refactor/phase2-task2-persistence | 153f6464139d579b5835c5bc68658287a18cfeaf | b9b0c9c6b6b53b9efcee152dc631312b446dd500 | accepted | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-ACCEPTED | merge governance record, then publish implementation PR; Task 3 remains locked |
 
 ## Effective Decisions
 
@@ -76,10 +76,12 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - `2026-07-17 controller main worktree /api/health observation: Dify and OpenAI are not configured; this is environment-specific and not a project-wide architecture fact`
 - 用户手动导入仓库 L2 DSL 后，真实 Dify smoke 已证明 chapter-import、l1-index 与 l2-index 的 HTTP、线上 Workflow 输出及本地 accepted contract 全链路通过
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
+- Task 2 fact review 的 UUID cursor 在 cursor row 被删除时会提前结束分页；当前阶段没有 fact 删除路径
+- Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
 
 ## Pending Feedback
 
-- Task 2 已启动；等待 PostgreSQL RED/GREEN、双阶段独立审查和总控验收，Task 3 保持锁定
+- Task 2 已接受；等待治理记录与实现 PR 按顺序合并，Task 3 保持锁定
 
 ## Next Gate
 
@@ -128,6 +130,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [L2 Workflow output alignment merged checkpoint](checkpoints/CP-20260719-PHASE2-L2-DSL-ALIGNMENT-MERGED.md)
 - [L2 Workflow real smoke accepted checkpoint](checkpoints/CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED.md)
 - [Phase 2 Task 2 started checkpoint](checkpoints/CP-20260719-PHASE2-TASK2-STARTED.md)
+- [Phase 2 Task 2 accepted checkpoint](checkpoints/CP-20260719-PHASE2-TASK2-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
