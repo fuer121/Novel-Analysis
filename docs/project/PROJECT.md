@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T15:28:34+08:00
+updated_at: 2026-07-19T16:09:43+08:00
 updated_by: controller-agent
 current_phase: phase-2-planning
 last_checkpoint: CP-20260719-PHASE1-MERGED
@@ -32,7 +32,7 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 | --- | --- | --- |
 | Phase 0 | merged | [CP-20260717-PHASE0-MERGED](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [CP-20260719-PHASE1-MERGED](checkpoints/CP-20260719-PHASE1-MERGED.md) |
-| Phase 2 | planning ready | 需要独立计划与 `GATE-PHASE2-PLAN-APPROVED` |
+| Phase 2 | plan submitted | [设计](../superpowers/specs/2026-07-19-phase-2-library-indexing-design.md)与[实施计划](../superpowers/plans/2026-07-19-phase-2-library-indexing-implementation-plan.md)已通过 PR #27 合并，等待 `GATE-PHASE2-PLAN-APPROVED` |
 | Phase 3 | blocked by Phase 2 | Phase 2 通过后才能推进 |
 
 ## Active Work
@@ -48,6 +48,7 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 | PHASE1-TASK6 | phase-1 | Lease recovery and worker runtime | controller-agent | main | fd51657889a7748bc90a4641f3fa51f6dcb1526a | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | merged | CP-20260719-PHASE1-TASK5-MERGED | CP-20260719-PHASE1-TASK6-MERGED | complete |
 | PHASE1-TASK7 | phase-1 | Persisted SSE and minimal web | controller-agent | main | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | merged | CP-20260719-PHASE1-TASK6-MERGED | CP-20260719-PHASE1-TASK7-MERGED | complete |
 | PHASE1-TASK8 | phase-1 | Independent recovery demo and Phase 1 acceptance evidence | controller-agent | main | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | 820b30a1cfae0b0a19be9fa763f44801742d38e9 | merged | CP-20260719-PHASE1-TASK7-MERGED | CP-20260719-PHASE1-TASK8-MERGED | complete |
+| PHASE2-PLAN | phase-2 | Library, chapter import, L1 and L2 indexing design and implementation plan | controller-agent | main | 201e1e74ee18e1ce08b93211d3652c4c8a90ef21 | fbd944bd85e9eb9e319a22dd547877b42a81ca61 | review | CP-20260719-PHASE1-MERGED | CP-20260719-PHASE2-PLAN-SUBMITTED | request `GATE-PHASE2-PLAN-APPROVED` |
 
 ## Effective Decisions
 
@@ -74,7 +75,7 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 
 ## Next Gate
 
-Phase 1 已合并并更新实施基线；下一门禁为 `GATE-PHASE2-PLAN-APPROVED`，当前只允许 Phase 2 计划与审查，不允许提前实施
+Phase 2 设计与 Task 0 至 Task 8 实施计划已通过 PR #27 合并；下一门禁为 `GATE-PHASE2-PLAN-APPROVED`，Gate 明确通过前不允许开始 Phase 2 实施
 
 ## Evidence Index
 
@@ -105,6 +106,9 @@ Phase 1 已合并并更新实施基线；下一门禁为 `GATE-PHASE2-PLAN-APPRO
 - [Phase 1 implementation accepted checkpoint](checkpoints/CP-20260719-PHASE1-IMPLEMENTATION-ACCEPTED.md)
 - [Phase 1 Task 8 merged checkpoint](checkpoints/CP-20260719-PHASE1-TASK8-MERGED.md)
 - [Phase 1 merged checkpoint](checkpoints/CP-20260719-PHASE1-MERGED.md)
+- [Phase 2 library and indexing design](../superpowers/specs/2026-07-19-phase-2-library-indexing-design.md)
+- [Phase 2 library and indexing implementation plan](../superpowers/plans/2026-07-19-phase-2-library-indexing-implementation-plan.md)
+- [Phase 2 plan submitted checkpoint](checkpoints/CP-20260719-PHASE2-PLAN-SUBMITTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
