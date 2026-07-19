@@ -19,7 +19,7 @@
     },
     "l2_index": {
       "file": "dify-workflows/l2-fact-index.workflow.yml",
-      "sha256": "6242ceac66358ab44211cb209e5d62b5f0bd94cb0201f7ebcca5990e035ad6d1"
+      "sha256": "b8003c60302c80d017eb00eac16ed18b0d4dba6df6073c6eb1735a2139ae4894"
     }
   }
 }
