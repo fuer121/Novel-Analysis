@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T16:52:10+08:00
+updated_at: 2026-07-19T16:56:20+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260719-PHASE2-TASK0-ACCEPTED
+last_checkpoint: CP-20260719-PHASE2-TASK0-MERGED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -49,12 +49,13 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE1-TASK7 | phase-1 | Persisted SSE and minimal web | controller-agent | main | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | merged | CP-20260719-PHASE1-TASK6-MERGED | CP-20260719-PHASE1-TASK7-MERGED | complete |
 | PHASE1-TASK8 | phase-1 | Independent recovery demo and Phase 1 acceptance evidence | controller-agent | main | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | 820b30a1cfae0b0a19be9fa763f44801742d38e9 | merged | CP-20260719-PHASE1-TASK7-MERGED | CP-20260719-PHASE1-TASK8-MERGED | complete |
 | PHASE2-PLAN | phase-2 | Library, chapter import, L1 and L2 indexing design and implementation plan | controller-agent | main | 201e1e74ee18e1ce08b93211d3652c4c8a90ef21 | fbd944bd85e9eb9e319a22dd547877b42a81ca61 | accepted | CP-20260719-PHASE1-MERGED | CP-20260719-PHASE2-PLAN-APPROVED | merge Gate record, then start Task 0 |
-| PHASE2-TASK0 | phase-2 | Dify contracts, JobStep granularity and freshness matrix | controller-agent | refactor/phase2-task0-contracts | 7656951b392ceb72344c29344dffa904bc767294 | a4c1393222f9b5e907152e21de6f55b724a03273 | accepted | CP-20260719-PHASE2-PLAN-APPROVED | CP-20260719-PHASE2-TASK0-ACCEPTED | verify PR #30 CI and merge |
+| PHASE2-TASK0 | phase-2 | Dify contracts, JobStep granularity and freshness matrix | controller-agent | main | 7656951b392ceb72344c29344dffa904bc767294 | 71549b8bfdde91114789594d776b86b4452fc301 | merged | CP-20260719-PHASE2-PLAN-APPROVED | CP-20260719-PHASE2-TASK0-MERGED | complete; start Task 1 |
 
 ## Effective Decisions
 
 - [DEC-0001 Controller-Owned Project Source](decisions/DEC-0001-project-governance.md) 确立项目治理信源与权限边界
 - [DEC-0002 Automated Pull Request Authority](decisions/DEC-0002-automated-pull-request-authority.md) 授权总控在全部低风险合并条件满足时自动创建、审查、合并 PR 并推进下一个已批准任务
+- [DEC-0003 One Chapter Per JobStep](decisions/DEC-0003-phase2-step-granularity.md) 以双候选 PostgreSQL 实测确定 Phase 2 采用一章一个 JobStep
 - [已批准设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md) 是重构范围和架构的有效依据
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -112,6 +113,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 plan submitted checkpoint](checkpoints/CP-20260719-PHASE2-PLAN-SUBMITTED.md)
 - [Phase 2 plan approved checkpoint](checkpoints/CP-20260719-PHASE2-PLAN-APPROVED.md)
 - [Phase 2 Task 0 accepted checkpoint](checkpoints/CP-20260719-PHASE2-TASK0-ACCEPTED.md)
+- [Phase 2 Task 0 merged checkpoint](checkpoints/CP-20260719-PHASE2-TASK0-MERGED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
