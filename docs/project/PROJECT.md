@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T23:27:10+08:00
+updated_at: 2026-07-19T23:31:42+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260719-PHASE2-TASK2-MERGED
+last_checkpoint: CP-20260719-PHASE2-TASK3-STARTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -53,6 +53,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-TASK1 | phase-2 | Contract-first Dify HTTP adapter and deterministic fake | controller-agent | main | 90bc45fb1e2327fc9bebc4edfdeea2297c485c0f | 3ed06f2c74d3c1be9f59f8d6d5585752afbeba92 | merged | CP-20260719-PHASE2-TASK0-MERGED | CP-20260719-PHASE2-TASK1-MERGED | complete; start Task 2 |
 | PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | main | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 95a73aedb0f41727d82f0058b0106c1f75403dcc | merged | DEC-0005 | CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED | complete; real Dify smoke passed; Task 2 remains unlocked |
 | PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | main | 153f6464139d579b5835c5bc68658287a18cfeaf | 78f2adf97c9598a3770a60be185e425df48dcfd6 | merged | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-MERGED | complete; start Task 3 |
+| PHASE2-TASK3 | phase-2 | Book creation and recoverable chapter import | controller-agent | refactor/phase2-task3-import | 1fa158bf39af1cfadc51517fbb0733c439e65628 | 1fa158bf39af1cfadc51517fbb0733c439e65628 | in_progress | CP-20260719-PHASE2-TASK2-MERGED | CP-20260719-PHASE2-TASK3-STARTED | implement scope preview, transactional job and single-chapter executor; Task 4 remains locked |
 
 ## Effective Decisions
 
@@ -81,7 +82,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- Task 2 已合并；Task 3 已解锁，可按批准计划启动
+- Task 3 已启动；等待 PostgreSQL RED/GREEN、双阶段独立审查和总控验收，Task 4 保持锁定
 
 ## Next Gate
 
@@ -132,6 +133,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 Task 2 started checkpoint](checkpoints/CP-20260719-PHASE2-TASK2-STARTED.md)
 - [Phase 2 Task 2 accepted checkpoint](checkpoints/CP-20260719-PHASE2-TASK2-ACCEPTED.md)
 - [Phase 2 Task 2 merged checkpoint](checkpoints/CP-20260719-PHASE2-TASK2-MERGED.md)
+- [Phase 2 Task 3 started checkpoint](checkpoints/CP-20260719-PHASE2-TASK3-STARTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
