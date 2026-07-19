@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T22:17:51+08:00
+updated_at: 2026-07-19T22:24:15+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260719-PHASE2-L2-DSL-ALIGNMENT-ACCEPTED
+last_checkpoint: CP-20260719-PHASE2-L2-DSL-ALIGNMENT-MERGED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -51,7 +51,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-PLAN | phase-2 | Library, chapter import, L1 and L2 indexing design and implementation plan | controller-agent | main | 201e1e74ee18e1ce08b93211d3652c4c8a90ef21 | fbd944bd85e9eb9e319a22dd547877b42a81ca61 | accepted | CP-20260719-PHASE1-MERGED | CP-20260719-PHASE2-PLAN-APPROVED | merge Gate record, then start Task 0 |
 | PHASE2-TASK0 | phase-2 | Dify contracts, JobStep granularity and freshness matrix | controller-agent | main | 7656951b392ceb72344c29344dffa904bc767294 | 71549b8bfdde91114789594d776b86b4452fc301 | merged | CP-20260719-PHASE2-PLAN-APPROVED | CP-20260719-PHASE2-TASK0-MERGED | complete; start Task 1 |
 | PHASE2-TASK1 | phase-2 | Contract-first Dify HTTP adapter and deterministic fake | controller-agent | main | 90bc45fb1e2327fc9bebc4edfdeea2297c485c0f | 3ed06f2c74d3c1be9f59f8d6d5585752afbeba92 | merged | CP-20260719-PHASE2-TASK0-MERGED | CP-20260719-PHASE2-TASK1-MERGED | complete; start Task 2 |
-| PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | fix/l2-workflow-output-alignment | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 60ae42a62e98a7e9035e5c5caad06a162edea3fe | accepted | DEC-0005 | CP-20260719-PHASE2-L2-DSL-ALIGNMENT-ACCEPTED | merge governance record, then publish implementation PR; wait for user import before real L2 smoke |
+| PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | main | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 95a73aedb0f41727d82f0058b0106c1f75403dcc | merged | DEC-0005 | CP-20260719-PHASE2-L2-DSL-ALIGNMENT-MERGED | wait for user import, then run real L2 smoke; Task 2 remains unlocked |
 
 ## Effective Decisions
 
@@ -125,6 +125,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [L2 Workflow output alignment design](../superpowers/specs/2026-07-19-l2-workflow-output-alignment-design.md)
 - [L2 Workflow output alignment implementation plan](../superpowers/plans/2026-07-19-l2-workflow-output-alignment-implementation-plan.md)
 - [L2 Workflow output alignment accepted checkpoint](checkpoints/CP-20260719-PHASE2-L2-DSL-ALIGNMENT-ACCEPTED.md)
+- [L2 Workflow output alignment merged checkpoint](checkpoints/CP-20260719-PHASE2-L2-DSL-ALIGNMENT-MERGED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
