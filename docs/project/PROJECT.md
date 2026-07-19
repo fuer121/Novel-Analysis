@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: be49f4ccd312a269ee4c7419c6d9d08407df2c21
+baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T15:24:15+08:00
+updated_at: 2026-07-19T15:28:34+08:00
 updated_by: controller-agent
-current_phase: phase-1-acceptance-approved
-last_checkpoint: CP-20260719-PHASE1-IMPLEMENTATION-ACCEPTED
+current_phase: phase-2-planning
+last_checkpoint: CP-20260719-PHASE1-MERGED
 next_gate: GATE-PHASE2-PLAN-APPROVED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `be49f4ccd312a269ee4c7419c6d9d08407df2c21` |
-| Pull request | PR #1 `https://github.com/fuer121/Novel-Analysis/pull/1` |
+| Accepted implementation baseline | `820b30a1cfae0b0a19be9fa763f44801742d38e9` |
+| Pull request | PR #25 `https://github.com/fuer121/Novel-Analysis/pull/25` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -31,8 +31,8 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 | 阶段 | 状态 | 证据或依赖 |
 | --- | --- | --- |
 | Phase 0 | merged | [CP-20260717-PHASE0-MERGED](checkpoints/CP-20260717-PHASE0-MERGED.md) |
-| Phase 1 | accepted, pending implementation merge | [CP-20260719-PHASE1-IMPLEMENTATION-ACCEPTED](checkpoints/CP-20260719-PHASE1-IMPLEMENTATION-ACCEPTED.md) |
-| Phase 2 | blocked by Phase 1 merge | Task 8 implementation merge checkpoint 后才能启动计划 |
+| Phase 1 | merged | [CP-20260719-PHASE1-MERGED](checkpoints/CP-20260719-PHASE1-MERGED.md) |
+| Phase 2 | planning ready | 需要独立计划与 `GATE-PHASE2-PLAN-APPROVED` |
 | Phase 3 | blocked by Phase 2 | Phase 2 通过后才能推进 |
 
 ## Active Work
@@ -47,7 +47,7 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 | PHASE1-TASK5 | phase-1 | Transactional outbox and pg-boss dispatcher | controller-agent | main | b4b8c92232d195ba53ae6e18d5f204f95c9cfdd4 | fd51657889a7748bc90a4641f3fa51f6dcb1526a | merged | CP-20260719-PHASE1-TASK4-MERGED | CP-20260719-PHASE1-TASK5-MERGED | complete |
 | PHASE1-TASK6 | phase-1 | Lease recovery and worker runtime | controller-agent | main | fd51657889a7748bc90a4641f3fa51f6dcb1526a | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | merged | CP-20260719-PHASE1-TASK5-MERGED | CP-20260719-PHASE1-TASK6-MERGED | complete |
 | PHASE1-TASK7 | phase-1 | Persisted SSE and minimal web | controller-agent | main | 84c3770f29ad97bcb1f4b71ce9afdf5021dbf1dc | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | merged | CP-20260719-PHASE1-TASK6-MERGED | CP-20260719-PHASE1-TASK7-MERGED | complete |
-| PHASE1-TASK8 | phase-1 | Independent recovery demo and Phase 1 acceptance evidence | controller-agent | refactor/phase1-task8-recovery-demo | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | 23a7d57582ec7188139b19bede19747c18143cc1 | accepted | CP-20260719-PHASE1-TASK7-MERGED | CP-20260719-PHASE1-TASK8-ACCEPTED | publish implementation PR |
+| PHASE1-TASK8 | phase-1 | Independent recovery demo and Phase 1 acceptance evidence | controller-agent | main | 28aa15d96c52ad3d571c015fe017eb0172eb5296 | 820b30a1cfae0b0a19be9fa763f44801742d38e9 | merged | CP-20260719-PHASE1-TASK7-MERGED | CP-20260719-PHASE1-TASK8-MERGED | complete |
 
 ## Effective Decisions
 
@@ -74,7 +74,7 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 
 ## Next Gate
 
-`GATE-PHASE1-IMPLEMENTATION-ACCEPTED` 已通过；Task 8 实现 PR 合并和最终 main checkpoint 完成后，下一门禁为 `GATE-PHASE2-PLAN-APPROVED`
+Phase 1 已合并并更新实施基线；下一门禁为 `GATE-PHASE2-PLAN-APPROVED`，当前只允许 Phase 2 计划与审查，不允许提前实施
 
 ## Evidence Index
 
@@ -103,6 +103,8 @@ next_gate: GATE-PHASE2-PLAN-APPROVED
 - [Phase 1 Task 8 submitted checkpoint](checkpoints/CP-20260719-PHASE1-TASK8-SUBMITTED.md)
 - [Phase 1 Task 8 accepted checkpoint](checkpoints/CP-20260719-PHASE1-TASK8-ACCEPTED.md)
 - [Phase 1 implementation accepted checkpoint](checkpoints/CP-20260719-PHASE1-IMPLEMENTATION-ACCEPTED.md)
+- [Phase 1 Task 8 merged checkpoint](checkpoints/CP-20260719-PHASE1-TASK8-MERGED.md)
+- [Phase 1 merged checkpoint](checkpoints/CP-20260719-PHASE1-MERGED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
