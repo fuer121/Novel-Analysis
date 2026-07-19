@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
+import { URL as NodeUrl } from "node:url";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -75,7 +76,7 @@ describe("persisted task center", () => {
   });
 
   it("contains wide tables without allowing their width to escape the scroll wrapper", () => {
-    const styles = readFileSync("src/app/styles.css", "utf8");
+    const styles = readFileSync(new NodeUrl("../../app/styles.css", import.meta.url), "utf8");
     const wrapperRule = styles.match(/\.data-table-wrap\s*\{([^}]*)\}/)?.[1] ?? "";
     const screenReaderRule = styles.match(/\.sr-only\s*\{([^}]*)\}/)?.[1] ?? "";
 
