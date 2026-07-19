@@ -237,6 +237,11 @@ describe("phase 1 PostgreSQL schema", () => {
 
   test("migrates down in foreign-key reverse order and back up from empty", async () => {
     await migrateDown(postgres.db);
+    expect(await tableExists(postgres.db, "books")).toBe(false);
+    expect(await tableExists(postgres.db, "jobs")).toBe(true);
+    expect(await tableExists(postgres.db, "users")).toBe(true);
+
+    await migrateDown(postgres.db);
     expect(await tableExists(postgres.db, "jobs")).toBe(false);
     expect(await tableExists(postgres.db, "users")).toBe(true);
 
@@ -247,6 +252,7 @@ describe("phase 1 PostgreSQL schema", () => {
     expect(result.error).toBeUndefined();
     expect(await tableExists(postgres.db, "users")).toBe(true);
     expect(await tableExists(postgres.db, "jobs")).toBe(true);
+    expect(await tableExists(postgres.db, "books")).toBe(true);
   });
 
   test("enforces named role, user status, and shared job status checks", async () => {
