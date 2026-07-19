@@ -32,6 +32,7 @@ data-preview/
 .superpowers/
 .worktrees/
 .DS_Store
+dify-workflows/Dify-key.md
 *.suo
 *.ntvs*
 *.njsproj
