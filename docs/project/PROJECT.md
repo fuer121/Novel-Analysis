@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-19T21:46:53+08:00
+updated_at: 2026-07-19T22:17:51+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260719-PHASE2-TASK1-MERGED
+last_checkpoint: CP-20260719-PHASE2-L2-DSL-ALIGNMENT-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -51,6 +51,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-PLAN | phase-2 | Library, chapter import, L1 and L2 indexing design and implementation plan | controller-agent | main | 201e1e74ee18e1ce08b93211d3652c4c8a90ef21 | fbd944bd85e9eb9e319a22dd547877b42a81ca61 | accepted | CP-20260719-PHASE1-MERGED | CP-20260719-PHASE2-PLAN-APPROVED | merge Gate record, then start Task 0 |
 | PHASE2-TASK0 | phase-2 | Dify contracts, JobStep granularity and freshness matrix | controller-agent | main | 7656951b392ceb72344c29344dffa904bc767294 | 71549b8bfdde91114789594d776b86b4452fc301 | merged | CP-20260719-PHASE2-PLAN-APPROVED | CP-20260719-PHASE2-TASK0-MERGED | complete; start Task 1 |
 | PHASE2-TASK1 | phase-2 | Contract-first Dify HTTP adapter and deterministic fake | controller-agent | main | 90bc45fb1e2327fc9bebc4edfdeea2297c485c0f | 3ed06f2c74d3c1be9f59f8d6d5585752afbeba92 | merged | CP-20260719-PHASE2-TASK0-MERGED | CP-20260719-PHASE2-TASK1-MERGED | complete; start Task 2 |
+| PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | fix/l2-workflow-output-alignment | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 60ae42a62e98a7e9035e5c5caad06a162edea3fe | accepted | DEC-0005 | CP-20260719-PHASE2-L2-DSL-ALIGNMENT-ACCEPTED | merge governance record, then publish implementation PR; wait for user import before real L2 smoke |
 
 ## Effective Decisions
 
@@ -58,6 +59,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [DEC-0002 Automated Pull Request Authority](decisions/DEC-0002-automated-pull-request-authority.md) 授权总控在全部低风险合并条件满足时自动创建、审查、合并 PR 并推进下一个已批准任务
 - [DEC-0003 One Chapter Per JobStep](decisions/DEC-0003-phase2-step-granularity.md) 以双候选 PostgreSQL 实测确定 Phase 2 采用一章一个 JobStep
 - [DEC-0004 Dify Smoke Credential Policy](decisions/DEC-0004-dify-smoke-credential-policy.md) 授权总控使用本地未跟踪凭证执行显式、脱敏、非正式数据 smoke，禁止凭证进入 Git、日志、CI 和项目源
+- [DEC-0005 Repository L2 Workflow Output Alignment](decisions/DEC-0005-repository-l2-workflow-output-alignment.md) 保持 accepted adapter contract，以仓库 L2 DSL 的可信 Workflow 输入补齐章节绑定；只提交仓库 DSL，由用户手动导入
 - [已批准设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md) 是重构范围和架构的有效依据
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -72,12 +74,12 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - GitHub Actions 依赖尚未固定到完整 SHA
 - `2026-07-17 controller main worktree /api/health observation: Dify and OpenAI are not configured; this is environment-specific and not a project-wide architecture fact`
 - VPN 开启后真实 Dify smoke 已证明 chapter-import 与 l1-index 的 HTTP、凭证、线上 Workflow 输出及本地 contract 全链路通过；l2-index 返回 HTTP 200 和合法 JSON，但顶层只有 `facts`，缺少 accepted contract 要求的 `chapter_index` 与 `chapter_title`，因此 fail-closed 为 `provider_invalid_response`
-- Task 1 `test:smoke` 命令仍使用 Vitest 默认 5 秒 test timeout，短于 adapter 60 秒 timeout；本次通过 CLI 临时提高 test timeout 完成诊断，正式修复尚未授权
+- 仓库 L2 DSL 对齐和 smoke 专用 200 秒 timeout 已通过本地验证，但用户尚未手动导入线上 Dify，因此真实 L2 smoke 仍未通过
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 
 ## Pending Feedback
 
-- 需要决定 L2 契约对齐方向：推荐保持章节绑定 fail-closed，并让线上 L2 Workflow 输出 `chapter_index`、`chapter_title`、`facts`；另一方案是在 adapter 中使用请求上下文补齐章节字段，但这会改变已接受的数据完整性策略
+- 等待用户在实现 PR 合并后手动导入仓库 L2 DSL，再执行脱敏真实 smoke；导入前不得移除线上 L2 blocker
 
 ## Next Gate
 
@@ -120,6 +122,9 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 Task 0 merged checkpoint](checkpoints/CP-20260719-PHASE2-TASK0-MERGED.md)
 - [Phase 2 Task 1 accepted checkpoint](checkpoints/CP-20260719-PHASE2-TASK1-ACCEPTED.md)
 - [Phase 2 Task 1 merged checkpoint](checkpoints/CP-20260719-PHASE2-TASK1-MERGED.md)
+- [L2 Workflow output alignment design](../superpowers/specs/2026-07-19-l2-workflow-output-alignment-design.md)
+- [L2 Workflow output alignment implementation plan](../superpowers/plans/2026-07-19-l2-workflow-output-alignment-implementation-plan.md)
+- [L2 Workflow output alignment accepted checkpoint](checkpoints/CP-20260719-PHASE2-L2-DSL-ALIGNMENT-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
