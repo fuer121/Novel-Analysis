@@ -15,3 +15,13 @@ export interface ScopePreview extends IndexCoverage {
   skipped: number;
   scopeHash: string;
 }
+
+export interface ImportScopePreview {
+  requested: number;
+  existingFresh: number;
+  existingStale: number;
+  executable: number;
+  scopeHash: string;
+}
+
+export type ActionPreview = ScopePreview | ImportScopePreview;

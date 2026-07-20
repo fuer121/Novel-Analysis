@@ -65,13 +65,20 @@ describe("book workspace", () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === `/api/books/${book.id}`) return json({ book });
-      if (url.endsWith("/import-preview")) return json(preview);
+      if (url.endsWith("/import-preview")) return json({ requested: 12, existingFresh: 2, existingStale: 1, executable: 9, scopeHash: preview.scopeHash });
       if (url.endsWith("/import-jobs")) { submittedBody = String(init?.body); return json({ job }, 201); }
       throw new Error(`unexpected ${url}`);
     }));
     renderPath(`/books/${book.id}/import`);
     expect(screen.queryByRole("button", { name: /确认执行/ })).toBeNull();
     await userEvent.click(await screen.findByRole("button", { name: "预览范围" }));
+    expect(screen.getByText("请求").nextElementSibling?.textContent).toBe("12");
+    expect(screen.getByText("将跳过").nextElementSibling?.textContent).toBe("3");
+    expect(screen.getByText("已有新鲜内容").nextElementSibling?.textContent).toBe("2");
+    expect(screen.getByText("已有过期内容").nextElementSibling?.textContent).toBe("1");
+    expect(screen.queryByText("缺失")).toBeNull();
+    expect(screen.queryByText("失败")).toBeNull();
+    expect(document.body.textContent).not.toContain("undefined");
     await userEvent.click(await screen.findByRole("button", { name: "确认执行 9 项" }));
     expect(await screen.findByText("任务已创建，", { exact: false })).toBeTruthy();
     expect(JSON.parse(submittedBody)).toMatchObject({ scopeHash: preview.scopeHash, autoStartL1: true });

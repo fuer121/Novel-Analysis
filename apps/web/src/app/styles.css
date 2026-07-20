@@ -121,6 +121,7 @@ progress { display: block; width: 92px; height: 5px; margin-top: 6px; accent-col
 .scope-strip dt { color: #697586; font-size: 12px; }
 .scope-strip dd { margin: 6px 0 0; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .preview-strip { grid-template-columns: repeat(7, minmax(72px, 1fr)); margin-top: 18px; }
+.import-preview-strip { grid-template-columns: repeat(5, minmax(90px, 1fr)); margin-top: 18px; }
 .operation-panel { padding: 20px; border: 1px solid #dfe4ea; background: #fff; }
 .inline-setting { color: #4a5565; font-size: 13px; }
 .confirmation-note, .success-notice, .warning-notice { display: flex; align-items: center; gap: 7px; margin: 14px 0 0; padding: 10px 12px; font-size: 13px; }
