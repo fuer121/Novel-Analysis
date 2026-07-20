@@ -4,13 +4,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 
 import { refreshCurrentUser } from "../../shared/api.js";
 import { currentUserKey } from "./useCurrentUser.js";
-
-function validatedReturnTo(value: string | null): string {
-  if (value === "/tasks" || value === "/admin/members" || /^\/tasks\/[^/?#]+$/.test(value ?? "")) {
-    return value!;
-  }
-  return "/tasks";
-}
+import { safeReturnTo } from "./return-to.js";
+import { clearPriorSessionQueries } from "./session-query-cache.js";
 
 export function AuthCompletePage() {
   const [search] = useSearchParams();
@@ -22,8 +17,9 @@ export function AuthCompletePage() {
     let active = true;
     void refreshCurrentUser().then((user) => {
       if (!active) return;
+      clearPriorSessionQueries(queryClient);
       queryClient.setQueryData(currentUserKey, user);
-      navigate(validatedReturnTo(search.get("returnTo")), { replace: true });
+      navigate(safeReturnTo(search.get("returnTo")), { replace: true });
     }).catch(() => {
       if (active) setFailed(true);
     });

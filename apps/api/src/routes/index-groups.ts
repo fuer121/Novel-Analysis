@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { Router, type Response } from "express";
 import { z } from "zod";
 
-import { JobResponseSchema } from "@novel-analysis/contracts";
-import type { DatabaseConnection } from "@novel-analysis/database";
+import { FactReviewPageSchema, JobResponseSchema } from "@novel-analysis/contracts";
+import { createIndexRepository, type ContentCipher, type DatabaseConnection } from "@novel-analysis/database";
 import {
   L2BookNotFoundError,
   L2ConfigurationError,
@@ -24,6 +24,10 @@ const createSchema = z.strictObject({ key: z.string().trim().min(1).max(200), na
 const scopeSchema = z.strictObject({ startChapter: z.number().safe().int().positive(), endChapter: z.number().safe().int().positive(), mode: z.enum(["all", "missing", "retry_failed"]), force: z.boolean() }).refine((value) => value.endChapter >= value.startChapter, { path: ["endChapter"] });
 const createJobSchema = scopeSchema.extend({ scopeHash: z.string().regex(/^[a-f0-9]{64}$/) });
 const keySchema = z.string().trim().min(1).max(200);
+const factQuerySchema = z.strictObject({
+  limit: z.coerce.number().safe().int().min(1).max(100).default(50),
+  cursor: z.uuid().optional(),
+});
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -48,7 +52,7 @@ function handleL2Error(error: unknown, response: Response, next: (error: Error) 
   next(new Error("L2 index group request failed"));
 }
 
-export function createIndexGroupsRouter(database: DatabaseConnection, config: ApiConfig): Router {
+export function createIndexGroupsRouter(database: DatabaseConnection, config: ApiConfig, contentCipher?: ContentCipher): Router {
   const router = Router();
   const session = requireSession(database, config);
   const csrf = requireCsrf(database, config);
@@ -96,6 +100,23 @@ export function createIndexGroupsRouter(database: DatabaseConnection, config: Ap
     try {
       response.json(await jobs.coverage({ bookId: params.data.bookId, groupId: params.data.groupId }));
     } catch (error) { handleL2Error(error, response, next); }
+  });
+
+  router.get("/:bookId/index-groups/:groupId/facts", session, async (request, response, next) => {
+    const params = identifiers.safeParse(request.params);
+    const query = factQuerySchema.safeParse(request.query);
+    if (!params.success || !params.data.groupId || !query.success) { response.status(400).json({ error: "invalid_request" }); return; }
+    try {
+      const group = await database.selectFrom("index_groups").select("id")
+        .where("id", "=", params.data.groupId).where("book_id", "=", params.data.bookId).where("status", "=", "active").executeTakeFirst();
+      if (!group) { response.status(404).json({ error: "index_group_not_found" }); return; }
+      if (!contentCipher) throw new Error("content cipher unavailable");
+      const page = await createIndexRepository(database, contentCipher).listFactReviews({ groupId: group.id, ...query.data });
+      response.json(FactReviewPageSchema.parse({
+        ...page,
+        facts: page.facts.map((fact) => ({ ...fact, createdAt: fact.createdAt.toISOString() })),
+      }));
+    } catch { next(new Error("fact review failed")); }
   });
 
   router.post("/:bookId/index-groups/:groupId/l2-preview", ...csrf, async (request, response, next) => {

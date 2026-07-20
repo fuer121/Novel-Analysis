@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 9e25a7d14c860ae11adfce28883d53dcfaccf3a2
 baseline_status: current
-updated_at: 2026-07-20T20:34:18+08:00
+updated_at: 2026-07-20T21:28:20+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK7-CONTRACT-CORRECTION
+last_checkpoint: CP-20260720-PHASE2-TASK7-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | codex/phase2-task7-book-workspace | 4c117ba6243fddbfa1098470a37463e08f6788b9 | none | in_progress | CP-20260720-PHASE2-TASK6-MERGED | CP-20260720-PHASE2-TASK7-CONTRACT-CORRECTION | implement corrected contract with TDD and two-stage review |
+| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | codex/phase2-task7-book-workspace | 9b11835aab1b71cf134a7dbe69f0827ede65c670 | 1bbd90dae5ee2ffa802096e8812514867434e85c | accepted | CP-20260720-PHASE2-TASK6-MERGED | CP-20260720-PHASE2-TASK7-ACCEPTED | push implementation, create PR, verify CI and merge under DEC-0002 |
 
 ## Phase Ledgers
 
@@ -60,6 +60,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [DEC-0009 Phase 2 Task 5 Workflow Snapshot Boundary](decisions/DEC-0009-phase2-task5-workflow-snapshot-boundary.md)
 - [DEC-0010 Index Group Category Scope](decisions/DEC-0010-index-group-category-scope.md)
 - [DEC-0011 Task 7 Fact Review API](decisions/DEC-0011-task7-fact-review-api.md)
+- [DEC-0012 Task 7 Session Cache Boundary](decisions/DEC-0012-task7-session-cache-boundary.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -77,7 +78,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，Task 7 可按 accepted started contract 实施
+无，Task 7 implementation 已接受，可按 DEC-0002 创建 PR 并核验 CI
 
 ## Next Gate
 
@@ -85,6 +86,8 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 7 accepted](checkpoints/CP-20260720-PHASE2-TASK7-ACCEPTED.md)
+- [Phase 2 Task 7 session cache correction](checkpoints/CP-20260720-PHASE2-TASK7-SESSION-CACHE-CORRECTION.md)
 - [Phase 2 Task 7 contract correction](checkpoints/CP-20260720-PHASE2-TASK7-CONTRACT-CORRECTION.md)
 - [Phase 2 Task 7 started](checkpoints/CP-20260720-PHASE2-TASK7-STARTED.md)
 - [Phase 2 Task 6 merged](checkpoints/CP-20260720-PHASE2-TASK6-MERGED.md)

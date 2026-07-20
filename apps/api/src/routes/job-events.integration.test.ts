@@ -440,6 +440,8 @@ describe("job event stream", () => {
         FEISHU_APP_ID: "test-app-id",
         FEISHU_APP_SECRET: "test-app-secret",
         FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
+        CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+        CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
         PORT: String(port),
       },
     });
@@ -485,6 +487,8 @@ describe("job event stream", () => {
         FEISHU_APP_ID: "test-app-id",
         FEISHU_APP_SECRET: "test-app-secret",
         FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
+        CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+        CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
         PORT: String(port),
       },
     });

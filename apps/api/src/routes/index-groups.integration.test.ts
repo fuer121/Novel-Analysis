@@ -35,7 +35,7 @@ describe("index group routes", () => {
   });
 
   afterEach(async () => postgres.destroy());
-  const app = () => createApp({ database: postgres.db, config, feishu: new FakeFeishuOAuthAdapter() });
+  const app = () => createApp({ database: postgres.db, config, feishu: new FakeFeishuOAuthAdapter(), contentCipher: cipher });
   const mutate = (path: string) => request(app()).post(path).set("Cookie", cookie).set("Origin", config.appOrigin).set("X-CSRF-Token", csrf);
 
   it("creates and lists a group, reports coverage, previews scope and creates an idempotent job", async () => {
@@ -72,5 +72,35 @@ describe("index group routes", () => {
     expect(duplicate.status).toBe(409);
     expect(duplicate.body).toEqual({ error: "index_group_exists" });
     expect((await request(app()).patch(`/api/books/${bookId}/index-groups/${crypto.randomUUID()}`).set("Cookie", cookie).set("Origin", config.appOrigin).set("X-CSRF-Token", csrf).send({ name: "Changed" })).status).toBe(404);
+  });
+
+  it("returns authorized encrypted facts with bounded cursor pagination", async () => {
+    const indexes = createIndexRepository(postgres.db, cipher);
+    const group = await indexes.createIndexGroup({ bookId, key: "facts", name: "Facts", categoryScope: "general", promptVersionId, configHash: "facts-config" });
+    const chapters = await postgres.db.selectFrom("chapters").select(["id", "chapter_index"]).where("book_id", "=", bookId).orderBy("chapter_index").execute();
+    for (const chapter of chapters) {
+      await postgres.db.transaction().execute((transaction) => createIndexRepository(transaction, cipher).replaceL2ChapterResult({
+        groupId: group.id, chapterId: chapter.id, inputSignature: `sig-${chapter.chapter_index}`,
+        acceptedCount: 1, candidateCount: 0, rejectedCount: 0,
+        facts: [{ subjectKey: `subject-${chapter.chapter_index}`, displayName: `主体 ${chapter.chapter_index}`, aliases: [], factType: "event", plaintext: `事实 ${chapter.chapter_index}`, metadata: { category: "event", scopeEligible: true } }],
+      }));
+    }
+
+    expect((await request(app()).get(`/api/books/${bookId}/index-groups/${group.id}/facts?limit=1`)).status).toBe(401);
+    const first = await request(app()).get(`/api/books/${bookId}/index-groups/${group.id}/facts?limit=1`).set("Cookie", cookie);
+    expect(first.status).toBe(200);
+    expect(first.body.facts).toHaveLength(1);
+    expect(first.body.facts[0]).toMatchObject({ body: expect.stringMatching(/^事实 [12]$/), chapterIndex: expect.any(Number), metadata: { category: "event" } });
+    expect(first.body.nextCursor).toEqual(expect.any(String));
+    const second = await request(app()).get(`/api/books/${bookId}/index-groups/${group.id}/facts?limit=1&cursor=${first.body.nextCursor}`).set("Cookie", cookie);
+    expect(second.body.nextCursor).toBeNull();
+    expect(second.body.facts).toHaveLength(1);
+    expect(new Set([first.body.facts[0].body, second.body.facts[0].body])).toEqual(new Set(["事实 1", "事实 2"]));
+
+    for (const query of ["limit=0", "limit=101", "limit=1.5", "limit=1&cursor=bad"]) {
+      expect((await request(app()).get(`/api/books/${bookId}/index-groups/${group.id}/facts?${query}`).set("Cookie", cookie)).status).toBe(400);
+    }
+    const otherBook = await createLibraryRepository(postgres.db, cipher).createBook({ title: "Other", createdBy: (await postgres.db.selectFrom("users").select("id").executeTakeFirstOrThrow()).id });
+    expect((await request(app()).get(`/api/books/${otherBook.id}/index-groups/${group.id}/facts?limit=10`).set("Cookie", cookie)).status).toBe(404);
   });
 });

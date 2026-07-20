@@ -304,11 +304,13 @@ describe("persisted task center", () => {
     }));
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     queryClient.setQueryData(["current-user"], member);
+    queryClient.setQueryData(["book", "prior-book", "group", "prior-group", "facts", "first"], { facts: [{ body: "prior-session-plaintext" }] });
 
     renderRouter("/tasks", queryClient);
 
     expect(await screen.findByRole("heading", { name: "登录团队工作区" })).toBeTruthy();
     expect(getCsrfToken()).toBeNull();
+    expect(queryClient.getQueryData(["book", "prior-book", "group", "prior-group", "facts", "first"])).toBeUndefined();
     const loginHref = screen.getByRole("link", { name: "使用飞书登录" }).getAttribute("href")!;
     expect(new URL(loginHref, "http://app.test").searchParams.get("returnTo"))
       .toBe("/auth/complete?returnTo=%2Ftasks");

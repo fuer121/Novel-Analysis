@@ -1,6 +1,6 @@
 import express, { type ErrorRequestHandler, type Express } from "express";
 
-import type { DatabaseConnection } from "@novel-analysis/database";
+import type { ContentCipher, DatabaseConnection } from "@novel-analysis/database";
 
 import { assertCookieConfig, type ApiConfig } from "./config.js";
 import type { FeishuOAuthAdapter } from "./auth/feishu-adapter.js";
@@ -15,6 +15,7 @@ export interface CreateAppOptions {
   database: DatabaseConnection;
   config: ApiConfig;
   feishu: FeishuOAuthAdapter;
+  contentCipher?: ContentCipher;
   logger?: AuthRouteLogger;
 }
 
@@ -30,7 +31,7 @@ export function createApp(options: CreateAppOptions): Express {
   app.use("/api/job-events", createJobEventsRouter(options.database, options.config));
   app.use("/api/jobs", createJobsRouter(options.database, options.config));
   app.use("/api/books", createBooksRouter(options.database, options.config));
-  app.use("/api/books", createIndexGroupsRouter(options.database, options.config));
+  app.use("/api/books", createIndexGroupsRouter(options.database, options.config, options.contentCipher));
   app.use((_request, response) => response.status(404).json({ error: "not_found" }));
 
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
