@@ -25,13 +25,48 @@
 每个委派任务必须包含以下内容
 
 - task ID
-- allowed scope
+- core allowed modules
+- mechanical adjacent scope
 - base commit
 - success criteria
 - prohibited changes
 - required verification
+- escalation conditions
+
+Mechanical adjacent scope 默认包含直接对应测试、类型与导出入口、migration registry、既有模块 runtime wiring，以及新增 migration 必须更新的 schema roundtrip test
+
+Mechanical adjacent change 必须与已批准行为存在直接因果关系，不能引入新模块、新业务语义或新的用户可见能力
+
+新数据对象或表、新外部依赖、新认证或权限语义、新 API 产品能力、Gate、验收标准、任务顺序、正式数据或线上操作仍必须停止并确认
 
 当 `baseline_status` 为 `stale`、`conflicted` 或 `blocked` 时，不得启动依赖任务
+
+## Worktree Lifecycle
+
+- 每个 active task 原则上只保留一个实现 worktree
+- 新 worktree 默认位于 `~/.config/codex/worktrees/Novel-Analysis/`
+- 临时治理、审查和 post-merge worktree 在对应 PR 合并后立即删除
+- merged checkpoint 后删除该任务全部已合并 worktree 与本地分支，并在阶段结束执行 `git worktree prune`
+- 删除前必须确认 worktree clean、HEAD 已进入 `main`、分支已推送且 PR 已合并
+- dirty、未推送、未合并或证据冲突时必须停止，禁止强制删除
+
+## Governance Nodes
+
+- 常规 task 原则上最多使用 Started Contract、Implementation Acceptance、Merged Checkpoint 三类治理节点
+- Merged Checkpoint 可与下一任务 Started Contract 合并
+- 直接测试、package export、migration registry、类型导出和既有模块 wiring 不单独建立 correction PR，在 accepted checkpoint 记录实际 scope
+- 架构、数据、migration 策略、安全、权限、凭证、Gate、验收标准、正式数据、部署、切换或不可逆操作必须单独暂停确认
+
+## Verification Roles
+
+- 实现 Agent：RED/GREEN、focused tests、lint、typecheck、scope audit
+- 规格审查：契约矩阵、focused tests、遗漏行为检查
+- 质量审查：targeted reproduction、并发与错误路径检查
+- 总控：合并前完整 new、legacy、integration、project source
+- CI：仓库标准完整验证
+- Post-merge：focused smoke、project source、主线 SHA 与 clean 状态
+
+修改共享基础设施、数据库 transaction、lease、outbox、安全或身份链路，或出现全局回归与证据冲突时，扩大验证范围
 
 ## Completion Evidence
 

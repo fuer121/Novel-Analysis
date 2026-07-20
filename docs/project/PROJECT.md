@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T11:52:40+08:00
+updated_at: 2026-07-20T13:25:28+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
 last_checkpoint: CP-20260720-PHASE2-TASK4-MERGED
@@ -64,6 +64,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [DEC-0004 Dify Smoke Credential Policy](decisions/DEC-0004-dify-smoke-credential-policy.md) 授权总控使用本地未跟踪凭证执行显式、脱敏、非正式数据 smoke，禁止凭证进入 Git、日志、CI 和项目源
 - [DEC-0005 Repository L2 Workflow Output Alignment](decisions/DEC-0005-repository-l2-workflow-output-alignment.md) 保持 accepted adapter contract，以仓库 L2 DSL 的可信 Workflow 输入补齐章节绑定；只提交仓库 DSL，由用户手动导入
 - [DEC-0006 Phase 2 Task 4 Contract Correction](decisions/DEC-0006-phase2-task4-contract-correction.md) 补齐自动 handoff、Worker L1 分派、credential 装配与不可变 Prompt 正文存储的最小实现范围
+- [DEC-0007 Controller Workspace And Governance Lifecycle](decisions/DEC-0007-controller-workspace-and-governance-lifecycle.md) 建立 worktree 生命周期、模块化 task contract、mechanical adjacent scope、治理节点上限和分层验证职责
 - [已批准设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md) 是重构范围和架构的有效依据
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -84,7 +85,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- Task 4 已合并；Task 5 已解锁，可按批准计划启动
+- Task 4 已合并；治理与工作区优化已生效，Task 5 按 DEC-0007 的模块边界 contract 与分层验证启动
 
 ## Next Gate
 
