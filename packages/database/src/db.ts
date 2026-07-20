@@ -17,6 +17,7 @@ type GeneratedTimestamp = ColumnType<
 type JsonObject = Record<string, unknown>;
 type Json = ColumnType<JsonObject, JsonObject, JsonObject>;
 export type FactCategory = "character" | "relationship" | "cultivation" | "force" | "event" | "item" | "magical_creature" | "location" | "foreshadowing" | "other" | "organization" | "power" | "mystery";
+export type IndexGroupCategoryScope = "general" | "magical_creature";
 export interface FactRetrievalMetadata { category?: FactCategory; importance?: number; confidence?: number; scopeEligible?: boolean; transformationEligible?: boolean; scopeFieldsComplete?: boolean }
 type FactMetadataJson = ColumnType<FactRetrievalMetadata, FactRetrievalMetadata, FactRetrievalMetadata>;
 
@@ -143,7 +144,7 @@ interface BookSourcesTable { id: Generated<string>; book_id: string; provider: s
 interface ChaptersTable { id: Generated<string>; book_id: string; chapter_index: number; title: string; content_hmac: string; content_ciphertext: Buffer; content_nonce: Buffer; content_tag: Buffer; content_key_version: string; source_version: string; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
 interface PromptVersionsTable { id: Generated<string>; target: "l1-index" | "l2-index"; version: string; content: Generated<string>; content_hash: string; created_at: GeneratedTimestamp }
 interface WorkflowVersionsTable { id: Generated<string>; target: "chapter-import" | "l1-index" | "l2-index"; contract_version: string; dsl_hash: string; enabled: Generated<boolean>; created_at: GeneratedTimestamp }
-interface IndexGroupsTable { id: Generated<string>; book_id: string; key: string; name: string; prompt_version_id: string; config_hash: string; status: Generated<"active" | "archived">; created_at: GeneratedTimestamp }
+interface IndexGroupsTable { id: Generated<string>; book_id: string; key: string; name: string; category_scope: Generated<IndexGroupCategoryScope>; prompt_version_id: string; config_hash: string; status: Generated<"active" | "archived">; created_at: GeneratedTimestamp }
 interface L1IndexesTable { id: Generated<string>; chapter_id: string; prompt_version_id: string; workflow_version_id: string; input_signature: string; status: "fresh" | "failed" | "stale"; is_current: Generated<boolean>; route: Json; created_at: GeneratedTimestamp }
 interface L2ChapterStatusesTable { id: Generated<string>; group_id: string; chapter_id: string; book_id: string; input_signature: string; status: "fresh" | "failed" | "stale"; failure_code: string | null; updated_at: GeneratedTimestamp }
 interface L2FactsTable { id: Generated<string>; group_id: string; chapter_id: string; book_id: string; subject_key: string; fact_type: string; fact_ciphertext: Buffer; fact_nonce: Buffer; fact_tag: Buffer; fact_key_version: string; metadata: FactMetadataJson; created_at: GeneratedTimestamp }

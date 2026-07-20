@@ -20,7 +20,7 @@ const libraryConfig = parseLibraryRuntimeConfig(process.env);
 const libraryExecutor = libraryConfig
   ? new LibraryImportExecutor({
       database,
-      adapter: new HttpDifyAdapter({ fetch: globalThis.fetch, baseUrl: libraryConfig.baseUrl, credentials: { "chapter-import": libraryConfig.chapterImportKey, "l1-index": libraryConfig.l1WorkflowKey, "l2-index": "unused" }, timeoutMs: 60_000 }),
+      adapter: new HttpDifyAdapter({ fetch: globalThis.fetch, baseUrl: libraryConfig.baseUrl, credentials: { "chapter-import": libraryConfig.chapterImportKey, "l1-index": libraryConfig.l1WorkflowKey, "l2-index": libraryConfig.l2WorkflowKey }, timeoutMs: 60_000 }),
       cipher: createContentCipher({ activeKeyVersion: libraryConfig.contentKeyVersion, keys: { [libraryConfig.contentKeyVersion]: libraryConfig.contentKey } }),
       hmacKey: libraryConfig.hmacKey,
     })

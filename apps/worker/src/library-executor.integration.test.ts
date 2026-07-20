@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
 import { FakeDifyAdapter, type DifyAdapter } from "@novel-analysis/dify";
-import { ImportJobService, L1JobService, L1_ROUTE_SCHEMA_VERSION, PostgresStepLeaseService } from "@novel-analysis/jobs";
+import { ImportJobService, L1JobService, L1_ROUTE_SCHEMA_VERSION, L2JobService, PostgresStepLeaseService } from "@novel-analysis/jobs";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../packages/database/src/testing/postgres.js";
 
 import { LibraryImportExecutor } from "./library-executor.js";
@@ -49,6 +49,27 @@ describe("library import executor", () => {
     const claimed = await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs: 60_000 }).claimNext(job.id, "worker", new Date());
     if (!claimed) throw new Error("L1 claim missing");
     return { claimed, chapter, cipher, jobs, prompt };
+  }
+
+  async function claimL2(groupKey = "magical-creatures") {
+    const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 3) } });
+    const chapter = await createLibraryRepository(postgres.db, cipher).insertChapter({ bookId, chapterIndex: 1, title: "L2 One", plaintext: "L2_SECRET_BODY", contentHmac: "l2-hmac", sourceVersion: "source-v1" });
+    const indexes = createIndexRepository(postgres.db, cipher);
+    const l1Prompt = await postgres.db.selectFrom("prompt_versions").select("id").where("target", "=", "l1-index").executeTakeFirstOrThrow();
+    const l1Workflow = await postgres.db.selectFrom("workflow_versions").select("id").where("target", "=", "l1-index").executeTakeFirstOrThrow();
+    await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-frozen", status: "fresh", route: { route_schema_version: L1_ROUTE_SCHEMA_VERSION, route_entities: [], route_keywords: ["小蛟"], signals: [], category_scores: {} } });
+    const prompt = "L2_SECRET_PROMPT";
+    const l2Prompt = await indexes.createPromptVersion({ target: "l2-index", version: crypto.randomUUID(), content: prompt, contentHash: createHash("sha256").update(prompt).digest("hex") });
+    const workflowVersion = crypto.randomUUID();
+    await indexes.createWorkflowVersion({ target: "l2-index", contractVersion: workflowVersion, dslHash: workflowVersion });
+    const group = await indexes.createIndexGroup({ bookId, key: groupKey, name: "L2 Group", categoryScope: groupKey === "people" ? "general" : "magical_creature", promptVersionId: l2Prompt.id, configHash: "l2-config" });
+    const jobs = new L2JobService(postgres.db);
+    const scope = { bookId, groupId: group.id, startChapter: 1, endChapter: 1, mode: "all" as const, force: false };
+    const preview = await jobs.preview(scope);
+    const job = await jobs.create({ ...scope, requestedBy: userId, requestId: crypto.randomUUID(), scopeHash: preview.scopeHash });
+    const claimed = await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs: 60_000 }).claimNext(job.id, "worker", new Date());
+    if (!claimed) throw new Error("L2 claim missing");
+    return { claimed, chapter, cipher, group, jobs, prompt };
   }
 
   it("validates, encrypts and completes a chapter in one transaction without plaintext effects", async () => {
@@ -146,8 +167,8 @@ describe("library import executor", () => {
 
   it("parses runtime config as absent, complete, or redacted invalid without exposing values", () => {
     expect(parseLibraryRuntimeConfig({})).toBeUndefined();
-    const valid = { DIFY_BASE_URL: "https://dify.test", DIFY_CHAPTER_IMPORT_KEY: "secret-key", DIFY_L1_WORKFLOW_API_KEY: "l1-secret-key", CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"), CONTENT_ENCRYPTION_KEY_VERSION: "v1", CONTENT_HMAC_KEY: Buffer.from("hmac-key").toString("base64") };
-    expect(parseLibraryRuntimeConfig(valid)).toMatchObject({ baseUrl: "https://dify.test", chapterImportKey: "secret-key", l1WorkflowKey: "l1-secret-key", contentKeyVersion: "v1" });
+    const valid = { DIFY_BASE_URL: "https://dify.test", DIFY_CHAPTER_IMPORT_KEY: "secret-key", DIFY_L1_WORKFLOW_API_KEY: "l1-secret-key", DIFY_L2_WORKFLOW_API_KEY: "l2-secret-key", CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"), CONTENT_ENCRYPTION_KEY_VERSION: "v1", CONTENT_HMAC_KEY: Buffer.from("hmac-key").toString("base64") };
+    expect(parseLibraryRuntimeConfig(valid)).toMatchObject({ baseUrl: "https://dify.test", chapterImportKey: "secret-key", l1WorkflowKey: "l1-secret-key", l2WorkflowKey: "l2-secret-key", contentKeyVersion: "v1" });
     for (const field of Object.keys(valid)) {
       const partial = { ...valid };
       delete partial[field as keyof typeof partial];
@@ -157,6 +178,7 @@ describe("library import executor", () => {
       { ...valid, DIFY_BASE_URL: "not-a-url" },
       { ...valid, DIFY_CHAPTER_IMPORT_KEY: " " },
       { ...valid, DIFY_L1_WORKFLOW_API_KEY: " " },
+      { ...valid, DIFY_L2_WORKFLOW_API_KEY: " " },
       { ...valid, CONTENT_ENCRYPTION_KEY: Buffer.alloc(31).toString("base64") },
       { ...valid, CONTENT_HMAC_KEY: "" },
     ];
@@ -166,9 +188,69 @@ describe("library import executor", () => {
         const message = (error as Error).message;
         expect(message).not.toContain("secret-key");
         expect(message).not.toContain("l1-secret-key");
+        expect(message).not.toContain("l2-secret-key");
         expect(message).not.toContain(valid.CONTENT_ENCRYPTION_KEY);
       }
     }
+  });
+
+  it("runs a frozen L2 claim, persists admitted and candidate facts atomically, and emits plaintext-safe effects", async () => {
+    const { claimed, chapter, cipher, group, prompt } = await claimL2();
+    const output = { chapter_index: 1, chapter_title: "L2 One", facts: [
+      { category: "other" as const, entity: "白鹿", aliases: ["瑞兽"], tags: ["异兽"], related_entities: [], fact_type: "classification", fact: "L2_FACT_SECRET", evidence: ["明确称为异兽"], importance: 0.9, confidence: 0.9, scope_eligible: true, scope_basis: "explicit_nonhuman_species", transformation_eligible: false, scope_fields_complete: true, creature_type: "异兽", original_form: "白鹿", qualification_evidence: ["明确称为异兽"], subject_key: "white-deer", identity_basis: "" },
+      { category: "other" as const, entity: "小蛟", aliases: [], tags: ["异兽"], related_entities: [], fact_type: "identity_clue", fact: "候选秘密", evidence: ["小蛟"], importance: 0.5, confidence: 0.6, scope_eligible: false, scope_basis: "", transformation_eligible: false, scope_fields_complete: true, creature_type: "", original_form: "", qualification_evidence: [], subject_key: "little-jiao", identity_basis: "" },
+    ] };
+    const adapter = new FakeDifyAdapter([{ target: "l2-index", invocationKey: claimed.stepId, output }]);
+    const executor = new LibraryImportExecutor({ database: postgres.db, adapter, cipher, hmacKey: Buffer.from("hmac") });
+    expect(await createWorkerStepExecutor({ database: postgres.db, libraryExecutor: executor }).execute(claimed)).toEqual({ disposition: "completed" });
+    expect(adapter.calls[0]).toMatchObject({ target: "l2-index", input: { chapterContent: "L2_SECRET_BODY", indexPrompt: prompt, indexGroupKey: "magical-creatures", chapterIndex: 1 } });
+    const reviews = await createIndexRepository(postgres.db, cipher).listFactReviews({ groupId: group.id, limit: 10 });
+    expect(reviews.facts.map((item) => item.body)).toEqual(expect.arrayContaining(["L2_FACT_SECRET", "候选秘密"]));
+    expect(await createIndexRepository(postgres.db, cipher).listVerifiedSubjects(group.id)).toEqual([{ subjectKey: "white-deer", displayName: "白鹿", aliases: ["瑞兽"] }]);
+    const step = await postgres.db.selectFrom("job_steps").select(["status", "output_ref"]).where("id", "=", claimed.stepId).executeTakeFirstOrThrow();
+    expect(step).toEqual({ status: "completed", output_ref: { groupId: group.id, chapterId: chapter.id, chapterIndex: 1, acceptedCount: 1, candidateCount: 1, rejectedCount: 0, factCount: 2 } });
+    const effects = JSON.stringify({ step, scope: await postgres.db.selectFrom("jobs").select("scope").where("id", "=", claimed.jobId).executeTakeFirstOrThrow(), events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", claimed.jobId).execute() });
+    for (const secret of ["L2_SECRET_BODY", "L2_FACT_SECRET", "候选秘密", prompt]) expect(effects).not.toContain(secret);
+    expect(await executor.execute(claimed)).toEqual({ disposition: "already-completed" });
+    expect(await postgres.db.selectFrom("l2_facts").select("id").where("group_id", "=", group.id).execute()).toHaveLength(2);
+  });
+
+  it("does not promote a historical candidate from cancelled late L2 output", async () => {
+    const { claimed, cipher, group } = await claimL2("shan-hai");
+    const historical = await createLibraryRepository(postgres.db, cipher).insertChapter({ bookId, chapterIndex: 2, title: "Historical", plaintext: "history", contentHmac: "history", sourceVersion: "source-v1" });
+    await postgres.db.transaction().execute(async (transaction) => {
+      await createIndexRepository(transaction, cipher).replaceL2ChapterResult({ groupId: group.id, chapterId: historical.id, inputSignature: "candidate", acceptedCount: 0, candidateCount: 1, rejectedCount: 0, facts: [{ subjectKey: "little-jiao", displayName: "小蛟", aliases: [], factType: "identity_clue", plaintext: "candidate", metadata: { category: "other", scopeEligible: false } }] });
+    });
+    const output = { chapter_index: 1, chapter_title: "L2 One", facts: [{ category: "other" as const, entity: "小蛟", aliases: [], tags: ["异兽"], related_entities: [], fact_type: "classification", fact: "明确是异兽", evidence: ["明确是异兽"], importance: 0.9, confidence: 0.9, scope_eligible: true, scope_basis: "explicit_nonhuman_species", transformation_eligible: false, scope_fields_complete: true, creature_type: "异兽", original_form: "小蛟", qualification_evidence: ["明确是异兽"], subject_key: "little-jiao", identity_basis: "" }] };
+    await postgres.db.updateTable("jobs").set({ status: "cancelled" }).where("id", "=", claimed.jobId).execute();
+    const executor = new LibraryImportExecutor({ database: postgres.db, adapter: new FakeDifyAdapter([{ target: "l2-index", invocationKey: claimed.stepId, output }]), cipher, hmacKey: Buffer.from("hmac") });
+    expect(await executor.execute(claimed)).toEqual({ disposition: "discarded-cancelled" });
+    expect((await postgres.db.selectFrom("l2_facts").select("metadata").where("chapter_id", "=", historical.id).executeTakeFirstOrThrow()).metadata.scopeEligible).toBe(false);
+  });
+
+  it("treats zero-admission as success, skips matching fresh status, and records a redacted failed gap", async () => {
+    const first = await claimL2();
+    const ordinary = { chapter_index: 1, chapter_title: "L2 One", facts: [{ category: "character" as const, entity: "年轻剑客", aliases: [], tags: ["普通人物"], related_entities: [], fact_type: "identity_clue", fact: "普通人物", evidence: ["年轻剑客"], importance: 0.5, confidence: 0.8, scope_eligible: false, scope_basis: "", transformation_eligible: false, scope_fields_complete: true, creature_type: "", original_form: "", qualification_evidence: [], subject_key: "young-swordsman", identity_basis: "" }] };
+    const executor = new LibraryImportExecutor({ database: postgres.db, adapter: new FakeDifyAdapter([{ target: "l2-index", invocationKey: first.claimed.stepId, output: ordinary }]), cipher: first.cipher, hmacKey: Buffer.from("hmac") });
+    expect(await executor.execute(first.claimed)).toEqual({ disposition: "completed" });
+    expect((await postgres.db.selectFrom("job_steps").select("output_ref").where("id", "=", first.claimed.stepId).executeTakeFirstOrThrow()).output_ref).toMatchObject({ acceptedCount: 0, candidateCount: 0, rejectedCount: 1 });
+    const snapshot = await postgres.db.selectFrom("l2_chapter_statuses").select("input_signature").where("group_id", "=", first.group.id).executeTakeFirstOrThrow();
+    const original = await postgres.db.selectFrom("jobs").select(["scope", "config_snapshot"]).where("id", "=", first.claimed.jobId).executeTakeFirstOrThrow();
+    const job = await postgres.db.insertInto("jobs").values({ type: "l2-index", status: "queued", requested_by: userId, request_id: crypto.randomUUID(), scope: original.scope, config_snapshot: original.config_snapshot, concurrency_key: null, progress: { total: 1, completed: 0, failed: 0, skipped: 0, current: "" } }).returning("id").executeTakeFirstOrThrow();
+    await postgres.db.insertInto("job_steps").values({ job_id: job.id, position: 1, kind: "l2-index", status: "queued", input_signature: snapshot.input_signature, idempotency_key: `${job.id}:l2`, output_ref: null, lease_owner: null, lease_expires_at: null }).execute();
+    const skipClaim = (await new PostgresStepLeaseService({ database: postgres.db }).claimNext(job.id, "worker", new Date()))!;
+    const noCalls = new FakeDifyAdapter([]);
+    expect(await new LibraryImportExecutor({ database: postgres.db, adapter: noCalls, cipher: first.cipher, hmacKey: Buffer.from("hmac") }).execute(skipClaim)).toEqual({ disposition: "completed" });
+    expect(noCalls.calls).toEqual([]);
+    expect((await postgres.db.selectFrom("jobs").select("progress").where("id", "=", job.id).executeTakeFirstOrThrow()).progress.skipped).toBe(1);
+
+    await postgres.db.deleteFrom("jobs").where("id", "in", [first.claimed.jobId, job.id]).execute();
+    await postgres.db.deleteFrom("chapters").where("id", "=", first.chapter.id).execute();
+    const failed = await claimL2("people");
+    const malformed = { runL2Index: async () => ({ chapter_index: 1, chapter_title: "L2 One", facts: [{ secret: "NEVER_STORE" }] }) } as unknown as DifyAdapter;
+    expect(await new LibraryImportExecutor({ database: postgres.db, adapter: malformed, cipher: failed.cipher, hmacKey: Buffer.from("hmac") }).execute(failed.claimed)).toEqual({ disposition: "failed" });
+    expect((await postgres.db.selectFrom("l2_chapter_statuses").select(["status", "failure_code"]).where("group_id", "=", failed.group.id).executeTakeFirstOrThrow())).toEqual({ status: "failed", failure_code: "provider_invalid_response" });
+    expect(JSON.stringify(await postgres.db.selectFrom("job_attempts").selectAll().where("id", "=", failed.claimed.attemptId).executeTakeFirstOrThrow())).not.toContain("NEVER_STORE");
   });
 
   it("decrypts one L1 chapter in memory and atomically stores the validated route and references", async () => {

@@ -33,7 +33,7 @@ describe("L2 job service", () => {
     const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-adapter-v1", dslHash: "l1-workflow-v1" });
     const l2Prompt = await indexes.createPromptVersion({ target: "l2-index", version: "l2-v1", content: l2PromptContent, contentHash: createHash("sha256").update(l2PromptContent).digest("hex") });
     const l2Workflow = await indexes.createWorkflowVersion({ target: "l2-index", contractVersion: "l2-adapter-v1", dslHash: "l2-workflow-v1" });
-    groupId = (await indexes.createIndexGroup({ bookId, key: "people", name: "People", promptVersionId: l2Prompt.id, configHash: "group-config-v1" })).id;
+    groupId = (await indexes.createIndexGroup({ bookId, key: "people", name: "People", categoryScope: "general", promptVersionId: l2Prompt.id, configHash: "group-config-v1" })).id;
 
     for (let chapterIndex = 1; chapterIndex <= 4; chapterIndex += 1) {
       const chapter = await library.insertChapter({ bookId, chapterIndex, title: `Chapter ${chapterIndex}`, plaintext: `secret-${chapterIndex}`, contentHmac: `hmac-${chapterIndex}`, sourceVersion: "source-v1" });
@@ -73,7 +73,7 @@ describe("L2 job service", () => {
       workflow: { dslHash: "l2-workflow-v1", adapterContractVersion: "l2-adapter-v1" },
       schemaVersion: L2_FACT_SCHEMA_VERSION,
       admissionVersion: L2_ADMISSION_VERSION,
-      indexGroup: { id: groupId, key: "people", configHash: "group-config-v1" },
+      indexGroup: { id: groupId, key: "people", categoryScope: "general", configHash: "group-config-v1" },
     });
     expect(steps).toHaveLength(1);
     expect(steps[0]).toMatchObject({ position: 2, kind: "l2-index", output_ref: null });

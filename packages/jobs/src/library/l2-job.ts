@@ -37,7 +37,7 @@ type ChapterSnapshot = {
 type Selection = L2ScopePreview & {
   prompt: { id: string; version: string; content: string; contentHash: string };
   workflow: { id: string; dslHash: string; contractVersion: string; adapterContractVersion: string };
-  indexGroup: { id: string; key: string; name: string; configHash: string };
+  indexGroup: { id: string; key: string; name: string; categoryScope: "general" | "magical_creature"; configHash: string };
   chapters: ChapterSnapshot[];
 };
 
@@ -72,7 +72,7 @@ async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promi
   if (!book) throw new L2BookNotFoundError();
   const group = await database.selectFrom("index_groups as g")
     .innerJoin("prompt_versions as p", "p.id", "g.prompt_version_id")
-    .select(["g.id", "g.key", "g.name", "g.config_hash", "p.id as prompt_id", "p.version as prompt_version", "p.content as prompt_content", "p.content_hash as prompt_hash"])
+    .select(["g.id", "g.key", "g.name", "g.category_scope", "g.config_hash", "p.id as prompt_id", "p.version as prompt_version", "p.content as prompt_content", "p.content_hash as prompt_hash"])
     .where("g.id", "=", input.groupId).where("g.book_id", "=", input.bookId).where("g.status", "=", "active").where("p.target", "=", "l2-index").executeTakeFirst();
   if (!group) throw new L2IndexGroupNotFoundError();
   const workflow = await database.selectFrom("workflow_versions").selectAll().where("target", "=", "l2-index").where("enabled", "=", true).orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst();
@@ -124,6 +124,7 @@ async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promi
     schemaVersion: L2_FACT_SCHEMA_VERSION,
     admissionVersion: L2_ADMISSION_VERSION,
     indexGroupConfigHash: group.config_hash,
+    indexGroupCategoryScope: group.category_scope,
     states: states.filter(({ chapterIndex }) => chapterIndex >= input.startChapter && chapterIndex <= input.endChapter)
       .map((state) => ({ chapterId: state.chapterId, chapterIndex: state.chapterIndex, status: state.status, inputSignature: snapshots.get(state.chapterIndex)!.inputSignature })),
   });
@@ -136,7 +137,7 @@ async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promi
     scopeHash,
     prompt: { id: group.prompt_id, version: group.prompt_version, content: group.prompt_content, contentHash: group.prompt_hash },
     workflow: { id: workflow.id, dslHash: workflow.dsl_hash, contractVersion: workflow.contract_version, adapterContractVersion: workflow.contract_version },
-    indexGroup: { id: group.id, key: group.key, name: group.name, configHash: group.config_hash },
+    indexGroup: { id: group.id, key: group.key, name: group.name, categoryScope: group.category_scope, configHash: group.config_hash },
     chapters,
   };
 }

@@ -1,10 +1,11 @@
 import { createHash, createHmac } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 
-import { ChapterImportOutputSchema, L1IndexOutputSchema } from "@novel-analysis/contracts";
+import { ChapterImportOutputSchema, L1IndexOutputSchema, L2IndexOutputSchema } from "@novel-analysis/contracts";
 import { createIndexRepository, createLibraryRepository, type ContentCipher, type Database, type DatabaseConnection } from "@novel-analysis/database";
 import { DifyAdapterError, type DifyAdapter } from "@novel-analysis/dify";
-import { createImportL1Handoff, type ClaimedStep, type CompletionDisposition } from "@novel-analysis/jobs";
+import { admitL2FactsForIndexGroup } from "@novel-analysis/domain";
+import { createImportL1Handoff, L2_ADMISSION_VERSION, L2_FACT_SCHEMA_VERSION, type ClaimedStep, type CompletionDisposition } from "@novel-analysis/jobs";
 
 type JobConfig = {
   source: { sourceId: string; startChapter: number; endChapter: number };
@@ -17,6 +18,15 @@ type L1JobConfig = {
   workflow: { id: string };
   schemaVersion: string;
   chapters: Array<{ chapterId: string; chapterIndex: number; chapterTitle: string; sourceVersion: string; chapterHmac: string; inputSignature: string }>;
+};
+
+type L2JobConfig = {
+  prompt: { id: string; content: string; contentHash: string };
+  workflow: { id: string; dslHash: string; contractVersion: string; adapterContractVersion: string };
+  schemaVersion: string;
+  admissionVersion: string;
+  indexGroup: { id: string; key: string; categoryScope: "general" | "magical_creature"; configHash: string };
+  chapters: Array<{ chapterId: string; chapterIndex: number; chapterTitle: string; sourceVersion: string; chapterHmac: string; l1Signature: string; inputSignature: string }>;
 };
 
 function readConfig(value: Record<string, unknown>): JobConfig {
@@ -49,6 +59,27 @@ function readL1Config(value: Record<string, unknown>): L1JobConfig {
   return { prompt: prompt as L1JobConfig["prompt"], workflow: workflow as L1JobConfig["workflow"], schemaVersion: value.schemaVersion, chapters: parsed };
 }
 
+function readL2Config(value: Record<string, unknown>): L2JobConfig {
+  const prompt = value.prompt as Record<string, unknown> | undefined;
+  const workflow = value.workflow as Record<string, unknown> | undefined;
+  const indexGroup = value.indexGroup as Record<string, unknown> | undefined;
+  if (!prompt || !workflow || !indexGroup || !Array.isArray(value.chapters)
+    || typeof prompt.id !== "string" || typeof prompt.content !== "string" || !prompt.content.trim()
+    || typeof prompt.contentHash !== "string" || createHash("sha256").update(prompt.content).digest("hex") !== prompt.contentHash
+    || typeof workflow.id !== "string" || typeof workflow.dslHash !== "string" || typeof workflow.contractVersion !== "string"
+    || workflow.adapterContractVersion !== workflow.contractVersion
+    || value.schemaVersion !== L2_FACT_SCHEMA_VERSION || value.admissionVersion !== L2_ADMISSION_VERSION
+    || typeof indexGroup.id !== "string" || typeof indexGroup.key !== "string" || !["general", "magical_creature"].includes(String(indexGroup.categoryScope)) || typeof indexGroup.configHash !== "string") throw new Error("Invalid L2 job configuration");
+  const chapters = value.chapters.map((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Invalid L2 job configuration");
+    const chapter = item as Record<string, unknown>;
+    for (const field of ["chapterId", "chapterTitle", "sourceVersion", "chapterHmac", "l1Signature", "inputSignature"] as const) if (typeof chapter[field] !== "string") throw new Error("Invalid L2 job configuration");
+    if (typeof chapter.chapterIndex !== "number") throw new Error("Invalid L2 job configuration");
+    return chapter as L2JobConfig["chapters"][number];
+  });
+  return { prompt: prompt as L2JobConfig["prompt"], workflow: workflow as L2JobConfig["workflow"], schemaVersion: value.schemaVersion, admissionVersion: value.admissionVersion, indexGroup: indexGroup as L2JobConfig["indexGroup"], chapters };
+}
+
 export class LibraryImportExecutor {
   constructor(private readonly options: {
     database: DatabaseConnection;
@@ -64,16 +95,19 @@ export class LibraryImportExecutor {
       return await this.executeClaim(claim);
     } catch (error) {
       const errorCode = error instanceof DifyAdapterError ? error.code : "provider_invalid_response";
-      return claim.kind === "l1-index" ? this.failL1Claim(claim, errorCode) : failImportClaim(this.options.database, claim, errorCode);
+      if (claim.kind === "l1-index") return this.failL1Claim(claim, errorCode);
+      if (claim.kind === "l2-index") return this.failL2Claim(claim, errorCode);
+      return failImportClaim(this.options.database, claim, errorCode);
     }
   }
 
   private async executeClaim(claim: ClaimedStep): Promise<{ disposition: CompletionDisposition }> {
     const context = await this.options.database.selectFrom("jobs")
       .innerJoin("job_steps", "job_steps.job_id", "jobs.id")
-      .select(["jobs.type", "jobs.scope", "jobs.config_snapshot", "job_steps.position"])
+      .select(["jobs.type", "jobs.scope", "jobs.config_snapshot", "job_steps.position", "job_steps.input_signature"])
       .where("jobs.id", "=", claim.jobId).where("job_steps.id", "=", claim.stepId).executeTakeFirstOrThrow();
     if (context.type === "l1-index") return this.executeL1Claim(claim, context.scope, context.config_snapshot, context.position);
+    if (context.type === "l2-index") return this.executeL2Claim(claim, context.scope, context.config_snapshot, context.position, context.input_signature);
     if (context.type !== "import") throw new Error("LibraryImportExecutor only accepts import jobs");
     const bookId = context.scope.bookId;
     if (typeof bookId !== "string") throw new Error("Invalid import job scope");
@@ -119,6 +153,119 @@ export class LibraryImportExecutor {
         chapterId = inserted.id;
       }
       return this.finish(transaction, claim, { chapterId, chapterIndex: chapter.chapter_index }, false, config.autoStartL1, bookId);
+    });
+  }
+
+  private async executeL2Claim(claim: ClaimedStep, scope: Record<string, unknown>, snapshot: Record<string, unknown>, position: number, stepSignature: string): Promise<{ disposition: CompletionDisposition }> {
+    const bookId = scope.bookId;
+    const groupIds = scope.indexGroupKeys;
+    if (typeof bookId !== "string" || !Array.isArray(groupIds) || groupIds.length !== 1 || typeof groupIds[0] !== "string") throw new Error("Invalid L2 job scope");
+    const config = readL2Config(snapshot);
+    if (config.indexGroup.id !== groupIds[0]) throw new Error("Invalid L2 job configuration");
+    const chapterConfig = config.chapters.find((chapter) => chapter.chapterIndex === position);
+    if (!chapterConfig || chapterConfig.inputSignature !== stepSignature) throw new Error("Invalid L2 job configuration");
+    const frozen = await this.loadL2FrozenState(bookId, config, chapterConfig);
+    const status = await this.options.database.selectFrom("l2_chapter_statuses").select(["input_signature", "status"]).where("group_id", "=", config.indexGroup.id).where("chapter_id", "=", chapterConfig.chapterId).executeTakeFirst();
+    if (status?.status === "fresh" && status.input_signature === chapterConfig.inputSignature) return this.commitL2Skip(claim, config, chapterConfig);
+    const knownSubjects = await createIndexRepository(this.options.database, this.options.cipher).listVerifiedSubjects(config.indexGroup.id);
+    const chapterContent = this.options.cipher.decrypt({ ciphertext: frozen.chapter.content_ciphertext, nonce: frozen.chapter.content_nonce, tag: frozen.chapter.content_tag, keyVersion: frozen.chapter.content_key_version });
+    const l1Route = L1IndexOutputSchema.safeParse(frozen.l1.route);
+    if (!l1Route.success) throw new Error("L2 frozen input changed");
+    const raw = await this.options.adapter.runL2Index({ invocationKey: claim.stepId, bookId, indexGroupKey: config.indexGroup.key, chapterIndex: chapterConfig.chapterIndex, chapterTitle: chapterConfig.chapterTitle, chapterContent, l1Route: l1Route.data, indexPrompt: config.prompt.content, knownSubjects });
+    const parsed = L2IndexOutputSchema.safeParse(raw);
+    if (!parsed.success || parsed.data.chapter_index !== chapterConfig.chapterIndex || parsed.data.chapter_title !== chapterConfig.chapterTitle) throw new Error("Invalid L2 index output");
+    const admission = admitL2FactsForIndexGroup(parsed.data.facts, { categoryScope: config.indexGroup.categoryScope }, knownSubjects);
+    return this.options.database.transaction().execute(async (transaction) => {
+      const disposition = await validateImportClaim(transaction, claim);
+      if (disposition) return { disposition };
+      await this.recheckL2FrozenState(transaction, bookId, config, chapterConfig);
+      const current = await transaction.selectFrom("l2_chapter_statuses").select(["input_signature", "status"]).where("group_id", "=", config.indexGroup.id).where("chapter_id", "=", chapterConfig.chapterId).executeTakeFirst();
+      if (current?.status === "fresh" && current.input_signature === chapterConfig.inputSignature) return this.finishL2(transaction, claim, config, chapterConfig, { acceptedCount: 0, candidateCount: 0, rejectedCount: 0, factCount: 0 }, true);
+      const facts = [...admission.accepted, ...admission.candidates].map((fact) => ({
+        subjectKey: fact.subject_key.trim() || fact.entity.trim(), displayName: fact.entity.trim(), aliases: fact.aliases,
+        factType: fact.fact_type, plaintext: fact.fact, metadata: { category: fact.category, importance: fact.importance, confidence: fact.confidence, scopeEligible: fact.scope_eligible, transformationEligible: fact.transformation_eligible, scopeFieldsComplete: fact.scope_fields_complete },
+      }));
+      const counts = await createIndexRepository(transaction, this.options.cipher).replaceL2ChapterResult({ groupId: config.indexGroup.id, chapterId: chapterConfig.chapterId, inputSignature: chapterConfig.inputSignature, acceptedCount: admission.accepted.length, candidateCount: admission.candidates.length, rejectedCount: admission.rejectedCount, facts, verifiedSubjectKeys: admission.verifiedSubjects.map((subject) => subject.subjectKey) });
+      return this.finishL2(transaction, claim, config, chapterConfig, counts, false);
+    });
+  }
+
+  private async loadL2FrozenState(bookId: string, config: L2JobConfig, chapter: L2JobConfig["chapters"][number]) {
+    const [storedChapter, l1, group, prompt, workflow] = await Promise.all([
+      this.options.database.selectFrom("chapters").selectAll().where("id", "=", chapter.chapterId).where("book_id", "=", bookId).executeTakeFirst(),
+      this.options.database.selectFrom("l1_indexes").select(["input_signature", "status", "route"]).where("chapter_id", "=", chapter.chapterId).where("is_current", "=", true).executeTakeFirst(),
+      this.options.database.selectFrom("index_groups").select(["prompt_version_id", "config_hash", "key", "category_scope", "status"]).where("id", "=", config.indexGroup.id).where("book_id", "=", bookId).executeTakeFirst(),
+      this.options.database.selectFrom("prompt_versions").select(["content", "content_hash", "target"]).where("id", "=", config.prompt.id).executeTakeFirst(),
+      this.options.database.selectFrom("workflow_versions").select(["dsl_hash", "contract_version", "target"]).where("id", "=", config.workflow.id).executeTakeFirst(),
+    ]);
+    if (!storedChapter || storedChapter.chapter_index !== chapter.chapterIndex || storedChapter.title !== chapter.chapterTitle || storedChapter.source_version !== chapter.sourceVersion || storedChapter.content_hmac !== chapter.chapterHmac
+      || !l1 || l1.status !== "fresh" || l1.input_signature !== chapter.l1Signature
+      || !group || group.status !== "active" || group.prompt_version_id !== config.prompt.id || group.config_hash !== config.indexGroup.configHash || group.key !== config.indexGroup.key || group.category_scope !== config.indexGroup.categoryScope
+      || !prompt || prompt.target !== "l2-index" || prompt.content !== config.prompt.content || prompt.content_hash !== config.prompt.contentHash
+      || !workflow || workflow.target !== "l2-index" || workflow.dsl_hash !== config.workflow.dslHash || workflow.contract_version !== config.workflow.contractVersion) throw new Error("L2 frozen input changed");
+    return { chapter: storedChapter, l1 };
+  }
+
+  private async recheckL2FrozenState(transaction: Transaction<Database>, bookId: string, config: L2JobConfig, chapter: L2JobConfig["chapters"][number]) {
+    await transaction.selectFrom("chapters").select("id").where("id", "=", chapter.chapterId).forUpdate().executeTakeFirst();
+    await transaction.selectFrom("index_groups").select("id").where("id", "=", config.indexGroup.id).forUpdate().executeTakeFirst();
+    const [storedChapter, l1] = await Promise.all([
+      transaction.selectFrom("chapters").select(["chapter_index", "title", "source_version", "content_hmac"]).where("id", "=", chapter.chapterId).where("book_id", "=", bookId).executeTakeFirst(),
+      transaction.selectFrom("l1_indexes").select(["input_signature", "status"]).where("chapter_id", "=", chapter.chapterId).where("is_current", "=", true).executeTakeFirst(),
+    ]);
+    if (!storedChapter || storedChapter.chapter_index !== chapter.chapterIndex || storedChapter.title !== chapter.chapterTitle || storedChapter.source_version !== chapter.sourceVersion || storedChapter.content_hmac !== chapter.chapterHmac || !l1 || l1.status !== "fresh" || l1.input_signature !== chapter.l1Signature) throw new Error("L2 frozen input changed");
+  }
+
+  private commitL2Skip(claim: ClaimedStep, config: L2JobConfig, chapter: L2JobConfig["chapters"][number]) {
+    return this.options.database.transaction().execute(async (transaction) => {
+      const disposition = await validateImportClaim(transaction, claim);
+      if (disposition) return { disposition };
+      const job = await transaction.selectFrom("jobs").select("scope").where("id", "=", claim.jobId).executeTakeFirstOrThrow();
+      await this.recheckL2FrozenState(transaction, String(job.scope.bookId), config, chapter);
+      const status = await transaction.selectFrom("l2_chapter_statuses").select(["input_signature", "status"]).where("group_id", "=", config.indexGroup.id).where("chapter_id", "=", chapter.chapterId).executeTakeFirst();
+      if (status?.status !== "fresh" || status.input_signature !== chapter.inputSignature) throw new Error("L2 frozen input changed");
+      return this.finishL2(transaction, claim, config, chapter, { acceptedCount: 0, candidateCount: 0, rejectedCount: 0, factCount: 0 }, true);
+    });
+  }
+
+  private async finishL2(transaction: Transaction<Database>, claim: ClaimedStep, config: L2JobConfig, chapter: L2JobConfig["chapters"][number], counts: { acceptedCount: number; candidateCount: number; rejectedCount: number; factCount: number }, skipped: boolean) {
+    const job = await transaction.selectFrom("jobs").select(["status", "progress"]).where("id", "=", claim.jobId).executeTakeFirstOrThrow();
+    const output = { groupId: config.indexGroup.id, chapterId: chapter.chapterId, chapterIndex: chapter.chapterIndex, ...counts };
+    await transaction.updateTable("job_steps").set({ status: "completed", output_ref: output, lease_owner: null, lease_expires_at: null, updated_at: new Date() }).where("id", "=", claim.stepId).execute();
+    await transaction.updateTable("job_attempts").set({ status: "completed", finished_at: new Date() }).where("id", "=", claim.attemptId).execute();
+    const progress: Record<string, unknown> = { ...job.progress, current: "l2-index" };
+    progress[skipped ? "skipped" : "completed"] = Number(progress[skipped ? "skipped" : "completed"] ?? 0) + 1;
+    await transaction.updateTable("jobs").set({ progress, updated_at: new Date() }).where("id", "=", claim.jobId).execute();
+    await transaction.insertInto("job_events").values({ job_id: claim.jobId, type: "progress", dedupe_key: `step:${claim.stepId}:completed`, payload: { stepId: claim.stepId, position: claim.position, progress } }).onConflict((conflict) => conflict.columns(["job_id", "dedupe_key"]).doNothing()).execute();
+    if (job.status === "paused") return { disposition: "paused-boundary" as const };
+    const remaining = await transaction.selectFrom("job_steps").select("id").where("job_id", "=", claim.jobId).where("status", "!=", "completed").executeTakeFirst();
+    if (remaining) { await transaction.insertInto("job_outbox").values({ job_id: claim.jobId, topic: "jobs.wake", payload: { jobId: claim.jobId }, claimed_by: null, claim_expires_at: null, delivered_at: null }).execute(); return { disposition: "completed" as const }; }
+    await transaction.updateTable("jobs").set({ status: "completed", updated_at: new Date() }).where("id", "=", claim.jobId).execute();
+    await transaction.insertInto("job_events").values({ job_id: claim.jobId, type: "completed", dedupe_key: "completed", payload: { status: "completed", progress } }).onConflict((conflict) => conflict.columns(["job_id", "dedupe_key"]).doNothing()).execute();
+    return { disposition: "completed" as const };
+  }
+
+  private failL2Claim(claim: ClaimedStep, errorCode: string): Promise<{ disposition: CompletionDisposition | "failed" }> {
+    return this.options.database.transaction().execute(async (transaction) => {
+      const disposition = await validateImportClaim(transaction, claim);
+      if (disposition) return { disposition };
+      const job = await transaction.selectFrom("jobs").select(["progress", "scope", "config_snapshot"]).where("id", "=", claim.jobId).executeTakeFirstOrThrow();
+      try {
+        const config = readL2Config(job.config_snapshot);
+        const chapter = config.chapters.find((item) => item.chapterIndex === claim.position);
+        if (chapter) {
+          await this.recheckL2FrozenState(transaction, String(job.scope.bookId), config, chapter);
+          await createIndexRepository(transaction, this.options.cipher).putL2ChapterStatus({ groupId: config.indexGroup.id, chapterId: chapter.chapterId, inputSignature: chapter.inputSignature, status: "failed", failureCode: errorCode });
+        }
+      } catch {
+        // A changed or malformed snapshot cannot safely identify a current gap
+      }
+      const progress: Record<string, unknown> = { ...job.progress, failed: Number(job.progress.failed ?? 0) + 1, current: "l2-index" };
+      await transaction.updateTable("job_attempts").set({ status: "failed", error_code: errorCode, error_message: errorCode, finished_at: new Date() }).where("id", "=", claim.attemptId).execute();
+      await transaction.updateTable("job_steps").set({ status: "failed", lease_owner: null, lease_expires_at: null, updated_at: new Date() }).where("id", "=", claim.stepId).execute();
+      await transaction.updateTable("jobs").set({ status: "failed", progress, updated_at: new Date() }).where("id", "=", claim.jobId).execute();
+      await transaction.insertInto("job_events").values({ job_id: claim.jobId, type: "failed", dedupe_key: `step:${claim.stepId}:failed`, payload: { stepId: claim.stepId, position: claim.position, errorCode, progress } }).onConflict((conflict) => conflict.columns(["job_id", "dedupe_key"]).doNothing()).execute();
+      return { disposition: "failed" as const };
     });
   }
 

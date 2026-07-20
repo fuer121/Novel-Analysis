@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { sql } from "kysely";
 import type { ContentCipher } from "./content-encryption.js";
-import type { DatabaseExecutor, FactCategory, FactRetrievalMetadata } from "../db.js";
+import type { DatabaseExecutor, FactCategory, FactRetrievalMetadata, IndexGroupCategoryScope } from "../db.js";
 
 type Coverage = { total: number; fresh: number; missing: number; failed: number; stale: number };
 const FACT_CATEGORIES = new Set<FactCategory>(["character", "relationship", "cultivation", "force", "event", "item", "magical_creature", "location", "foreshadowing", "other", "organization", "power", "mystery"]);
@@ -24,7 +24,7 @@ export function createIndexRepository(db: DatabaseExecutor, cipher: ContentCiphe
       return db.insertInto("prompt_versions").values({ target: input.target, version: input.version, content: input.content, content_hash: input.contentHash }).returningAll().executeTakeFirstOrThrow();
     },
     createWorkflowVersion(input: { target: "chapter-import" | "l1-index" | "l2-index"; contractVersion: string; dslHash: string }) { return db.insertInto("workflow_versions").values({ target: input.target, contract_version: input.contractVersion, dsl_hash: input.dslHash }).returningAll().executeTakeFirstOrThrow(); },
-    createIndexGroup(input: { bookId: string; key: string; name: string; promptVersionId: string; configHash: string }) { return db.insertInto("index_groups").values({ book_id: input.bookId, key: input.key, name: input.name, prompt_version_id: input.promptVersionId, config_hash: input.configHash }).returningAll().executeTakeFirstOrThrow(); },
+    createIndexGroup(input: { bookId: string; key: string; name: string; categoryScope: IndexGroupCategoryScope; promptVersionId: string; configHash: string }) { return db.insertInto("index_groups").values({ book_id: input.bookId, key: input.key, name: input.name, category_scope: input.categoryScope, prompt_version_id: input.promptVersionId, config_hash: input.configHash }).returningAll().executeTakeFirstOrThrow(); },
     async putL1Index(input: { chapterId: string; promptVersionId: string; workflowVersionId: string; inputSignature: string; status: "fresh" | "failed" | "stale"; route: Record<string, unknown> }) {
       const replace = async (executor: DatabaseExecutor) => {
         await sql`select id from chapters where id = ${input.chapterId} for update`.execute(executor);
@@ -47,6 +47,58 @@ export function createIndexRepository(db: DatabaseExecutor, cipher: ContentCiphe
     registerSubject(input: { groupId: string; subjectKey: string; displayName: string; aliases: string[] }) {
       return sql`insert into l2_subjects (group_id, subject_key, display_name, aliases) values (${input.groupId}, ${input.subjectKey}, ${input.displayName}, ${JSON.stringify(input.aliases)}::jsonb)
         on conflict (group_id, subject_key) do update set display_name = excluded.display_name, aliases = excluded.aliases`.execute(db);
+    },
+    async listVerifiedSubjects(groupId: string) {
+      const result = await sql<{ subject_key: string; display_name: string; aliases: unknown }>`select distinct s.subject_key, s.display_name, s.aliases
+        from l2_subjects s join l2_facts f on f.group_id = s.group_id and f.subject_key = s.subject_key
+        where s.group_id = ${groupId} and (f.metadata ->> 'scopeEligible')::boolean is true
+        order by s.subject_key`.execute(db);
+      return result.rows.map((row) => ({ subjectKey: row.subject_key, displayName: row.display_name, aliases: Array.isArray(row.aliases) ? row.aliases.map(String) : [] }));
+    },
+    async replaceL2ChapterResult(input: {
+      groupId: string;
+      chapterId: string;
+      inputSignature: string;
+      acceptedCount: number;
+      candidateCount: number;
+      rejectedCount: number;
+      facts: Array<{ subjectKey: string; displayName: string; aliases: string[]; factType: string; plaintext: string; metadata: FactRetrievalMetadata }>;
+      verifiedSubjectKeys?: string[];
+    }) {
+      if (!db.isTransaction) throw new Error("L2 chapter replacement requires a caller transaction");
+      for (const fact of input.facts) {
+        if (!fact.subjectKey.trim() || !fact.displayName.trim() || !fact.factType.trim() || !fact.plaintext.trim()) throw new Error("Invalid L2 chapter result");
+        validateMetadata(fact.metadata);
+      }
+      if ([input.acceptedCount, input.candidateCount, input.rejectedCount].some((count) => !Number.isSafeInteger(count) || count < 0)
+        || input.acceptedCount + input.candidateCount !== input.facts.length) throw new Error("Invalid L2 admission counts");
+      const encrypted = input.facts.map((fact) => ({ ...fact, encrypted: cipher.encrypt(fact.plaintext) }));
+      const locked = await sql<{ book_id: string }>`select c.book_id from chapters c join index_groups g on g.book_id = c.book_id
+        where c.id = ${input.chapterId} and g.id = ${input.groupId} for update of c, g`.execute(db);
+      const bookId = locked.rows[0]?.book_id;
+      if (!bookId) throw new Error("Index group and chapter must belong to the same book");
+      for (const fact of encrypted) {
+        await sql`insert into l2_subjects (group_id, subject_key, display_name, aliases) values (${input.groupId}, ${fact.subjectKey}, ${fact.displayName}, ${JSON.stringify(fact.aliases)}::jsonb)
+          on conflict (group_id, subject_key) do update set display_name = excluded.display_name, aliases = excluded.aliases`.execute(db);
+      }
+      const verifiedSubjectKeys = [...new Set(input.verifiedSubjectKeys ?? [])].filter((key) => key.trim());
+      if (verifiedSubjectKeys.length > 0) {
+        await sql`update l2_facts set metadata = jsonb_set(metadata, '{scopeEligible}', 'true'::jsonb)
+          where group_id = ${input.groupId} and subject_key in (${sql.join(verifiedSubjectKeys)})
+          and coalesce((metadata ->> 'scopeEligible')::boolean, false) is false`.execute(db);
+      }
+      await db.deleteFrom("l2_facts").where("group_id", "=", input.groupId).where("chapter_id", "=", input.chapterId).execute();
+      for (const fact of encrypted) {
+        await db.insertInto("l2_facts").values({
+          group_id: input.groupId, chapter_id: input.chapterId, book_id: bookId, subject_key: fact.subjectKey, fact_type: fact.factType,
+          fact_ciphertext: fact.encrypted.ciphertext, fact_nonce: fact.encrypted.nonce, fact_tag: fact.encrypted.tag,
+          fact_key_version: fact.encrypted.keyVersion, metadata: fact.metadata,
+        }).execute();
+      }
+      await sql`insert into l2_chapter_statuses (group_id, chapter_id, book_id, input_signature, status, failure_code)
+        values (${input.groupId}, ${input.chapterId}, ${bookId}, ${input.inputSignature}, 'fresh', null)
+        on conflict (group_id, chapter_id) do update set input_signature = excluded.input_signature, status = 'fresh', failure_code = null, updated_at = now()`.execute(db);
+      return { acceptedCount: input.acceptedCount, candidateCount: input.candidateCount, rejectedCount: input.rejectedCount, factCount: input.facts.length };
     },
     async addFact(input: { groupId: string; chapterId: string; subjectKey: string; factType: string; plaintext: string; metadata: FactRetrievalMetadata }) {
       validateMetadata(input.metadata);

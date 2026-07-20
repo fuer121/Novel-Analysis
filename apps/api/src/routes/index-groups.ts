@@ -20,7 +20,7 @@ import { type AuthenticatedRequest, requireSession } from "../auth/session-middl
 import type { ApiConfig } from "../config.js";
 
 const identifiers = z.strictObject({ bookId: z.uuid(), groupId: z.uuid().optional() });
-const createSchema = z.strictObject({ key: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(500), promptVersionId: z.uuid() });
+const createSchema = z.strictObject({ key: z.string().trim().min(1).max(200), name: z.string().trim().min(1).max(500), categoryScope: z.enum(["general", "magical_creature"]), promptVersionId: z.uuid() });
 const scopeSchema = z.strictObject({ startChapter: z.number().safe().int().positive(), endChapter: z.number().safe().int().positive(), mode: z.enum(["all", "missing", "retry_failed"]), force: z.boolean() }).refine((value) => value.endChapter >= value.startChapter, { path: ["endChapter"] });
 const createJobSchema = scopeSchema.extend({ scopeHash: z.string().regex(/^[a-f0-9]{64}$/) });
 const keySchema = z.string().trim().min(1).max(200);
@@ -35,8 +35,8 @@ function idempotencyKey(request: AuthenticatedRequest, response: Response): stri
   return parsed.data;
 }
 
-function publicGroup(row: { id: string; key: string; name: string; prompt_version_id: string; config_hash: string; status: "active" | "archived" }) {
-  return { id: row.id, key: row.key, name: row.name, promptVersionId: row.prompt_version_id, configHash: row.config_hash, status: row.status };
+function publicGroup(row: { id: string; key: string; name: string; category_scope: "general" | "magical_creature"; prompt_version_id: string; config_hash: string; status: "active" | "archived" }) {
+  return { id: row.id, key: row.key, name: row.name, categoryScope: row.category_scope, promptVersionId: row.prompt_version_id, configHash: row.config_hash, status: row.status };
 }
 
 function handleL2Error(error: unknown, response: Response, next: (error: Error) => void): void {
@@ -64,9 +64,9 @@ export function createIndexGroupsRouter(database: DatabaseConnection, config: Ap
         if (!book) throw new L2BookNotFoundError();
         const prompt = await transaction.selectFrom("prompt_versions").select(["id", "content_hash"]).where("id", "=", body.data.promptVersionId).where("target", "=", "l2-index").executeTakeFirst();
         if (!prompt) throw new L2ConfigurationError();
-        const configHash = hash({ key: body.data.key, name: body.data.name, promptVersionId: prompt.id, promptHash: prompt.content_hash, schemaVersion: L2_FACT_SCHEMA_VERSION, admissionVersion: L2_ADMISSION_VERSION });
-        const inserted = await transaction.insertInto("index_groups").values({ book_id: params.data.bookId, key: body.data.key, name: body.data.name, prompt_version_id: prompt.id, config_hash: configHash }).returning(["id", "key", "name", "prompt_version_id", "config_hash", "status"]).executeTakeFirstOrThrow();
-        await transaction.insertInto("audit_logs").values({ actor_user_id: request.auth!.userId, action: "index_group.create", target_type: "index_group", target_id: inserted.id, metadata: { bookId: params.data.bookId, key: inserted.key, promptVersionId: prompt.id, configHash } }).execute();
+        const configHash = hash({ key: body.data.key, name: body.data.name, categoryScope: body.data.categoryScope, promptVersionId: prompt.id, promptHash: prompt.content_hash, schemaVersion: L2_FACT_SCHEMA_VERSION, admissionVersion: L2_ADMISSION_VERSION });
+        const inserted = await transaction.insertInto("index_groups").values({ book_id: params.data.bookId, key: body.data.key, name: body.data.name, category_scope: body.data.categoryScope, prompt_version_id: prompt.id, config_hash: configHash }).returning(["id", "key", "name", "category_scope", "prompt_version_id", "config_hash", "status"]).executeTakeFirstOrThrow();
+        await transaction.insertInto("audit_logs").values({ actor_user_id: request.auth!.userId, action: "index_group.create", target_type: "index_group", target_id: inserted.id, metadata: { bookId: params.data.bookId, key: inserted.key, categoryScope: inserted.category_scope, promptVersionId: prompt.id, configHash } }).execute();
         return publicGroup(inserted);
       });
       response.status(201).json({ indexGroup: group });
@@ -85,7 +85,7 @@ export function createIndexGroupsRouter(database: DatabaseConnection, config: Ap
     try {
       const book = await database.selectFrom("books").select("id").where("id", "=", params.data.bookId).where("status", "=", "active").executeTakeFirst();
       if (!book) { response.status(404).json({ error: "book_not_found" }); return; }
-      const groups = await database.selectFrom("index_groups").select(["id", "key", "name", "prompt_version_id", "config_hash", "status"]).where("book_id", "=", params.data.bookId).where("status", "=", "active").orderBy("created_at").orderBy("id").execute();
+      const groups = await database.selectFrom("index_groups").select(["id", "key", "name", "category_scope", "prompt_version_id", "config_hash", "status"]).where("book_id", "=", params.data.bookId).where("status", "=", "active").orderBy("created_at").orderBy("id").execute();
       response.json({ indexGroups: groups.map(publicGroup) });
     } catch { next(new Error("index group list failed")); }
   });
