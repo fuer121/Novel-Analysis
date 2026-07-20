@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
+baseline_commit: 9e25a7d14c860ae11adfce28883d53dcfaccf3a2
 baseline_status: current
-updated_at: 2026-07-20T20:12:56+08:00
+updated_at: 2026-07-20T20:17:25+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK6-ACCEPTED
+last_checkpoint: CP-20260720-PHASE2-TASK6-MERGED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `820b30a1cfae0b0a19be9fa763f44801742d38e9` |
-| Latest merged implementation | PR #62 `https://github.com/fuer121/Novel-Analysis/pull/62` |
+| Accepted implementation baseline | `9e25a7d14c860ae11adfce28883d53dcfaccf3a2` |
+| Latest merged implementation | PR #66 `https://github.com/fuer121/Novel-Analysis/pull/66` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -33,14 +33,14 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | --- | --- | --- |
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
-| Phase 2 | implementing | Task 0 至 Task 5 已完成，Task 6 ready |
+| Phase 2 | implementing | Task 0 至 Task 6 已完成，Task 7 ready |
 | Phase 3 | blocked | Phase 2 Gate 通过后才能推进 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK6 | phase-2 | L2 execution, facts, subjects and admission | controller-agent | codex/phase2-task6-l2-executor | af33a6ff71f60c847006f73f206a419e7a4df1ce | c4e2f77108aec7e7f60ccc5060f8d78d82d0a9ac | accepted | CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS | CP-20260720-PHASE2-TASK6-ACCEPTED | create PR, verify CI and merge under DEC-0002 |
+| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | none | 9e25a7d14c860ae11adfce28883d53dcfaccf3a2 | none | ready | CP-20260720-PHASE2-TASK6-MERGED | none | create and validate started contract before implementation |
 
 ## Phase Ledgers
 
@@ -72,11 +72,11 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- Task 6 完整 integration 曾出现一次不可复现的 `socket hang up`，focused 6/6 与完整重跑 207/207 均通过
+- 当前无阻塞 Task 7 started contract 的证据冲突
 
 ## Pending Feedback
 
-Task 6 规格和质量审查均已通过，可按 DEC-0002 创建 PR 并核验 CI
+无，Task 7 可在创建并核验 started contract 后实施
 
 ## Next Gate
 
@@ -84,6 +84,7 @@ Task 6 规格和质量审查均已通过，可按 DEC-0002 创建 PR 并核验 C
 
 ## Evidence Index
 
+- [Phase 2 Task 6 merged](checkpoints/CP-20260720-PHASE2-TASK6-MERGED.md)
 - [Phase 2 Task 6 accepted](checkpoints/CP-20260720-PHASE2-TASK6-ACCEPTED.md)
 - [Phase 2 Task 6 contract correction](checkpoints/CP-20260720-PHASE2-TASK6-CONTRACT-CORRECTION.md)
 - [Phase 2 Task 6 started](checkpoints/CP-20260720-PHASE2-TASK6-STARTED.md)
