@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
 import { L2JobService } from "@novel-analysis/jobs";
 import { createDisposablePostgres, type DisposablePostgres } from "../../packages/database/src/testing/postgres.js";
+import { startPhase2TestApi } from "./helpers/test-api.js";
 
 function p95(samples: number[]): number {
   return [...samples].sort((left, right) => left - right)[18]!;
@@ -14,8 +15,9 @@ function p95(samples: number[]): number {
 
 describe("Phase 2 library indexing scale", () => {
   let postgres: DisposablePostgres | undefined;
+  let stopApi: (() => Promise<void>) | undefined;
 
-  afterEach(async () => postgres?.destroy());
+  afterEach(async () => { await stopApi?.(); await postgres?.destroy(); });
 
   it("keeps 3000 chapters and 70000 encrypted facts within accepted read thresholds", async () => {
     postgres = await createDisposablePostgres();
@@ -59,11 +61,15 @@ describe("Phase 2 library indexing scale", () => {
       from generate_series(1, 3000) value
     `.execute(postgres.db);
     expect(performance.now() - setupStarted).toBeLessThan(5000);
+    const api = await startPhase2TestApi(postgres.db, user.id);
+    stopApi = api.stop;
 
     const samples = { overview: [] as number[], coverage: [] as number[], facts: [] as number[], detail: [] as number[] };
     for (let iteration = 0; iteration < 20; iteration += 1) {
       let started = performance.now();
-      await postgres.db.selectFrom("books as b").leftJoin("chapters as c", "c.book_id", "b.id").select("b.id").select(({ fn }) => fn.count("c.id").as("chapter_count")).where("b.id", "=", book.id).groupBy("b.id").executeTakeFirstOrThrow();
+      const overview = await api.request(`/books/${book.id}`);
+      expect(overview.status).toBe(200);
+      await overview.json();
       samples.overview.push(performance.now() - started);
       started = performance.now();
       await new L2JobService(postgres.db).coverage({ bookId: book.id, groupId: group.id });
@@ -72,7 +78,9 @@ describe("Phase 2 library indexing scale", () => {
       await indexes.listFactReviews({ groupId: group.id, limit: 20 });
       samples.facts.push(performance.now() - started);
       started = performance.now();
-      await postgres.db.selectFrom("jobs").select(["id", "status", "progress"]).where("id", "=", job.id).executeTakeFirstOrThrow();
+      const detail = await api.request(`/jobs/${job.id}`);
+      expect(detail.status).toBe(200);
+      await detail.json();
       samples.detail.push(performance.now() - started);
     }
 
