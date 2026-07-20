@@ -38,12 +38,13 @@
     "build:legacy": "vite build",
     "verify:legacy": "npm run test:legacy && npm run lint:legacy && npm run build:legacy",
     "project:check": "node scripts/check-project-source.mjs",
+    "controller:health": "node scripts/controller-health.mjs",
     "workspace:audit": "node scripts/workspace-audit.mjs",
     "workspace:cleanup": "node scripts/workspace-cleanup.mjs",
     "test:workspace": "node --test test/workspace-*.test.js",
     "verify:implementation": "npm run lint && npm run typecheck:phase1",
     "verify:controller": "npm run verify && npm run lint && npm run typecheck:phase1 && npm run test:workspace && npm run test:integration",
-    "verify:post-merge": "npm run test:project-source && npm run project:check && npm run workspace:audit",
+    "verify:post-merge": "npm run test:project-source && npm run project:check && npm run workspace:audit && npm run controller:health",
     "verify": "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check && npm run test:project-source && npm run project:check"
   },
   "dependencies": {
