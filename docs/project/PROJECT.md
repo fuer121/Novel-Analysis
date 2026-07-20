@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 4b4cc227e9540f5a0764ae476c54a2090aa54a24
 baseline_status: current
-updated_at: 2026-07-20T23:16:41+08:00
+updated_at: 2026-07-21T00:34:10+08:00
 updated_by: controller-agent
 current_phase: phase-3-planning
-last_checkpoint: CP-20260720-PHASE2-IMPLEMENTATION-ACCEPTED
+last_checkpoint: CP-20260721-PHASE3-DESIGN-ACCEPTED
 next_gate: GATE-PHASE3-PLAN-APPROVED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-PLAN | phase-3 | L2 continuous-question design and implementation plan | controller-agent | main | 4b4cc227e9540f5a0764ae476c54a2090aa54a24 | none | ready | CP-20260720-PHASE2-IMPLEMENTATION-ACCEPTED | none | audit Phase 3 boundaries and prepare plan for review |
+| PHASE3-PLAN | phase-3 | L2 continuous-question design and implementation plan | controller-agent | codex/phase3-design | d8c7c3ab4b56c13bf564b234f9f35d406be4f9ad | none | in_progress | CP-20260721-PHASE3-DESIGN-ACCEPTED | none | merge reviewed seven-task plan before submitting Phase 3 Plan Gate |
 
 ## Phase Ledgers
 
@@ -61,6 +61,7 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 - [DEC-0010 Index Group Category Scope](decisions/DEC-0010-index-group-category-scope.md)
 - [DEC-0011 Task 7 Fact Review API](decisions/DEC-0011-task7-fact-review-api.md)
 - [DEC-0012 Task 7 Session Cache Boundary](decisions/DEC-0012-task7-session-cache-boundary.md)
+- [DEC-0013 Phase 3 Query Session Sharing](decisions/DEC-0013-phase3-query-session-sharing.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -79,7 +80,7 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 
 ## Pending Feedback
 
-无，Phase 3 只可进入规划，不得开始实施
+Phase 3 七项计划待合并，Plan Gate 通过前不得开始实施
 
 ## Next Gate
 
@@ -87,6 +88,8 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 
 ## Evidence Index
 
+- [Phase 3 design accepted](checkpoints/CP-20260721-PHASE3-DESIGN-ACCEPTED.md)
+- [Phase 3 design submitted](checkpoints/CP-20260721-PHASE3-DESIGN-SUBMITTED.md)
 - [Phase 2 implementation accepted](checkpoints/CP-20260720-PHASE2-IMPLEMENTATION-ACCEPTED.md)
 - [Phase 2 Task 8 merged](checkpoints/CP-20260720-PHASE2-TASK8-MERGED.md)
 - [Phase 2 Task 8 accepted](checkpoints/CP-20260720-PHASE2-TASK8-ACCEPTED.md)
