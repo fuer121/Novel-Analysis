@@ -57,8 +57,12 @@ function matchingKnown(fact: L2AdmissionFact, subjects: readonly L2AdmissionSubj
     .some((name) => value === name || value.includes(name) || name.includes(value))));
 }
 
+function hardExcluded(fact: L2AdmissionFact): boolean {
+  return isArtifact(fact) || isNonCreatureObject(fact) || isOrdinaryHuman(fact) || isOrdinaryAnimal(fact) || isTentativeHumanSimile(fact);
+}
+
 function candidateEligible(fact: L2AdmissionFact): boolean {
-  if (isArtifact(fact) || isNonCreatureObject(fact) || isOrdinaryHuman(fact) || isOrdinaryAnimal(fact)) return false;
+  if (hardExcluded(fact)) return false;
   if (fact.fact_type === "identity_clue") return true;
   return /异兽|妖|精|鬼|灵|化形|人形|灵智|通灵|大妖|水神|山神|鬼魅|阴物|祥瑞|神兽|树妖|狐妖|蛇精/.test(text(fact));
 }
@@ -77,7 +81,7 @@ export function admitL2FactsForIndexGroup(
   const verifiedSubjects: L2AdmissionSubject[] = [];
   for (const fact of facts) {
     const explicit = explicitlyEligible(fact);
-    const known = explicit || !candidateEligible(fact) ? undefined : matchingKnown(fact, knownSubjects);
+    const known = explicit || hardExcluded(fact) ? undefined : matchingKnown(fact, knownSubjects);
     if (explicit || known) {
       const subjectKey = known?.subjectKey ?? (fact.subject_key.trim() || fact.entity.trim());
       accepted.push({

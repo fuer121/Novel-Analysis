@@ -111,4 +111,9 @@ describe("admitL2FactsForIndexGroup", () => {
     const result = admitL2FactsForIndexGroup([fact({ entity: "飞剑", category: "item", related_entities: ["白鹿"], fact: "飞剑掠过白鹿身旁" })], { categoryScope: "magical_creature" }, [{ subjectKey: "white-deer", displayName: "白鹿", aliases: ["瑞兽"] }]);
     expect(result).toMatchObject({ accepted: [], candidates: [], rejectedCount: 1, verifiedSubjects: [] });
   });
+
+  it("admits a plain event for an exact prior verified subject", () => {
+    const result = admitL2FactsForIndexGroup([fact({ entity: "蛟老", aliases: [], tags: [], related_entities: [], fact_type: "event_record", fact: "蛟老在山中出现", evidence: ["蛟老在山中出现"] })], { categoryScope: "magical_creature" }, [{ subjectKey: "verified-jiao", displayName: "蛟老", aliases: [] }]);
+    expect(result.accepted[0]).toMatchObject({ subject_key: "verified-jiao", scope_basis: "prior_verified_subject" });
+  });
 });
