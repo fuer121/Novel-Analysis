@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 4b4cc227e9540f5a0764ae476c54a2090aa54a24
 baseline_status: current
-updated_at: 2026-07-20T22:56:29+08:00
+updated_at: 2026-07-20T23:16:41+08:00
 updated_by: controller-agent
-current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK8-MERGED
-next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
+current_phase: phase-3-planning
+last_checkpoint: CP-20260720-PHASE2-IMPLEMENTATION-ACCEPTED
+next_gate: GATE-PHASE3-PLAN-APPROVED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -33,14 +33,14 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | --- | --- | --- |
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
-| Phase 2 | gate_pending | Task 0 至 Task 8 已合并，等待 Phase 2 Gate 明确确认 |
-| Phase 3 | blocked | Phase 2 Gate 通过后才能推进 |
+| Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
+| Phase 3 | planning_ready | 仅解锁独立规划，实施仍需 Phase 3 Plan Gate |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK8 | phase-2 | Scale, recovery and Phase 2 acceptance | controller-agent | main | 11f55a26d2b4de42cde7addcc0aa6e4dda07e17f | 4b4cc227e9540f5a0764ae476c54a2090aa54a24 | merged | CP-20260720-PHASE2-TASK7-MERGED | CP-20260720-PHASE2-TASK8-MERGED | request explicit Phase 2 Gate confirmation |
+| PHASE3-PLAN | phase-3 | L2 continuous-question design and implementation plan | controller-agent | main | 4b4cc227e9540f5a0764ae476c54a2090aa54a24 | none | ready | CP-20260720-PHASE2-IMPLEMENTATION-ACCEPTED | none | audit Phase 3 boundaries and prepare plan for review |
 
 ## Phase Ledgers
 
@@ -74,18 +74,20 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- 当前无阻塞 Phase 2 Gate 决策的证据冲突
+- Phase 3 query session、turn evidence、召回与降级契约尚未形成独立批准计划
+- 当前无阻塞 Phase 3 规划的证据冲突
 
 ## Pending Feedback
 
-无，等待用户明确确认 `GATE-PHASE2-IMPLEMENTATION-ACCEPTED`
+无，Phase 3 只可进入规划，不得开始实施
 
 ## Next Gate
 
-下一阶段门禁为 `GATE-PHASE2-IMPLEMENTATION-ACCEPTED`，Task 6 至 Task 8 完成前不得进入 Phase 3
+下一阶段门禁为 `GATE-PHASE3-PLAN-APPROVED`，Phase 3 设计与实施计划获明确批准前不得开始编码
 
 ## Evidence Index
 
+- [Phase 2 implementation accepted](checkpoints/CP-20260720-PHASE2-IMPLEMENTATION-ACCEPTED.md)
 - [Phase 2 Task 8 merged](checkpoints/CP-20260720-PHASE2-TASK8-MERGED.md)
 - [Phase 2 Task 8 accepted](checkpoints/CP-20260720-PHASE2-TASK8-ACCEPTED.md)
 - [Phase 2 Task 8 started](checkpoints/CP-20260720-PHASE2-TASK8-STARTED.md)
