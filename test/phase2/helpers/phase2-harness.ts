@@ -46,7 +46,12 @@ export function failingL1Adapter(onInput: (input: L1IndexInput) => void): DifyAd
   const delegate = new Phase2DifyFake();
   return {
     runChapterImport: (input) => delegate.runChapterImport(input),
-    async runL1Index(input) { onInput(input); throw new DifyAdapterError("provider_unavailable"); },
+    async runL1Index(input) {
+      onInput(input);
+      const error = new DifyAdapterError("provider_unavailable");
+      error.message = `${PHASE2_SENTINELS.chapter}:${PHASE2_SENTINELS.fact}:${PHASE2_SENTINELS.credential}`;
+      throw error;
+    },
     runL2Index: (input) => delegate.runL2Index(input),
   };
 }
