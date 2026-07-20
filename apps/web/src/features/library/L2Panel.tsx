@@ -12,7 +12,7 @@ export function L2Panel() {
   const { bookId = "" } = useParams();
   const { book } = useOutletContext<{ book: BookSummary }>();
   const groups = useQuery({ queryKey: ["book", bookId, "index-groups"], queryFn: () => apiRead<{ indexGroups: IndexGroup[] }>(`/books/${bookId}/index-groups`) });
-  const [groupId, setGroupId] = useState(""); const [startChapter, setStartChapter] = useState(1); const [endChapter, setEndChapter] = useState(book.chapterCount); const [mode, setMode] = useState<"all" | "missing" | "retry_failed">("missing");
+  const [groupId, setGroupId] = useState(""); const [startChapter, setStartChapter] = useState(1); const [endChapter, setEndChapter] = useState(Math.max(1, book.chapterCount)); const [mode, setMode] = useState<"all" | "missing" | "retry_failed">("missing");
   useEffect(() => { if (!groupId && groups.data?.indexGroups[0]) setGroupId(groups.data.indexGroups[0].id); }, [groupId, groups.data]);
   const coverage = useQuery({ queryKey: ["book", bookId, "group", groupId, "coverage"], queryFn: () => apiRead<IndexCoverage>(`/books/${bookId}/index-groups/${groupId}/coverage`), enabled: Boolean(groupId) });
   if (groups.isPending) return <p className="empty-state">正在读取索引组...</p>;

@@ -129,6 +129,20 @@ describe("book workspace", () => {
     expect(completeClient.getQueryData(["book", "prior-book", "group", "prior-group", "facts", "first"])).toBeUndefined();
   });
 
+  it("keeps the initial L2 range valid for a book without imported chapters", async () => {
+    const emptyBook = { ...book, chapterCount: 0 };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `/api/books/${book.id}`) return json({ book: emptyBook });
+      if (url.endsWith("/index-groups")) return json({ indexGroups: [group] });
+      if (url.endsWith("/coverage")) return json({ total: 0, fresh: 0, missing: 0, failed: 0, stale: 0 });
+      if (url.includes("/facts?limit=20")) return json({ facts: [], nextCursor: null });
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath(`/books/${book.id}/l2`);
+    expect((await screen.findByLabelText("结束章节") as HTMLInputElement).value).toBe("1");
+  });
+
   it("reuses one idempotency key for uncertain submit retries and rotates after a fresh preview", async () => {
     const keys: string[] = [];
     let submitAttempt = 0;
