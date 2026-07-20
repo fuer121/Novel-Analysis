@@ -41,12 +41,13 @@ describe("book workspace", () => {
 
   it("requires preview and reconfirmation when the server reports scope_changed", async () => {
     let submissions = 0;
+    const keys: string[] = [];
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url === `/api/books/${book.id}`) return json({ book });
       if (url.endsWith("/l1-coverage")) return json({ total: 12, fresh: 3, missing: 6, failed: 1, stale: 2 });
       if (url.endsWith("/l1-preview")) return json(preview);
-      if (url.endsWith("/l1-jobs") && init?.method === "POST") { submissions += 1; return json({ error: "scope_changed" }, 409); }
+      if (url.endsWith("/l1-jobs") && init?.method === "POST") { submissions += 1; keys.push(new Headers(init.headers).get("Idempotency-Key")!); return json({ error: "scope_changed" }, 409); }
       throw new Error(`unexpected ${url}`);
     }));
     renderPath(`/books/${book.id}/l1`);
@@ -57,6 +58,10 @@ describe("book workspace", () => {
     expect(await screen.findByText("范围已变化，请重新预览并确认")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /确认执行/ })).toBeNull();
     expect(submissions).toBe(1);
+    await userEvent.click(screen.getByRole("button", { name: "预览范围" }));
+    await userEvent.click(await screen.findByRole("button", { name: "确认执行 9 项" }));
+    await waitFor(() => expect(submissions).toBe(2));
+    expect(keys[1]).not.toBe(keys[0]);
   });
 
   it("creates an import job only after a successful preview and explicit confirmation", async () => {
@@ -102,5 +107,77 @@ describe("book workspace", () => {
     expect(await screen.findByText("第二页事实")).toBeTruthy();
     FakeEventSource.instance.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ jobId: "job" }) }));
     await waitFor(() => expect(bookCalls).toBeGreaterThan(1));
+  });
+
+  it("roundtrips an allowed book workspace destination through login completion", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === "/api/auth/me") return json({ user, csrfToken: "fresh" });
+      if (url === `/api/books/${book.id}`) return json({ book });
+      if (url.endsWith("/l1-coverage")) return json({ total: 12, fresh: 3, missing: 6, failed: 1, stale: 2 });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const login = renderPath(`/login?returnTo=/books/${book.id}/overview`);
+    const loginHref = screen.getByRole("link", { name: "使用飞书登录" }).getAttribute("href")!;
+    expect(new URL(loginHref, "http://app.test").searchParams.get("returnTo")).toBe(`/auth/complete?returnTo=${encodeURIComponent(`/books/${book.id}/overview`)}`);
+    login.unmount();
+    renderPath(`/auth/complete?returnTo=${encodeURIComponent(`/books/${book.id}/overview`)}`);
+    expect(await screen.findByRole("heading", { name: book.title })).toBeTruthy();
+  });
+
+  it("reuses one idempotency key for uncertain submit retries and rotates after a fresh preview", async () => {
+    const keys: string[] = [];
+    let submitAttempt = 0;
+    const job = { id: "00000000-0000-4000-8000-000000000050", type: "import", status: "queued", requestedBy: user.id, scope: { bookId: book.id }, progress: { total: 9, completed: 0, failed: 0, skipped: 0, current: "" }, createdAt: book.createdAt, updatedAt: book.createdAt };
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/books/${book.id}`) return json({ book });
+      if (url.endsWith("/import-preview")) return json({ requested: 12, existingFresh: 2, existingStale: 1, executable: 9, scopeHash: preview.scopeHash });
+      if (url.endsWith("/import-jobs")) { keys.push(new Headers(init?.headers).get("Idempotency-Key")!); submitAttempt += 1; return submitAttempt === 1 ? json({ error: "internal_error" }, 500) : json({ job }, 201); }
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath(`/books/${book.id}/import`);
+    await userEvent.click(await screen.findByRole("button", { name: "预览范围" }));
+    await userEvent.click(await screen.findByRole("button", { name: "确认执行 9 项" }));
+    expect(await screen.findByText("提交结果未确认，请使用同一范围重试")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "确认执行 9 项" }));
+    expect(await screen.findByText("任务已创建，", { exact: false })).toBeTruthy();
+    expect(keys).toHaveLength(2);
+    expect(keys[0]).toBe(keys[1]);
+    await userEvent.click(screen.getByRole("button", { name: "预览范围" }));
+    await userEvent.click(await screen.findByRole("button", { name: "确认执行 9 项" }));
+    await waitFor(() => expect(keys).toHaveLength(3));
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  it("shows retry actions for overview and L2 query failures", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `/api/books/${book.id}`) return json({ book });
+      if (url.endsWith("/l1-coverage")) return json({ error: "internal_error" }, 500);
+      throw new Error(`unexpected ${url}`);
+    }));
+    const overview = renderPath(`/books/${book.id}/overview`);
+    expect(await screen.findByText("覆盖情况读取失败")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重试覆盖情况" })).toBeTruthy();
+    overview.unmount();
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input) === `/api/books/${book.id}` ? json({ book }) : json({ error: "internal_error" }, 500)));
+    renderPath(`/books/${book.id}/l2`);
+    expect(await screen.findByText("索引组读取失败")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重试索引组" })).toBeTruthy();
+  });
+
+  it("shows a retry action when L2 coverage fails after groups load", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `/api/books/${book.id}`) return json({ book });
+      if (url.endsWith("/index-groups")) return json({ indexGroups: [group] });
+      if (url.endsWith("/coverage")) return json({ error: "internal_error" }, 500);
+      if (url.includes("/facts?limit=20")) return json({ facts: [], nextCursor: null });
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath(`/books/${book.id}/l2`);
+    expect(await screen.findByText("L2 覆盖情况读取失败")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "重试 L2 覆盖情况" })).toBeTruthy();
   });
 });

@@ -5,16 +5,8 @@ import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-route
 
 import { subscribeSessionExpired } from "../shared/api.js";
 import { useCurrentUser } from "../features/auth/useCurrentUser.js";
+import { loginPath } from "../features/auth/return-to.js";
 import { useJobEvents } from "../features/task-center/useJobEvents.js";
-
-function loginTarget(pathname: string): string {
-  const returnTo = pathname === "/tasks" || pathname === "/books" || /^\/books\/[^/?#]+\/(overview|import|l1|l2)$/.test(pathname)
-    || pathname === "/admin/members"
-    || /^\/tasks\/[^/?#]+$/.test(pathname)
-    ? pathname
-    : "/tasks";
-  return `/login?returnTo=${encodeURIComponent(returnTo)}`;
-}
 
 export function AppShell() {
   const location = useLocation();
@@ -25,11 +17,11 @@ export function AppShell() {
 
   useEffect(() => subscribeSessionExpired(() => {
     queryClient.setQueryData(["current-user"], null);
-    navigate(loginTarget(location.pathname), { replace: true });
+    navigate(loginPath(location.pathname), { replace: true });
   }), [location.pathname, navigate, queryClient]);
 
   if (currentUser.isPending) return <main className="centered-state">正在加载工作区...</main>;
-  if (!currentUser.data) return <Navigate to={loginTarget(location.pathname)} replace />;
+  if (!currentUser.data) return <Navigate to={loginPath(location.pathname)} replace />;
 
   return (
     <div className="app-shell">

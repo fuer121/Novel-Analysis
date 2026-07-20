@@ -1,15 +1,9 @@
 import { Link, useSearchParams } from "react-router-dom";
-
-function safeDestination(value: string | null): string {
-  if (value === "/admin/members" || value === "/tasks" || /^\/tasks\/[^/?#]+$/.test(value ?? "")) {
-    return value!;
-  }
-  return "/tasks";
-}
+import { safeReturnTo } from "./return-to.js";
 
 export function LoginPage() {
   const [search] = useSearchParams();
-  const destination = safeDestination(search.get("returnTo"));
+  const destination = safeReturnTo(search.get("returnTo"));
   const completePath = `/auth/complete?returnTo=${encodeURIComponent(destination)}`;
   const loginUrl = `/api/auth/login?returnTo=${encodeURIComponent(completePath)}`;
 
