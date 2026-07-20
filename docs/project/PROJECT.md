@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T18:26:15+08:00
+updated_at: 2026-07-20T19:04:32+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS
+last_checkpoint: CP-20260720-CONTROLLER-HEALTH-METRICS-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -25,6 +25,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
+| Controller health | `npm run controller:health`，只读并已纳入 post-merge verification |
 
 ## Phase Status
 
@@ -82,7 +83,8 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
-- [Latest checkpoint](checkpoints/CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS.md)
+- [Controller health metrics accepted](checkpoints/CP-20260720-CONTROLLER-HEALTH-METRICS-ACCEPTED.md)
+- [Task 5 merged and project ledgers accepted](checkpoints/CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS.md)
 - [Phase 1 ledger](ledgers/phase-1-ledger.md)
 - [Phase 2 ledger](ledgers/phase-2-ledger.md)
 - [项目唯一信源治理设计](../superpowers/specs/2026-07-17-project-source-of-truth-design.md)
