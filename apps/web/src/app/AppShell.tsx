@@ -6,6 +6,7 @@ import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-route
 import { subscribeSessionExpired } from "../shared/api.js";
 import { useCurrentUser } from "../features/auth/useCurrentUser.js";
 import { loginPath } from "../features/auth/return-to.js";
+import { clearPriorSessionQueries } from "../features/auth/session-query-cache.js";
 import { useJobEvents } from "../features/task-center/useJobEvents.js";
 
 export function AppShell() {
@@ -16,6 +17,7 @@ export function AppShell() {
   useJobEvents(Boolean(currentUser.data));
 
   useEffect(() => subscribeSessionExpired(() => {
+    clearPriorSessionQueries(queryClient);
     queryClient.setQueryData(["current-user"], null);
     navigate(loginPath(location.pathname), { replace: true });
   }), [location.pathname, navigate, queryClient]);

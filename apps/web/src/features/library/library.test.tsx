@@ -121,8 +121,11 @@ describe("book workspace", () => {
     const loginHref = screen.getByRole("link", { name: "使用飞书登录" }).getAttribute("href")!;
     expect(new URL(loginHref, "http://app.test").searchParams.get("returnTo")).toBe(`/auth/complete?returnTo=${encodeURIComponent(`/books/${book.id}/overview`)}`);
     login.unmount();
-    renderPath(`/auth/complete?returnTo=${encodeURIComponent(`/books/${book.id}/overview`)}`);
+    const completeClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+    completeClient.setQueryData(["book", "prior-book", "group", "prior-group", "facts", "first"], { facts: [{ body: "prior-user-plaintext" }] });
+    render(<QueryClientProvider client={completeClient}><AppRouter initialEntries={[`/auth/complete?returnTo=${encodeURIComponent(`/books/${book.id}/overview`)}`]} /></QueryClientProvider>);
     expect(await screen.findByRole("heading", { name: book.title })).toBeTruthy();
+    expect(completeClient.getQueryData(["book", "prior-book", "group", "prior-group", "facts", "first"])).toBeUndefined();
   });
 
   it("reuses one idempotency key for uncertain submit retries and rotates after a fresh preview", async () => {
