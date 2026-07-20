@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 9e25a7d14c860ae11adfce28883d53dcfaccf3a2
 baseline_status: current
-updated_at: 2026-07-20T20:17:25+08:00
+updated_at: 2026-07-20T20:24:26+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK6-MERGED
+last_checkpoint: CP-20260720-PHASE2-TASK7-STARTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | none | 9e25a7d14c860ae11adfce28883d53dcfaccf3a2 | none | ready | CP-20260720-PHASE2-TASK6-MERGED | none | create and validate started contract before implementation |
+| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | codex/phase2-task7-book-workspace | 0ccf23b5aeeeded8d15dffdd3225feed8f665ea8 | none | in_progress | CP-20260720-PHASE2-TASK6-MERGED | CP-20260720-PHASE2-TASK7-STARTED | create visual concept, implement with TDD and run two-stage review |
 
 ## Phase Ledgers
 
@@ -72,11 +72,11 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- 当前无阻塞 Task 7 started contract 的证据冲突
+- 当前无阻塞 Task 7 implementation 的证据冲突
 
 ## Pending Feedback
 
-无，Task 7 可在创建并核验 started contract 后实施
+无，Task 7 可按 accepted started contract 实施
 
 ## Next Gate
 
@@ -84,6 +84,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 7 started](checkpoints/CP-20260720-PHASE2-TASK7-STARTED.md)
 - [Phase 2 Task 6 merged](checkpoints/CP-20260720-PHASE2-TASK6-MERGED.md)
 - [Phase 2 Task 6 accepted](checkpoints/CP-20260720-PHASE2-TASK6-ACCEPTED.md)
 - [Phase 2 Task 6 contract correction](checkpoints/CP-20260720-PHASE2-TASK6-CONTRACT-CORRECTION.md)
