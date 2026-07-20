@@ -153,7 +153,7 @@ Phase 3 保留三种显式策略，不用一个通用 Prompt 猜测全部行为
 
 `analysis-summary` 输入只包含问题、结构化意图、采用事实、章节引用、回答格式和预算信息
 
-provider transient retry 沿用现有 Dify adapter 策略，不在 Query 层叠加另一套隐式重试
+`analysis-summary` transient retry 在 Dify adapter 边界最多执行三次，与已接受的真实 Dify smoke 容错边界一致，Query 层不叠加另一套隐式重试
 
 重试耗尽后 turn 进入 `awaiting_fallback`，保留证据快照并提供两个明确动作
 
