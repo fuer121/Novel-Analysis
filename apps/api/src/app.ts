@@ -8,6 +8,7 @@ import { createAdminMembersRouter } from "./routes/admin-members.js";
 import { createAuthRouter, type AuthRouteLogger } from "./routes/auth.js";
 import { createJobEventsRouter } from "./routes/job-events.js";
 import { createJobsRouter } from "./routes/jobs.js";
+import { createBooksRouter } from "./routes/books.js";
 
 export interface CreateAppOptions {
   database: DatabaseConnection;
@@ -27,6 +28,7 @@ export function createApp(options: CreateAppOptions): Express {
   app.use("/api/admin/members", createAdminMembersRouter(options.database, options.config));
   app.use("/api/job-events", createJobEventsRouter(options.database, options.config));
   app.use("/api/jobs", createJobsRouter(options.database, options.config));
+  app.use("/api/books", createBooksRouter(options.database, options.config));
   app.use((_request, response) => response.status(404).json({ error: "not_found" }));
 
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
