@@ -17,27 +17,35 @@ supersedes: none
 
 ## Assigned Scope
 
-- Allowed files：待填写获授权修改的文件范围
+- Core modules：待填写实际使用的核心模块范围
+- Mechanical adjacent scope：待填写实际使用的机械性配套范围，无则填写无
 - Required behavior：待填写必须实现并验证的行为
-- Prohibited changes：待填写明确禁止的变更
+
+## Prohibited Changes Audit
+
+待填写：逐项确认未发生禁止变更，或提供升级处理记录
 
 ## Actual Changes
 
 待填写：列出实际变更的文件、行为和实现结果
 
-## Verification Evidence
+## Verification By Role
 
-| 检查项 | 命令或证据 | 结果 |
-| --- | --- | --- |
-| 待填写 | 待填写 | 待填写 |
+| 角色 | 检查项 | 命令或证据 | 结果 |
+| --- | --- | --- | --- |
+| 实现 Agent | 待填写 | 待填写 | 待填写 |
 
-## Plan Deviations
+## Scope Deviations
 
 无报告：如有偏差，替换本行并说明偏差、原因和影响
 
+## Escalations
+
+无报告：如触发升级条件，替换本行并提供处理状态和可核验证据
+
 ## Risks And Blockers
 
-无报告：如有风险或阻塞，替换本行并提供可核验证据
+无报告：如有其他风险或阻塞，替换本行并提供可核验证据
 
 ## User Feedback
 

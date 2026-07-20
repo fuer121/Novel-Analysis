@@ -62,6 +62,29 @@ const ACTIVE_WORK_STATUSES = new Set([
 ]);
 const COMMIT_PATTERN = /^[0-9a-f]{40}$/;
 const RECORD_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const TEMPLATE_SECTIONS = new Map([
+  ["task-contract.md", [
+    "Core Allowed Modules",
+    "Mechanical Adjacent Scope",
+    "Base Commit",
+    "Success Criteria",
+    "Prohibited Changes",
+    "Required Verification",
+    "Escalation Conditions",
+    "Resource Budget",
+  ]],
+  ["checkpoint.md", [
+    "Assigned Scope",
+    "Prohibited Changes Audit",
+    "Actual Changes",
+    "Verification By Role",
+    "Scope Deviations",
+    "Escalations",
+    "Risks And Blockers",
+    "Recommended Next Action",
+    "Acceptance Request",
+  ]],
+]);
 
 function parseFrontMatter(content, label) {
   const lines = content.replace(/^\uFEFF/, "").split(/\r?\n/);
@@ -101,6 +124,28 @@ async function pathExists(filePath) {
     return true;
   } catch {
     return false;
+  }
+}
+
+async function validateGovernanceTemplates(root, errors) {
+  for (const [fileName, requiredSections] of TEMPLATE_SECTIONS) {
+    const templatePath = path.join(root, "docs/project/templates", fileName);
+    let content;
+    try {
+      content = await fs.readFile(templatePath, "utf8");
+    } catch (error) {
+      errors.push(`Could not read governance template ${fileName}: ${error.message}`);
+      continue;
+    }
+
+    const headings = new Set(
+      [...content.matchAll(/^##\s+(.+?)\s*$/gm)].map((match) => match[1]),
+    );
+    for (const section of requiredSections) {
+      if (!headings.has(section)) {
+        errors.push(`${fileName} is missing required section: ${section}`);
+      }
+    }
   }
 }
 
@@ -465,6 +510,7 @@ export async function validateProjectSource(
 
   validateActiveWork(content, errors);
   await validateLocalLinks(content, projectPath, root, errors);
+  await validateGovernanceTemplates(root, errors);
   const checkpoints = await readGovernanceRecords(root, "checkpoints", {
     type: "checkpoint",
     idField: "checkpoint_id",
