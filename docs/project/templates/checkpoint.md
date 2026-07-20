@@ -33,7 +33,10 @@ supersedes: none
 
 | 角色 | 检查项 | 命令或证据 | 结果 |
 | --- | --- | --- | --- |
-| 实现 Agent | 待填写 | 待填写 | 待填写 |
+| 实现 Agent | RED/GREEN、focused tests、基础验证、scope audit | 待填写 | 待填写 |
+| 规格审查 | 契约矩阵、focused tests、遗漏行为 | 待填写 | 待填写 |
+| 质量审查 | targeted reproduction、并发与错误路径 | 待填写 | 待填写 |
+| 总控或 Post-merge | 完整验证或 smoke | 待填写 | 待填写 |
 
 ## Scope Deviations
 

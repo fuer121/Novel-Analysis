@@ -37,7 +37,9 @@ owner: replace-with-agent
 
 ## Required Verification
 
-- 实现 Agent：RED/GREEN、focused tests、lint、typecheck、scope audit
+- 实现 Agent：RED/GREEN、task-specific focused tests、`npm run verify:implementation`、scope audit
+- 总控合并前：`npm run verify:controller`
+- Post-merge：task-specific focused smoke、`npm run verify:post-merge`、主线 SHA 与 clean 状态
 - 待填写：本任务额外要求的验证命令和证据
 
 ## Escalation Conditions
