@@ -215,6 +215,19 @@ describe("library import executor", () => {
     expect(await postgres.db.selectFrom("l2_facts").select("id").where("group_id", "=", group.id).execute()).toHaveLength(2);
   });
 
+  it("does not promote a historical candidate from cancelled late L2 output", async () => {
+    const { claimed, cipher, group } = await claimL2("shan-hai");
+    const historical = await createLibraryRepository(postgres.db, cipher).insertChapter({ bookId, chapterIndex: 2, title: "Historical", plaintext: "history", contentHmac: "history", sourceVersion: "source-v1" });
+    await postgres.db.transaction().execute(async (transaction) => {
+      await createIndexRepository(transaction, cipher).replaceL2ChapterResult({ groupId: group.id, chapterId: historical.id, inputSignature: "candidate", acceptedCount: 0, candidateCount: 1, rejectedCount: 0, facts: [{ subjectKey: "little-jiao", displayName: "小蛟", aliases: [], factType: "identity_clue", plaintext: "candidate", metadata: { category: "other", scopeEligible: false } }] });
+    });
+    const output = { chapter_index: 1, chapter_title: "L2 One", facts: [{ category: "other" as const, entity: "小蛟", aliases: [], tags: ["异兽"], related_entities: [], fact_type: "classification", fact: "明确是异兽", evidence: ["明确是异兽"], importance: 0.9, confidence: 0.9, scope_eligible: true, scope_basis: "explicit_nonhuman_species", transformation_eligible: false, scope_fields_complete: true, creature_type: "异兽", original_form: "小蛟", qualification_evidence: ["明确是异兽"], subject_key: "little-jiao", identity_basis: "" }] };
+    await postgres.db.updateTable("jobs").set({ status: "cancelled" }).where("id", "=", claimed.jobId).execute();
+    const executor = new LibraryImportExecutor({ database: postgres.db, adapter: new FakeDifyAdapter([{ target: "l2-index", invocationKey: claimed.stepId, output }]), cipher, hmacKey: Buffer.from("hmac") });
+    expect(await executor.execute(claimed)).toEqual({ disposition: "discarded-cancelled" });
+    expect((await postgres.db.selectFrom("l2_facts").select("metadata").where("chapter_id", "=", historical.id).executeTakeFirstOrThrow()).metadata.scopeEligible).toBe(false);
+  });
+
   it("treats zero-admission as success, skips matching fresh status, and records a redacted failed gap", async () => {
     const first = await claimL2();
     const ordinary = { chapter_index: 1, chapter_title: "L2 One", facts: [{ category: "character" as const, entity: "年轻剑客", aliases: [], tags: ["普通人物"], related_entities: [], fact_type: "identity_clue", fact: "普通人物", evidence: ["年轻剑客"], importance: 0.5, confidence: 0.8, scope_eligible: false, scope_basis: "", transformation_eligible: false, scope_fields_complete: true, creature_type: "", original_form: "", qualification_evidence: [], subject_key: "young-swordsman", identity_basis: "" }] };
