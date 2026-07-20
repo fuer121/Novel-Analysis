@@ -39,9 +39,9 @@ describe("index group routes", () => {
   const mutate = (path: string) => request(app()).post(path).set("Cookie", cookie).set("Origin", config.appOrigin).set("X-CSRF-Token", csrf);
 
   it("creates and lists a group, reports coverage, previews scope and creates an idempotent job", async () => {
-    const created = await mutate(`/api/books/${bookId}/index-groups`).send({ key: "people", name: "People", promptVersionId });
+    const created = await mutate(`/api/books/${bookId}/index-groups`).send({ key: "people", name: "People", categoryScope: "general", promptVersionId });
     expect(created.status).toBe(201);
-    expect(created.body.indexGroup).toMatchObject({ key: "people", name: "People", promptVersionId, configHash: expect.stringMatching(/^[a-f0-9]{64}$/), status: "active" });
+    expect(created.body.indexGroup).toMatchObject({ key: "people", name: "People", categoryScope: "general", promptVersionId, configHash: expect.stringMatching(/^[a-f0-9]{64}$/), status: "active" });
     const groupId = created.body.indexGroup.id as string;
 
     const listed = await request(app()).get(`/api/books/${bookId}/index-groups`).set("Cookie", cookie);
@@ -66,9 +66,9 @@ describe("index group routes", () => {
 
   it("requires auth and CSRF, rejects duplicate groups and does not expose an edit endpoint", async () => {
     expect((await request(app()).get(`/api/books/${bookId}/index-groups`)).status).toBe(401);
-    expect((await request(app()).post(`/api/books/${bookId}/index-groups`).set("Cookie", cookie).send({ key: "people", name: "People", promptVersionId })).status).toBe(403);
-    expect((await mutate(`/api/books/${bookId}/index-groups`).send({ key: "people", name: "People", promptVersionId })).status).toBe(201);
-    const duplicate = await mutate(`/api/books/${bookId}/index-groups`).send({ key: "people", name: "Changed", promptVersionId });
+    expect((await request(app()).post(`/api/books/${bookId}/index-groups`).set("Cookie", cookie).send({ key: "people", name: "People", categoryScope: "general", promptVersionId })).status).toBe(403);
+    expect((await mutate(`/api/books/${bookId}/index-groups`).send({ key: "people", name: "People", categoryScope: "general", promptVersionId })).status).toBe(201);
+    const duplicate = await mutate(`/api/books/${bookId}/index-groups`).send({ key: "people", name: "Changed", categoryScope: "general", promptVersionId });
     expect(duplicate.status).toBe(409);
     expect(duplicate.body).toEqual({ error: "index_group_exists" });
     expect((await request(app()).patch(`/api/books/${bookId}/index-groups/${crypto.randomUUID()}`).set("Cookie", cookie).set("Origin", config.appOrigin).set("X-CSRF-Token", csrf).send({ name: "Changed" })).status).toBe(404);

@@ -25,7 +25,7 @@ type L2JobConfig = {
   workflow: { id: string; dslHash: string; contractVersion: string; adapterContractVersion: string };
   schemaVersion: string;
   admissionVersion: string;
-  indexGroup: { id: string; key: string; configHash: string };
+  indexGroup: { id: string; key: string; categoryScope: "general" | "magical_creature"; configHash: string };
   chapters: Array<{ chapterId: string; chapterIndex: number; chapterTitle: string; sourceVersion: string; chapterHmac: string; l1Signature: string; inputSignature: string }>;
 };
 
@@ -69,7 +69,7 @@ function readL2Config(value: Record<string, unknown>): L2JobConfig {
     || typeof workflow.id !== "string" || typeof workflow.dslHash !== "string" || typeof workflow.contractVersion !== "string"
     || workflow.adapterContractVersion !== workflow.contractVersion
     || value.schemaVersion !== L2_FACT_SCHEMA_VERSION || value.admissionVersion !== L2_ADMISSION_VERSION
-    || typeof indexGroup.id !== "string" || typeof indexGroup.key !== "string" || typeof indexGroup.configHash !== "string") throw new Error("Invalid L2 job configuration");
+    || typeof indexGroup.id !== "string" || typeof indexGroup.key !== "string" || !["general", "magical_creature"].includes(String(indexGroup.categoryScope)) || typeof indexGroup.configHash !== "string") throw new Error("Invalid L2 job configuration");
   const chapters = value.chapters.map((item) => {
     if (!item || typeof item !== "object" || Array.isArray(item)) throw new Error("Invalid L2 job configuration");
     const chapter = item as Record<string, unknown>;
@@ -174,7 +174,7 @@ export class LibraryImportExecutor {
     const raw = await this.options.adapter.runL2Index({ invocationKey: claim.stepId, bookId, indexGroupKey: config.indexGroup.key, chapterIndex: chapterConfig.chapterIndex, chapterTitle: chapterConfig.chapterTitle, chapterContent, l1Route: l1Route.data, indexPrompt: config.prompt.content, knownSubjects });
     const parsed = L2IndexOutputSchema.safeParse(raw);
     if (!parsed.success || parsed.data.chapter_index !== chapterConfig.chapterIndex || parsed.data.chapter_title !== chapterConfig.chapterTitle) throw new Error("Invalid L2 index output");
-    const admission = admitL2FactsForIndexGroup(parsed.data.facts, { key: config.indexGroup.key }, knownSubjects);
+    const admission = admitL2FactsForIndexGroup(parsed.data.facts, { categoryScope: config.indexGroup.categoryScope }, knownSubjects);
     return this.options.database.transaction().execute(async (transaction) => {
       const disposition = await validateImportClaim(transaction, claim);
       if (disposition) return { disposition };
@@ -185,7 +185,7 @@ export class LibraryImportExecutor {
         subjectKey: fact.subject_key.trim() || fact.entity.trim(), displayName: fact.entity.trim(), aliases: fact.aliases,
         factType: fact.fact_type, plaintext: fact.fact, metadata: { category: fact.category, importance: fact.importance, confidence: fact.confidence, scopeEligible: fact.scope_eligible, transformationEligible: fact.transformation_eligible, scopeFieldsComplete: fact.scope_fields_complete },
       }));
-      const counts = await createIndexRepository(transaction, this.options.cipher).replaceL2ChapterResult({ groupId: config.indexGroup.id, chapterId: chapterConfig.chapterId, inputSignature: chapterConfig.inputSignature, acceptedCount: admission.accepted.length, candidateCount: admission.candidates.length, rejectedCount: admission.rejectedCount, facts });
+      const counts = await createIndexRepository(transaction, this.options.cipher).replaceL2ChapterResult({ groupId: config.indexGroup.id, chapterId: chapterConfig.chapterId, inputSignature: chapterConfig.inputSignature, acceptedCount: admission.accepted.length, candidateCount: admission.candidates.length, rejectedCount: admission.rejectedCount, facts, verifiedSubjectKeys: admission.verifiedSubjects.map((subject) => subject.subjectKey) });
       return this.finishL2(transaction, claim, config, chapterConfig, counts, false);
     });
   }
@@ -194,13 +194,13 @@ export class LibraryImportExecutor {
     const [storedChapter, l1, group, prompt, workflow] = await Promise.all([
       this.options.database.selectFrom("chapters").selectAll().where("id", "=", chapter.chapterId).where("book_id", "=", bookId).executeTakeFirst(),
       this.options.database.selectFrom("l1_indexes").select(["input_signature", "status", "route"]).where("chapter_id", "=", chapter.chapterId).where("is_current", "=", true).executeTakeFirst(),
-      this.options.database.selectFrom("index_groups").select(["prompt_version_id", "config_hash", "key", "status"]).where("id", "=", config.indexGroup.id).where("book_id", "=", bookId).executeTakeFirst(),
+      this.options.database.selectFrom("index_groups").select(["prompt_version_id", "config_hash", "key", "category_scope", "status"]).where("id", "=", config.indexGroup.id).where("book_id", "=", bookId).executeTakeFirst(),
       this.options.database.selectFrom("prompt_versions").select(["content", "content_hash", "target"]).where("id", "=", config.prompt.id).executeTakeFirst(),
       this.options.database.selectFrom("workflow_versions").select(["dsl_hash", "contract_version", "target"]).where("id", "=", config.workflow.id).executeTakeFirst(),
     ]);
     if (!storedChapter || storedChapter.chapter_index !== chapter.chapterIndex || storedChapter.title !== chapter.chapterTitle || storedChapter.source_version !== chapter.sourceVersion || storedChapter.content_hmac !== chapter.chapterHmac
       || !l1 || l1.status !== "fresh" || l1.input_signature !== chapter.l1Signature
-      || !group || group.status !== "active" || group.prompt_version_id !== config.prompt.id || group.config_hash !== config.indexGroup.configHash || group.key !== config.indexGroup.key
+      || !group || group.status !== "active" || group.prompt_version_id !== config.prompt.id || group.config_hash !== config.indexGroup.configHash || group.key !== config.indexGroup.key || group.category_scope !== config.indexGroup.categoryScope
       || !prompt || prompt.target !== "l2-index" || prompt.content !== config.prompt.content || prompt.content_hash !== config.prompt.contentHash
       || !workflow || workflow.target !== "l2-index" || workflow.dsl_hash !== config.workflow.dslHash || workflow.contract_version !== config.workflow.contractVersion) throw new Error("L2 frozen input changed");
     return { chapter: storedChapter, l1 };

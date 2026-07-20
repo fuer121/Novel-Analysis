@@ -29,7 +29,7 @@ describe("admitL2FactsForIndexGroup", () => {
   it("admits all schema-valid facts for a general index group", () => {
     const input = [fact({ category: "character", entity: "陈平安" })];
 
-    expect(admitL2FactsForIndexGroup(input, { key: "characters" }, [])).toEqual({
+    expect(admitL2FactsForIndexGroup(input, { categoryScope: "general" }, [])).toEqual({
       accepted: input,
       candidates: [],
       rejectedCount: 0,
@@ -44,7 +44,7 @@ describe("admitL2FactsForIndexGroup", () => {
       scope_eligible: true,
       scope_basis: "explicit_nonhuman_species",
       subject_key: "white-deer",
-    })], { key: "magical-creatures" }, []);
+    })], { categoryScope: "magical_creature" }, []);
 
     expect(result.accepted[0]).toMatchObject({
       category: "magical_creature",
@@ -61,7 +61,7 @@ describe("admitL2FactsForIndexGroup", () => {
     const result = admitL2FactsForIndexGroup([
       candidate,
       fact({ entity: "蛟老", subject_key: "", fact_type: "event_record" }),
-    ], { key: "magical-creatures" }, known);
+    ], { categoryScope: "magical_creature" }, known);
 
     expect(result.accepted).toHaveLength(1);
     expect(result.accepted[0]).toMatchObject({
@@ -82,7 +82,7 @@ describe("admitL2FactsForIndexGroup", () => {
       fact({ entity: "符箓", category: "item", fact: "符箓自行飞行" }),
       fact({ entity: "祖荫槐叶", fact: "祖荫槐叶在本章出现" }),
       fact({ entity: "青衣少女", scope_eligible: true, scope_basis: "explicit_nonhuman_species", fact: "青衣少女像一头年幼狐魅", evidence: ["像一头年幼狐魅"] }),
-    ], { key: "magical-creatures" }, []);
+    ], { categoryScope: "magical_creature" }, []);
 
     expect(result).toMatchObject({ accepted: [], candidates: [], rejectedCount: 5, verifiedSubjects: [] });
   });
@@ -96,8 +96,14 @@ describe("admitL2FactsForIndexGroup", () => {
       transformation_eligible: true,
       fact: "飞剑具有独立灵智和生物化形能力",
       evidence: ["飞剑会飞行并执行命令"],
-    })], { key: "magical-creatures" }, []);
+    })], { categoryScope: "magical_creature" }, []);
 
     expect(result).toMatchObject({ accepted: [], candidates: [], rejectedCount: 1 });
+  });
+
+  it("uses immutable category scope instead of the group key or model category", () => {
+    const eligible = fact({ category: "magical_creature", scope_eligible: true, scope_basis: "explicit_nonhuman_species" });
+    expect(admitL2FactsForIndexGroup([eligible], { categoryScope: "general" }, []).accepted).toEqual([eligible]);
+    expect(admitL2FactsForIndexGroup([fact({ entity: "普通人物" })], { categoryScope: "magical_creature" }, []).accepted).toEqual([]);
   });
 });

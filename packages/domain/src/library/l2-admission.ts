@@ -65,10 +65,10 @@ function candidateEligible(fact: L2AdmissionFact): boolean {
 
 export function admitL2FactsForIndexGroup(
   facts: readonly L2AdmissionFact[],
-  indexGroup: { key: string },
+  indexGroup: { categoryScope: "general" | "magical_creature" },
   knownSubjects: readonly L2AdmissionSubject[],
 ): { accepted: L2AdmissionFact[]; candidates: L2AdmissionFact[]; rejectedCount: number; verifiedSubjects: L2AdmissionSubject[] } {
-  if (indexGroup.key !== "magical-creatures") {
+  if (indexGroup.categoryScope !== "magical_creature") {
     return { accepted: [...facts], candidates: [], rejectedCount: 0, verifiedSubjects: [] };
   }
 

@@ -62,7 +62,7 @@ describe("library import executor", () => {
     const l2Prompt = await indexes.createPromptVersion({ target: "l2-index", version: crypto.randomUUID(), content: prompt, contentHash: createHash("sha256").update(prompt).digest("hex") });
     const workflowVersion = crypto.randomUUID();
     await indexes.createWorkflowVersion({ target: "l2-index", contractVersion: workflowVersion, dslHash: workflowVersion });
-    const group = await indexes.createIndexGroup({ bookId, key: groupKey, name: "L2 Group", promptVersionId: l2Prompt.id, configHash: "l2-config" });
+    const group = await indexes.createIndexGroup({ bookId, key: groupKey, name: "L2 Group", categoryScope: groupKey === "people" ? "general" : "magical_creature", promptVersionId: l2Prompt.id, configHash: "l2-config" });
     const jobs = new L2JobService(postgres.db);
     const scope = { bookId, groupId: group.id, startChapter: 1, endChapter: 1, mode: "all" as const, force: false };
     const preview = await jobs.preview(scope);

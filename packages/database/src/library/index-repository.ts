@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { sql } from "kysely";
 import type { ContentCipher } from "./content-encryption.js";
-import type { DatabaseExecutor, FactCategory, FactRetrievalMetadata } from "../db.js";
+import type { DatabaseExecutor, FactCategory, FactRetrievalMetadata, IndexGroupCategoryScope } from "../db.js";
 
 type Coverage = { total: number; fresh: number; missing: number; failed: number; stale: number };
 const FACT_CATEGORIES = new Set<FactCategory>(["character", "relationship", "cultivation", "force", "event", "item", "magical_creature", "location", "foreshadowing", "other", "organization", "power", "mystery"]);
@@ -24,7 +24,7 @@ export function createIndexRepository(db: DatabaseExecutor, cipher: ContentCiphe
       return db.insertInto("prompt_versions").values({ target: input.target, version: input.version, content: input.content, content_hash: input.contentHash }).returningAll().executeTakeFirstOrThrow();
     },
     createWorkflowVersion(input: { target: "chapter-import" | "l1-index" | "l2-index"; contractVersion: string; dslHash: string }) { return db.insertInto("workflow_versions").values({ target: input.target, contract_version: input.contractVersion, dsl_hash: input.dslHash }).returningAll().executeTakeFirstOrThrow(); },
-    createIndexGroup(input: { bookId: string; key: string; name: string; promptVersionId: string; configHash: string }) { return db.insertInto("index_groups").values({ book_id: input.bookId, key: input.key, name: input.name, prompt_version_id: input.promptVersionId, config_hash: input.configHash }).returningAll().executeTakeFirstOrThrow(); },
+    createIndexGroup(input: { bookId: string; key: string; name: string; categoryScope: IndexGroupCategoryScope; promptVersionId: string; configHash: string }) { return db.insertInto("index_groups").values({ book_id: input.bookId, key: input.key, name: input.name, category_scope: input.categoryScope, prompt_version_id: input.promptVersionId, config_hash: input.configHash }).returningAll().executeTakeFirstOrThrow(); },
     async putL1Index(input: { chapterId: string; promptVersionId: string; workflowVersionId: string; inputSignature: string; status: "fresh" | "failed" | "stale"; route: Record<string, unknown> }) {
       const replace = async (executor: DatabaseExecutor) => {
         await sql`select id from chapters where id = ${input.chapterId} for update`.execute(executor);
@@ -63,6 +63,7 @@ export function createIndexRepository(db: DatabaseExecutor, cipher: ContentCiphe
       candidateCount: number;
       rejectedCount: number;
       facts: Array<{ subjectKey: string; displayName: string; aliases: string[]; factType: string; plaintext: string; metadata: FactRetrievalMetadata }>;
+      verifiedSubjectKeys?: string[];
     }) {
       if (!db.isTransaction) throw new Error("L2 chapter replacement requires a caller transaction");
       for (const fact of input.facts) {
@@ -79,6 +80,12 @@ export function createIndexRepository(db: DatabaseExecutor, cipher: ContentCiphe
       for (const fact of encrypted) {
         await sql`insert into l2_subjects (group_id, subject_key, display_name, aliases) values (${input.groupId}, ${fact.subjectKey}, ${fact.displayName}, ${JSON.stringify(fact.aliases)}::jsonb)
           on conflict (group_id, subject_key) do update set display_name = excluded.display_name, aliases = excluded.aliases`.execute(db);
+      }
+      const verifiedSubjectKeys = [...new Set(input.verifiedSubjectKeys ?? [])].filter((key) => key.trim());
+      if (verifiedSubjectKeys.length > 0) {
+        await sql`update l2_facts set metadata = jsonb_set(metadata, '{scopeEligible}', 'true'::jsonb)
+          where group_id = ${input.groupId} and subject_key in (${sql.join(verifiedSubjectKeys)})
+          and coalesce((metadata ->> 'scopeEligible')::boolean, false) is false`.execute(db);
       }
       await db.deleteFrom("l2_facts").where("group_id", "=", input.groupId).where("chapter_id", "=", input.chapterId).execute();
       for (const fact of encrypted) {

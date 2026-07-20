@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T19:18:23+08:00
+updated_at: 2026-07-20T19:50:51+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK6-STARTED
+last_checkpoint: CP-20260720-PHASE2-TASK6-CONTRACT-CORRECTION
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK6 | phase-2 | L2 execution, facts, subjects and admission | controller-agent | codex/phase2-task6-l2-executor | f61eda1ab494e8c4c370a9cb3196a3b62939d4e7 | none | in_progress | CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS | CP-20260720-PHASE2-TASK6-STARTED | implement contract with TDD and two-stage review |
+| PHASE2-TASK6 | phase-2 | L2 execution, facts, subjects and admission | controller-agent | codex/phase2-task6-l2-executor | af33a6ff71f60c847006f73f206a419e7a4df1ce | cadfa1cc76e156e36e4b70db41acd84b9aa4a9a3 | in_progress | CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS | CP-20260720-PHASE2-TASK6-CONTRACT-CORRECTION | fix category scope and candidate promotion, then repeat specification review |
 
 ## Phase Ledgers
 
@@ -58,6 +58,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [DEC-0007 Controller Workspace And Governance Lifecycle](decisions/DEC-0007-controller-workspace-and-governance-lifecycle.md)
 - [DEC-0008 Phase 2 Task 5 Index Group Create Only](decisions/DEC-0008-phase2-task5-index-group-create-only.md)
 - [DEC-0009 Phase 2 Task 5 Workflow Snapshot Boundary](decisions/DEC-0009-phase2-task5-workflow-snapshot-boundary.md)
+- [DEC-0010 Index Group Category Scope](decisions/DEC-0010-index-group-category-scope.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -71,11 +72,11 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- 当前无阻塞 Task 6 started contract 的证据冲突
+- Task 6 原实现使用 group key 选择专项 admission 且缺少候选晋升，已由 DEC-0010 和 corrected contract 解锁修复
 
 ## Pending Feedback
 
-无，Task 6 可在创建并核验 started contract 后实施
+Task 6 按 DEC-0010 修复后必须重新通过规格审查
 
 ## Next Gate
 
@@ -83,6 +84,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 6 contract correction](checkpoints/CP-20260720-PHASE2-TASK6-CONTRACT-CORRECTION.md)
 - [Phase 2 Task 6 started](checkpoints/CP-20260720-PHASE2-TASK6-STARTED.md)
 - [Controller health metrics accepted](checkpoints/CP-20260720-CONTROLLER-HEALTH-METRICS-ACCEPTED.md)
 - [Task 5 merged and project ledgers accepted](checkpoints/CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS.md)

@@ -4,12 +4,14 @@ import { collaborationMigration } from "./001_collaboration.js";
 import { jobsMigration } from "./002_jobs.js";
 import { libraryIndexingMigration } from "./003_library_indexing.js";
 import { promptContentMigration } from "./004_prompt_content.js";
+import { indexGroupCategoryScopeMigration } from "./005_index_group_category_scope.js";
 
 const migrations: Record<string, Migration> = {
   "001_collaboration": collaborationMigration,
   "002_jobs": jobsMigration,
   "003_library_indexing": libraryIndexingMigration,
   "004_prompt_content": promptContentMigration,
+  "005_index_group_category_scope": indexGroupCategoryScopeMigration,
 };
 
 export const migrationProvider: MigrationProvider = {

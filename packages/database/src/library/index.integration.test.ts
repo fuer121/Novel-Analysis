@@ -56,7 +56,7 @@ describe("index persistence", () => {
     expect(afterConcurrent.rows.map((row) => row.input_signature)).toEqual(expect.arrayContaining(["sig-concurrent-a", "sig-concurrent-b"]));
 
     const l2Prompt = await indexes.createPromptVersion({ target: "l2-index", version: "p2", content: "l2 prompt", contentHash: createHash("sha256").update("l2 prompt").digest("hex") });
-    const group = await indexes.createIndexGroup({ bookId: book.id, key: "people", name: "People", promptVersionId: l2Prompt.id, configHash: "cfg" });
+    const group = await indexes.createIndexGroup({ bookId: book.id, key: "people", name: "People", categoryScope: "general", promptVersionId: l2Prompt.id, configHash: "cfg" });
     await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: "l2sig", status: "fresh" });
     await indexes.registerSubject({ groupId: group.id, subjectKey: "alice", displayName: "Alice", aliases: [] });
     await indexes.registerSubject({ groupId: group.id, subjectKey: "bob", displayName: "Bob", aliases: [] });
@@ -137,6 +137,27 @@ describe("index persistence", () => {
     expect(await postgres.db.selectFrom("l2_facts").select("id").where("group_id", "=", group.id).where("chapter_id", "=", chapter.id).execute()).toEqual([]);
     expect((await postgres.db.selectFrom("l2_chapter_statuses").selectAll().where("group_id", "=", group.id).executeTakeFirstOrThrow())).toMatchObject({ status: "fresh", input_signature: "sig-2" });
     await expect(createIndexRepository(postgres.db, cipher).replaceL2ChapterResult({ groupId: group.id, chapterId: chapter.id, inputSignature: "bad", acceptedCount: 0, candidateCount: 0, rejectedCount: 0, facts: [] })).rejects.toThrow("transaction");
+  });
+
+  test("promotes historical candidates only after the same subject is verified in the group", async () => {
+    const cipher = createContentCipher({ activeKeyVersion: "v1", keys: { v1: randomBytes(32) } });
+    const actor = await postgres.db.insertInto("users").values({ display_name: "Promotion", role: "member", status: "active" }).returning("id").executeTakeFirstOrThrow();
+    const book = await postgres.db.insertInto("books").values({ title: "Promotion", created_by: actor.id, status: "active" }).returning("id").executeTakeFirstOrThrow();
+    const library = createLibraryRepository(postgres.db, cipher);
+    const candidateChapter = await library.insertChapter({ bookId: book.id, chapterIndex: 1, title: "Candidate", plaintext: "one", contentHmac: "h1", sourceVersion: "v1" });
+    const verificationChapter = await library.insertChapter({ bookId: book.id, chapterIndex: 2, title: "Verified", plaintext: "two", contentHmac: "h2", sourceVersion: "v1" });
+    const prompt = await postgres.db.insertInto("prompt_versions").values({ target: "l2-index", version: "promotion", content_hash: "hash" }).returning("id").executeTakeFirstOrThrow();
+    const group = await postgres.db.insertInto("index_groups").values({ book_id: book.id, key: "shan-hai", name: "山海异兽", category_scope: "magical_creature", prompt_version_id: prompt.id, config_hash: "scope" }).returning("id").executeTakeFirstOrThrow();
+
+    await postgres.db.transaction().execute(async (transaction) => {
+      await createIndexRepository(transaction, cipher).replaceL2ChapterResult({ groupId: group.id, chapterId: candidateChapter.id, inputSignature: "candidate", acceptedCount: 0, candidateCount: 1, rejectedCount: 0, facts: [{ subjectKey: "little-jiao", displayName: "小蛟", aliases: [], factType: "identity_clue", plaintext: "candidate", metadata: { category: "other", scopeEligible: false } }] });
+    });
+    expect((await postgres.db.selectFrom("l2_facts").select("metadata").where("chapter_id", "=", candidateChapter.id).executeTakeFirstOrThrow()).metadata.scopeEligible).toBe(false);
+
+    await postgres.db.transaction().execute(async (transaction) => {
+      await createIndexRepository(transaction, cipher).replaceL2ChapterResult({ groupId: group.id, chapterId: verificationChapter.id, inputSignature: "verified", acceptedCount: 1, candidateCount: 0, rejectedCount: 0, facts: [{ subjectKey: "little-jiao", displayName: "小蛟", aliases: [], factType: "classification", plaintext: "verified", metadata: { category: "magical_creature", scopeEligible: true } }], verifiedSubjectKeys: ["little-jiao"] });
+    });
+    expect((await postgres.db.selectFrom("l2_facts").select("metadata").where("chapter_id", "=", candidateChapter.id).executeTakeFirstOrThrow()).metadata.scopeEligible).toBe(true);
   });
 
   test("enforces foreign keys and status checks", async () => {
