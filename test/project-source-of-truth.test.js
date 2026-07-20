@@ -35,6 +35,11 @@ Implementation
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | task-001 | phase-1 | Define project source validation | controller-agent | none | 0123456789abcdef0123456789abcdef01234567 | none | planned | governance source merged | none | implement validator |
 
+## Phase Ledgers
+
+- [Phase 1 ledger](./ledgers/phase-1-ledger.md)
+- [Phase 2 ledger](./ledgers/phase-2-ledger.md)
+
 ## Effective Decisions
 
 [Decision 001](./decisions/decision-001.md)
@@ -137,6 +142,7 @@ async function createFixture(t) {
   await fs.mkdir(path.join(root, "docs/project/checkpoints"), { recursive: true });
   await fs.mkdir(path.join(root, "docs/project/decisions"), { recursive: true });
   await fs.mkdir(path.join(root, "docs/project/templates"), { recursive: true });
+  await fs.mkdir(path.join(root, "docs/project/ledgers"), { recursive: true });
   await fs.mkdir(path.join(root, "dify-workflows"), { recursive: true });
   await Promise.all([
     fs.writeFile(path.join(root, "docs/project/PROJECT.md"), projectDocument),
@@ -144,6 +150,8 @@ async function createFixture(t) {
     fs.writeFile(path.join(root, "docs/project/decisions/decision-001.md"), decisionDocument),
     fs.writeFile(path.join(root, "docs/project/templates/task-contract.md"), taskContractTemplate),
     fs.writeFile(path.join(root, "docs/project/templates/checkpoint.md"), checkpointTemplate),
+    fs.writeFile(path.join(root, "docs/project/ledgers/phase-1-ledger.md"), "# Phase 1 Ledger\n"),
+    fs.writeFile(path.join(root, "docs/project/ledgers/phase-2-ledger.md"), "# Phase 2 Ledger\n"),
     fs.writeFile(
       path.join(root, "dify-workflows/manifest.json"),
       `${JSON.stringify({ schemaVersion: 1, workflows: {} }, null, 2)}\n`,
@@ -193,6 +201,19 @@ test("accepts a complete project source fixture", async (t) => {
   const root = await createFixture(t);
 
   assert.deepEqual(await validateProjectSource(root, { checkGit: false }), []);
+});
+
+test("rejects a missing Phase Ledgers section", async (t) => {
+  const root = await createFixture(t);
+  const projectPath = path.join(root, "docs/project/PROJECT.md");
+  const content = await fs.readFile(projectPath, "utf8");
+  await fs.writeFile(
+    projectPath,
+    content.replace(/## Phase Ledgers[\s\S]*?(?=## Effective Decisions)/, ""),
+  );
+
+  const errors = await validateProjectSource(root, { checkGit: false });
+  assert.match(errors.join("\n"), /missing required section: Phase Ledgers/);
 });
 
 test("rejects missing governance templates and required sections", async (t) => {

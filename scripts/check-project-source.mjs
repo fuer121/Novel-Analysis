@@ -19,6 +19,7 @@ const PROJECT_SECTIONS = [
   "Current Baseline",
   "Phase Status",
   "Active Work",
+  "Phase Ledgers",
   "Effective Decisions",
   "Risks And Blockers",
   "Pending Feedback",
