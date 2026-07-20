@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T17:26:09+08:00
+updated_at: 2026-07-20T17:47:52+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-GOV-MECHANISMS-ACCEPTED
+last_checkpoint: CP-20260720-GOV-MECHANISMS-MERGED-PHASE2-TASK5-STARTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -55,7 +55,8 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | main | 153f6464139d579b5835c5bc68658287a18cfeaf | 78f2adf97c9598a3770a60be185e425df48dcfd6 | merged | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-MERGED | complete; start Task 3 |
 | PHASE2-TASK3 | phase-2 | Book creation and recoverable chapter import | controller-agent | main | 1fa158bf39af1cfadc51517fbb0733c439e65628 | 55560718147584ecf4eae434b6581b7748779c8e | merged | CP-20260719-PHASE2-TASK2-MERGED | CP-20260720-PHASE2-TASK3-MERGED | complete; start Task 4 |
 | PHASE2-TASK4 | phase-2 | Recoverable L1 build and coverage | controller-agent | main | f8a7291f3c5bd1fb2300573368a267b52c31d228 | 1d04f01545b8c1c83dd1baf00990f1eefe26cc7d | merged | CP-20260720-PHASE2-TASK3-MERGED | CP-20260720-PHASE2-TASK4-MERGED | complete; start Task 5 |
-| GOV-MECHANISMS | governance | Task contract, workspace lifecycle tools and layered verification | controller-agent | codex/governance-mechanisms | fc80285e69a97e3d979054f36439a6d4c097104e | 24c8a683dbd899214791e132b125cd5587c23322 | accepted | DEC-0007 | CP-20260720-GOV-MECHANISMS-ACCEPTED | create PR, verify CI, merge, then start Task 5 |
+| GOV-MECHANISMS | governance | Task contract, workspace lifecycle tools and layered verification | controller-agent | main | fc80285e69a97e3d979054f36439a6d4c097104e | 01aaa83002a01f58832d3303bfb4d222b0988feb | merged | DEC-0007 | CP-20260720-GOV-MECHANISMS-MERGED-PHASE2-TASK5-STARTED | complete; Task 5 started |
+| PHASE2-TASK5 | phase-2 | L2 index groups and scope contract | controller-agent | codex/phase2-task5-l2-scope | 01aaa83002a01f58832d3303bfb4d222b0988feb | 01aaa83002a01f58832d3303bfb4d222b0988feb | in_progress | CP-20260720-PHASE2-TASK4-MERGED | CP-20260720-GOV-MECHANISMS-MERGED-PHASE2-TASK5-STARTED | implement approved contract |
 
 ## Effective Decisions
 
@@ -66,6 +67,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [DEC-0005 Repository L2 Workflow Output Alignment](decisions/DEC-0005-repository-l2-workflow-output-alignment.md) 保持 accepted adapter contract，以仓库 L2 DSL 的可信 Workflow 输入补齐章节绑定；只提交仓库 DSL，由用户手动导入
 - [DEC-0006 Phase 2 Task 4 Contract Correction](decisions/DEC-0006-phase2-task4-contract-correction.md) 补齐自动 handoff、Worker L1 分派、credential 装配与不可变 Prompt 正文存储的最小实现范围
 - [DEC-0007 Controller Workspace And Governance Lifecycle](decisions/DEC-0007-controller-workspace-and-governance-lifecycle.md) 建立 worktree 生命周期、模块化 task contract、mechanical adjacent scope、治理节点上限和分层验证职责
+- [DEC-0008 Phase 2 Task 5 Index Group Create Only](decisions/DEC-0008-phase2-task5-index-group-create-only.md) 固定 Task 5 只创建索引组，不实现编辑、upsert 或 PATCH
 - [已批准设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md) 是重构范围和架构的有效依据
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -86,7 +88,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- 阶段 1 至阶段 4 的治理机制已通过本地完整验证，等待 PR 与 CI 核验；合并并创建 merged checkpoint 后启动 Task 5 试点
+- 治理机制已合并并完成 post-merge 清理；Task 5 按 create-only API、模块边界 contract 与分层验证实施
 
 ## Next Gate
 
@@ -146,6 +148,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 Task 4 accepted checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-ACCEPTED.md)
 - [Phase 2 Task 4 merged checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-MERGED.md)
 - [Governance mechanisms accepted checkpoint](checkpoints/CP-20260720-GOV-MECHANISMS-ACCEPTED.md)
+- [Governance mechanisms merged and Phase 2 Task 5 started checkpoint](checkpoints/CP-20260720-GOV-MECHANISMS-MERGED-PHASE2-TASK5-STARTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
