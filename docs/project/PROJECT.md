@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T13:25:28+08:00
+updated_at: 2026-07-20T17:26:09+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK4-MERGED
+last_checkpoint: CP-20260720-GOV-MECHANISMS-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -55,6 +55,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | main | 153f6464139d579b5835c5bc68658287a18cfeaf | 78f2adf97c9598a3770a60be185e425df48dcfd6 | merged | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-MERGED | complete; start Task 3 |
 | PHASE2-TASK3 | phase-2 | Book creation and recoverable chapter import | controller-agent | main | 1fa158bf39af1cfadc51517fbb0733c439e65628 | 55560718147584ecf4eae434b6581b7748779c8e | merged | CP-20260719-PHASE2-TASK2-MERGED | CP-20260720-PHASE2-TASK3-MERGED | complete; start Task 4 |
 | PHASE2-TASK4 | phase-2 | Recoverable L1 build and coverage | controller-agent | main | f8a7291f3c5bd1fb2300573368a267b52c31d228 | 1d04f01545b8c1c83dd1baf00990f1eefe26cc7d | merged | CP-20260720-PHASE2-TASK3-MERGED | CP-20260720-PHASE2-TASK4-MERGED | complete; start Task 5 |
+| GOV-MECHANISMS | governance | Task contract, workspace lifecycle tools and layered verification | controller-agent | codex/governance-mechanisms | fc80285e69a97e3d979054f36439a6d4c097104e | 24c8a683dbd899214791e132b125cd5587c23322 | accepted | DEC-0007 | CP-20260720-GOV-MECHANISMS-ACCEPTED | create PR, verify CI, merge, then start Task 5 |
 
 ## Effective Decisions
 
@@ -85,7 +86,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- Task 4 已合并；治理与工作区优化已生效，Task 5 按 DEC-0007 的模块边界 contract 与分层验证启动
+- 阶段 1 至阶段 4 的治理机制已通过本地完整验证，等待 PR 与 CI 核验；合并并创建 merged checkpoint 后启动 Task 5 试点
 
 ## Next Gate
 
@@ -144,6 +145,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 Task 4 test scope corrected checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-TEST-SCOPE-CORRECTED.md)
 - [Phase 2 Task 4 accepted checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-ACCEPTED.md)
 - [Phase 2 Task 4 merged checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-MERGED.md)
+- [Governance mechanisms accepted checkpoint](checkpoints/CP-20260720-GOV-MECHANISMS-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
