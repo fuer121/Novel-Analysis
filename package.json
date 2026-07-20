@@ -38,6 +38,8 @@
     "build:legacy": "vite build",
     "verify:legacy": "npm run test:legacy && npm run lint:legacy && npm run build:legacy",
     "project:check": "node scripts/check-project-source.mjs",
+    "workspace:audit": "node scripts/workspace-audit.mjs",
+    "test:workspace": "node --test test/workspace-audit.test.js",
     "verify": "npm run verify:legacy && npm run verify:new && npm run dify:manifest:check && npm run test:project-source && npm run project:check"
   },
   "dependencies": {
