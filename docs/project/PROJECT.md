@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 4b4cc227e9540f5a0764ae476c54a2090aa54a24
 baseline_status: current
-updated_at: 2026-07-21T00:34:10+08:00
+updated_at: 2026-07-21T00:38:19+08:00
 updated_by: controller-agent
 current_phase: phase-3-planning
 last_checkpoint: CP-20260721-PHASE3-DESIGN-ACCEPTED
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-PLAN | phase-3 | L2 continuous-question design and implementation plan | controller-agent | codex/phase3-design | d8c7c3ab4b56c13bf564b234f9f35d406be4f9ad | none | in_progress | CP-20260721-PHASE3-DESIGN-ACCEPTED | none | merge reviewed seven-task plan before submitting Phase 3 Plan Gate |
+| PHASE3-PLAN | phase-3 | L2 continuous-question design and implementation plan | controller-agent | main | d8c7c3ab4b56c13bf564b234f9f35d406be4f9ad | 640e30be862316aba50284b260d28ed42509582e | review | CP-20260721-PHASE3-DESIGN-ACCEPTED | CP-20260721-PHASE3-PLAN-SUBMITTED | request explicit Phase 3 Plan Gate confirmation |
 
 ## Phase Ledgers
 
@@ -80,7 +80,7 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 
 ## Pending Feedback
 
-Phase 3 七项计划待合并，Plan Gate 通过前不得开始实施
+等待用户明确判定 `GATE-PHASE3-PLAN-APPROVED`，Phase 3 不得开始实施
 
 ## Next Gate
 
@@ -88,6 +88,7 @@ Phase 3 七项计划待合并，Plan Gate 通过前不得开始实施
 
 ## Evidence Index
 
+- [Phase 3 plan submitted](checkpoints/CP-20260721-PHASE3-PLAN-SUBMITTED.md)
 - [Phase 3 design accepted](checkpoints/CP-20260721-PHASE3-DESIGN-ACCEPTED.md)
 - [Phase 3 design submitted](checkpoints/CP-20260721-PHASE3-DESIGN-SUBMITTED.md)
 - [Phase 2 implementation accepted](checkpoints/CP-20260720-PHASE2-IMPLEMENTATION-ACCEPTED.md)
