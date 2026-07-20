@@ -1,5 +1,5 @@
 import { createContentCipher, type DatabaseConnection } from "@novel-analysis/database";
-import type { ChapterImportInput, DifyAdapter, L1IndexInput, L2IndexInput } from "@novel-analysis/dify";
+import { DifyAdapterError, type ChapterImportInput, type DifyAdapter, type L1IndexInput, type L2IndexInput } from "@novel-analysis/dify";
 import { L1_ROUTE_SCHEMA_VERSION } from "@novel-analysis/jobs";
 import { LibraryImportExecutor } from "../../../apps/worker/src/library-executor.js";
 
@@ -9,7 +9,7 @@ export const PHASE2_SENTINELS = {
   credential: "PHASE2_CREDENTIAL_SENTINEL",
 } as const;
 
-class Phase2DifyFake implements DifyAdapter {
+export class Phase2DifyFake implements DifyAdapter {
   async runChapterImport(input: ChapterImportInput) {
     return { chapters: [{ book_id: String(input.bookId), chapter_index: input.startChapter, chapter_title: `Chapter ${input.startChapter}`, content: `${PHASE2_SENTINELS.chapter}-${input.startChapter}`, fetch_status: "ok" as const }] };
   }
@@ -23,6 +23,30 @@ class Phase2DifyFake implements DifyAdapter {
   }
 }
 
-export function createPhase2LibraryExecutor(database: DatabaseConnection): LibraryImportExecutor {
-  return new LibraryImportExecutor({ database, adapter: new Phase2DifyFake(), cipher: createContentCipher({ activeKeyVersion: "phase2-test", keys: { "phase2-test": Buffer.alloc(32, 8) } }), hmacKey: Buffer.from(PHASE2_SENTINELS.credential) });
+export function createPhase2LibraryExecutor(database: DatabaseConnection, adapter: DifyAdapter = new Phase2DifyFake()): LibraryImportExecutor {
+  return new LibraryImportExecutor({ database, adapter, cipher: createContentCipher({ activeKeyVersion: "phase2-test", keys: { "phase2-test": Buffer.alloc(32, 8) } }), hmacKey: Buffer.from(PHASE2_SENTINELS.credential) });
+}
+
+export function controlledPhase2Adapter(kind: "chapter-import" | "l1-index" | "l2-index") {
+  const delegate = new Phase2DifyFake();
+  let signalStarted!: () => void;
+  let release!: () => void;
+  const started = new Promise<void>((resolve) => { signalStarted = resolve; });
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const wait = async (target: typeof kind) => { if (target === kind) { signalStarted(); await gate; } };
+  const adapter: DifyAdapter = {
+    async runChapterImport(input) { await wait("chapter-import"); return delegate.runChapterImport(input); },
+    async runL1Index(input) { await wait("l1-index"); return delegate.runL1Index(input); },
+    async runL2Index(input) { await wait("l2-index"); return delegate.runL2Index(input); },
+  };
+  return { adapter, started, release };
+}
+
+export function failingL1Adapter(onInput: (input: L1IndexInput) => void): DifyAdapter {
+  const delegate = new Phase2DifyFake();
+  return {
+    runChapterImport: (input) => delegate.runChapterImport(input),
+    async runL1Index(input) { onInput(input); throw new DifyAdapterError("provider_unavailable"); },
+    runL2Index: (input) => delegate.runL2Index(input),
+  };
 }

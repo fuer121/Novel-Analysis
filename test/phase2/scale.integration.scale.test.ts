@@ -5,7 +5,6 @@ import { sql } from "kysely";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
-import { L2JobService } from "@novel-analysis/jobs";
 import { createDisposablePostgres, type DisposablePostgres } from "../../packages/database/src/testing/postgres.js";
 import { startPhase2TestApi } from "./helpers/test-api.js";
 
@@ -22,7 +21,7 @@ describe("Phase 2 library indexing scale", () => {
   it("keeps 3000 chapters and 70000 encrypted facts within accepted read thresholds", async () => {
     postgres = await createDisposablePostgres();
     const user = await postgres.db.insertInto("users").values({ display_name: "Scale member", avatar_url: null, role: "member", status: "active" }).returning("id").executeTakeFirstOrThrow();
-    const cipher = createContentCipher({ activeKeyVersion: "scale", keys: { scale: Buffer.alloc(32, 9) } });
+    const cipher = createContentCipher({ activeKeyVersion: "phase2-test", keys: { "phase2-test": Buffer.alloc(32, 8) } });
     const book = await createLibraryRepository(postgres.db, cipher).createBook({ title: "Scale Book", createdBy: user.id });
     const indexes = createIndexRepository(postgres.db, cipher);
     const promptContent = "scale prompt";
@@ -51,7 +50,7 @@ describe("Phase 2 library indexing scale", () => {
         where chapter.book_id = ${book.id}
       )
       insert into l2_facts (group_id, chapter_id, book_id, subject_key, fact_type, fact_ciphertext, fact_nonce, fact_tag, fact_key_version, metadata)
-      select ${group.id}, chapter_id, ${book.id}, 'scale-subject', 'event', ${encryptedFact.ciphertext}, ${encryptedFact.nonce}, ${encryptedFact.tag}, ${encryptedFact.keyVersion}, jsonb_build_object('category', 'event', 'factNo', fact_no)
+      select ${group.id}, chapter_id, ${book.id}, 'scale-subject', 'event', ${encryptedFact.ciphertext}, ${encryptedFact.nonce}, ${encryptedFact.tag}, ${encryptedFact.keyVersion}, jsonb_build_object('category', 'event')
       from fact_rows where fact_no <= 70000
     `.execute(postgres.db);
     const job = await postgres.db.insertInto("jobs").values({ type: "l2-index", status: "completed", requested_by: user.id, request_id: "scale-job", scope: { bookId: book.id }, config_snapshot: {}, concurrency_key: null, progress: { total: 3000, completed: 3000, failed: 0, skipped: 0, current: "" } }).returning("id").executeTakeFirstOrThrow();
@@ -72,10 +71,14 @@ describe("Phase 2 library indexing scale", () => {
       await overview.json();
       samples.overview.push(performance.now() - started);
       started = performance.now();
-      await new L2JobService(postgres.db).coverage({ bookId: book.id, groupId: group.id });
+      const coverage = await api.request(`/books/${book.id}/index-groups/${group.id}/coverage`);
+      expect(coverage.status).toBe(200);
+      await coverage.json();
       samples.coverage.push(performance.now() - started);
       started = performance.now();
-      await indexes.listFactReviews({ groupId: group.id, limit: 20 });
+      const facts = await api.request(`/books/${book.id}/index-groups/${group.id}/facts?limit=20`);
+      expect(facts.status).toBe(200);
+      await facts.json();
       samples.facts.push(performance.now() - started);
       started = performance.now();
       const detail = await api.request(`/jobs/${job.id}`);

@@ -1,12 +1,13 @@
 import { createHash } from "node:crypto";
+import { sql } from "kysely";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createContentCipher, createIndexRepository, type DatabaseConnection } from "@novel-analysis/database";
-import { createBoss } from "@novel-analysis/jobs";
+import { createBoss, OutboxDispatcher } from "@novel-analysis/jobs";
 import { JobWorker, createWorkerStepExecutor } from "../../apps/worker/src/worker.js";
 import { createDisposablePostgres, type DisposablePostgres } from "../../packages/database/src/testing/postgres.js";
 
-import { createPhase2LibraryExecutor, PHASE2_SENTINELS } from "./helpers/phase2-harness.js";
+import { controlledPhase2Adapter, createPhase2LibraryExecutor, failingL1Adapter, PHASE2_SENTINELS } from "./helpers/phase2-harness.js";
 import { startPhase2TestApi } from "./helpers/test-api.js";
 
 const SENTINELS = Object.values(PHASE2_SENTINELS);
@@ -90,7 +91,7 @@ describe("Phase 2 independent library indexing acceptance", () => {
     expect(invalidResponse.status).toBe(400);
     const invalidBody = await invalidResponse.json();
 
-    const ordinaryPersistence = JSON.stringify({ jobs: await postgres.db.selectFrom("jobs").select(["scope", "config_snapshot", "progress"]).execute(), steps: await postgres.db.selectFrom("job_steps").select("output_ref").execute(), events: await postgres.db.selectFrom("job_events").select("payload").execute(), outbox: await postgres.db.selectFrom("job_outbox").select("payload").execute(), attempts: await postgres.db.selectFrom("job_attempts").select(["error_code", "error_message"]).execute() });
+    const ordinaryPersistence = JSON.stringify({ jobs: await postgres.db.selectFrom("jobs").select(["scope", "config_snapshot", "progress"]).execute(), steps: await postgres.db.selectFrom("job_steps").select("output_ref").execute(), events: await postgres.db.selectFrom("job_events").select("payload").execute(), outbox: await postgres.db.selectFrom("job_outbox").select("payload").execute(), attempts: await postgres.db.selectFrom("job_attempts").select(["error_code", "error_message"]).execute(), audit: await postgres.db.selectFrom("audit_logs").select("metadata").execute() });
     const operationalResponses = JSON.stringify({ created, importPreview, imported, groupResponse, l2Preview, l2, book: firstRead[0], job: firstRead[1], coverage: firstRead[2], invalidBody });
     for (const sentinel of SENTINELS) { expect(ordinaryPersistence).not.toContain(sentinel); expect(operationalResponses).not.toContain(sentinel); expect(observedLogs.join("\n")).not.toContain(sentinel); }
     const encrypted = await postgres.db.selectFrom("chapters").select("content_ciphertext").where("book_id", "=", bookId).execute();
@@ -99,34 +100,80 @@ describe("Phase 2 independent library indexing acceptance", () => {
 
     const outbox = await postgres.db.selectFrom("job_outbox").select(["id", "job_id"]).where("job_id", "=", l2.job.id).executeTakeFirstOrThrow();
     const beforeReplay = await businessSnapshot(postgres.db);
-    const replayId = await boss.send("jobs.wake", { jobId: outbox.job_id, outboxId: outbox.id }, { singletonKey: `phase2-replay:${outbox.id}` });
-    expect(replayId).toEqual(expect.any(String));
-    await waitUntil(async () => (await postgres!.db.selectFrom("pgboss.job" as never).select("state" as never).where("id" as never, "=", replayId! as never).executeTakeFirst() as any)?.state === "completed", "replayed pg-boss consumption");
+    const priorQueueIds = new Set((await sql<{ id: string }>`select id::text from pgboss.job where data ->> 'outboxId' = ${outbox.id}`.execute(postgres.db)).rows.map((row) => row.id));
+    await postgres.db.updateTable("job_outbox").set({ delivered_at: null, claimed_by: null, claim_expires_at: null }).where("id", "=", outbox.id).execute();
+    expect(await new OutboxDispatcher({ database: postgres.db, boss, dispatcherId: "phase2-replay-dispatcher" }).dispatchNext()).toBe(true);
+    await waitUntil(async () => (await sql<{ id: string; state: string }>`select id::text, state from pgboss.job where data ->> 'outboxId' = ${outbox.id} order by created_on desc limit 1`.execute(postgres!.db)).rows.some((row) => !priorQueueIds.has(row.id) && row.state === "completed"), "exact outbox replay consumption");
+    expect((await postgres.db.selectFrom("job_outbox").select("delivered_at").where("id", "=", outbox.id).executeTakeFirstOrThrow()).delivered_at).not.toBeNull();
     expect(await businessSnapshot(postgres.db)).toEqual(beforeReplay);
   });
 
-  it("recovers Worker A's expired lease in Worker B with one committed effect", async () => {
+  it.each(["chapter-import", "l1-index", "l2-index"] as const)("recovers Worker A's expired %s provider call in Worker B", async (blockedKind) => {
     postgres = await createDisposablePostgres();
     const userId = (await postgres.db.insertInto("users").values({ display_name: "Recovery member", avatar_url: null, role: "member", status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
-    await configure(postgres.db);
+    const promptVersionId = await configure(postgres.db);
     const api = await startPhase2TestApi(postgres.db, userId); cleanups.push(api.stop);
-    let release!: () => void; let started!: () => void;
-    const startedPromise = new Promise<void>((resolve) => { started = resolve; });
-    const barrier = { async afterAttemptStarted() { started(); await new Promise<void>((resolve) => { release = resolve; }); } };
-    const workerA = new JobWorker({ database: postgres.db, boss: createBoss(postgres.databaseUrl), workerId: "phase2-worker-a", leaseDurationMs: 250, pollIntervalMs: 20, barrier, executor: createWorkerStepExecutor({ database: postgres.db, libraryExecutor: createPhase2LibraryExecutor(postgres.db) }) });
+    const control = controlledPhase2Adapter(blockedKind);
+    const workerA = new JobWorker({ database: postgres.db, boss: createBoss(postgres.databaseUrl), workerId: "phase2-worker-a", leaseDurationMs: 250, pollIntervalMs: 20, executor: createWorkerStepExecutor({ database: postgres.db, libraryExecutor: createPhase2LibraryExecutor(postgres.db, control.adapter) }) });
     await workerA.start();
+    let workerACleaned = false;
+    const cleanupWorkerA = async () => { if (workerACleaned) return; workerACleaned = true; control.release(); await workerA.stop(); };
+    cleanups.push(cleanupWorkerA);
     const created = await json(await api.request("/books", { method: "POST", body: JSON.stringify({ title: "Recovery", source: { provider: "dify", sourceId: "7", startChapter: 1, endChapter: 1 } }), headers: { "Content-Type": "application/json" } }), 201);
     const preview = await json(await api.request(`/books/${created.book.id}/import-preview`, { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } }));
-    const job = await json(await api.request(`/books/${created.book.id}/import-jobs`, { method: "POST", body: JSON.stringify({ scopeHash: preview.scopeHash, autoStartL1: false }), headers: { "Content-Type": "application/json" } }), 201);
-    await startedPromise;
-    expect(await postgres.db.selectFrom("job_steps").select(["status", "lease_owner"]).where("job_id", "=", job.job.id).executeTakeFirstOrThrow()).toEqual({ status: "running", lease_owner: "phase2-worker-a" });
-    workerA.stopAtBoundary();
-    const workerB = new JobWorker({ database: postgres.db, boss: createBoss(postgres.databaseUrl), workerId: "phase2-worker-b", leaseDurationMs: 250, pollIntervalMs: 20, executor: createWorkerStepExecutor({ database: postgres.db, libraryExecutor: createPhase2LibraryExecutor(postgres.db) }) });
-    await workerB.start(); cleanups.push(() => workerB.stop());
-    await waitUntil(async () => (await postgres!.db.selectFrom("jobs").select("status").where("id", "=", job.job.id).executeTakeFirst())?.status === "completed", "Worker B recovery");
-    release(); await workerA.stop();
+    const importJob = await json(await api.request(`/books/${created.book.id}/import-jobs`, { method: "POST", body: JSON.stringify({ scopeHash: preview.scopeHash, autoStartL1: false }), headers: { "Content-Type": "application/json" } }), 201);
+    let recoveredJobId: string | undefined;
+    const recover = async (jobId: string) => {
+      recoveredJobId = jobId;
+      await control.started;
+      expect(await postgres!.db.selectFrom("job_steps").select(["status", "lease_owner"]).where("job_id", "=", jobId).executeTakeFirstOrThrow()).toEqual({ status: "running", lease_owner: "phase2-worker-a" });
+      workerA.stopAtBoundary();
+      const workerB = new JobWorker({ database: postgres!.db, boss: createBoss(postgres!.databaseUrl), workerId: "phase2-worker-b", leaseDurationMs: 250, pollIntervalMs: 20, executor: createWorkerStepExecutor({ database: postgres!.db, libraryExecutor: createPhase2LibraryExecutor(postgres!.db) }) });
+      await workerB.start(); cleanups.push(() => workerB.stop());
+      await waitUntil(async () => (await postgres!.db.selectFrom("jobs").select("status").where("id", "=", jobId).executeTakeFirst())?.status === "completed", `Worker B ${blockedKind} recovery`);
+      control.release(); await cleanupWorkerA();
+    };
+    if (blockedKind === "chapter-import") await recover(importJob.job.id); else await waitUntil(async () => (await postgres!.db.selectFrom("jobs").select("status").where("id", "=", importJob.job.id).executeTakeFirst())?.status === "completed", "import before recovery");
+
+    const l1Preview = await json(await api.request(`/books/${created.book.id}/l1-preview`, { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } }));
+    const l1Job = await json(await api.request(`/books/${created.book.id}/l1-jobs`, { method: "POST", body: JSON.stringify({ scopeHash: l1Preview.scopeHash }), headers: { "Content-Type": "application/json" } }), 201);
+    if (blockedKind === "l1-index") await recover(l1Job.job.id); else await waitUntil(async () => (await postgres!.db.selectFrom("jobs").select("status").where("id", "=", l1Job.job.id).executeTakeFirst())?.status === "completed", "L1 before recovery");
+
+    const group = await json(await api.request(`/books/${created.book.id}/index-groups`, { method: "POST", body: JSON.stringify({ key: "events", name: "Events", categoryScope: "general", promptVersionId }), headers: { "Content-Type": "application/json" } }), 201);
+    const scope = { startChapter: 1, endChapter: 1, mode: "missing", force: false };
+    const l2Preview = await json(await api.request(`/books/${created.book.id}/index-groups/${group.indexGroup.id}/l2-preview`, { method: "POST", body: JSON.stringify(scope), headers: { "Content-Type": "application/json" } }));
+    const l2Job = await json(await api.request(`/books/${created.book.id}/index-groups/${group.indexGroup.id}/l2-jobs`, { method: "POST", body: JSON.stringify({ ...scope, scopeHash: l2Preview.scopeHash }), headers: { "Content-Type": "application/json" } }), 201);
+    if (blockedKind === "l2-index") await recover(l2Job.job.id); else await waitUntil(async () => (await postgres!.db.selectFrom("jobs").select("status").where("id", "=", l2Job.job.id).executeTakeFirst())?.status === "completed", "L2 after recovery");
+
     expect(await postgres.db.selectFrom("chapters").select("id").where("book_id", "=", created.book.id).execute()).toHaveLength(1);
-    expect((await postgres.db.selectFrom("job_attempts as a").innerJoin("job_steps as s", "s.id", "a.step_id").select("a.status").where("s.job_id", "=", job.job.id).orderBy("a.attempt_no").execute()).map((row) => row.status)).toEqual(["abandoned", "completed"]);
+    expect(await postgres.db.selectFrom("l1_indexes").select("id").where("chapter_id", "in", postgres.db.selectFrom("chapters").select("id").where("book_id", "=", created.book.id)).where("is_current", "=", true).execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("l2_chapter_statuses").select("chapter_id").where("group_id", "=", group.indexGroup.id).execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("l2_facts").select("id").where("group_id", "=", group.indexGroup.id).execute()).toHaveLength(1);
+    expect((await postgres.db.selectFrom("job_attempts as a").innerJoin("job_steps as s", "s.id", "a.step_id").select("a.status").where("s.job_id", "=", recoveredJobId!).orderBy("a.attempt_no").execute()).map((row) => row.status)).toEqual(["abandoned", "completed"]);
+  });
+
+  it("sanitizes a failing provider path across HTTP, logs, attempts and events", async () => {
+    postgres = await createDisposablePostgres();
+    const userId = (await postgres.db.insertInto("users").values({ display_name: "Failure member", avatar_url: null, role: "member", status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+    await configure(postgres.db);
+    const logs: string[] = [];
+    const api = await startPhase2TestApi(postgres.db, userId, { error: (message) => logs.push(message) }); cleanups.push(api.stop);
+    let failedInput = "";
+    const executor = createWorkerStepExecutor({ database: postgres.db, libraryExecutor: createPhase2LibraryExecutor(postgres.db, failingL1Adapter((input) => { failedInput = JSON.stringify(input); })) });
+    const worker = new JobWorker({ database: postgres.db, boss: createBoss(postgres.databaseUrl), workerId: "phase2-failing-worker", pollIntervalMs: 20, executor, onBackgroundError: (error) => logs.push(String(error)) });
+    await worker.start(); cleanups.push(() => worker.stop());
+    const created = await json(await api.request("/books", { method: "POST", body: JSON.stringify({ title: "Failure", source: { provider: "dify", sourceId: "9", startChapter: 1, endChapter: 1 } }), headers: { "Content-Type": "application/json" } }), 201);
+    const preview = await json(await api.request(`/books/${created.book.id}/import-preview`, { method: "POST", body: "{}", headers: { "Content-Type": "application/json" } }));
+    await json(await api.request(`/books/${created.book.id}/import-jobs`, { method: "POST", body: JSON.stringify({ scopeHash: preview.scopeHash, autoStartL1: true }), headers: { "Content-Type": "application/json" } }), 201);
+    await waitUntil(async () => (await postgres!.db.selectFrom("jobs").select("status").where("type", "=", "l1-index").executeTakeFirst())?.status === "failed", "controlled L1 failure");
+    expect(failedInput).toContain(PHASE2_SENTINELS.chapter);
+    const failedJob = await postgres.db.selectFrom("jobs").select("id").where("type", "=", "l1-index").executeTakeFirstOrThrow();
+    const http = await json(await api.request(`/jobs/${failedJob.id}`));
+    const attempts = await postgres.db.selectFrom("job_attempts as a").innerJoin("job_steps as s", "s.id", "a.step_id").select(["a.status", "a.error_code", "a.error_message"]).where("s.job_id", "=", failedJob.id).execute();
+    const events = await postgres.db.selectFrom("job_events").select(["type", "payload"]).where("job_id", "=", failedJob.id).execute();
+    expect(JSON.stringify({ attempts, events })).toContain("provider_unavailable");
+    expect(http.job.status).toBe("failed");
+    for (const sentinel of SENTINELS) { expect(JSON.stringify(http)).not.toContain(sentinel); expect(JSON.stringify(attempts)).not.toContain(sentinel); expect(JSON.stringify(events)).not.toContain(sentinel); expect(logs.join("\n")).not.toContain(sentinel); }
   });
 
 });
