@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T19:04:32+08:00
+updated_at: 2026-07-20T19:18:23+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-CONTROLLER-HEALTH-METRICS-ACCEPTED
+last_checkpoint: CP-20260720-PHASE2-TASK6-STARTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK6 | phase-2 | L2 execution, facts, subjects and admission | controller-agent | none | 2f342c743dd95a462ce696aca6895e31b8012375 | none | ready | CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS | none | create started contract before implementation |
+| PHASE2-TASK6 | phase-2 | L2 execution, facts, subjects and admission | controller-agent | codex/phase2-task6-l2-executor | f61eda1ab494e8c4c370a9cb3196a3b62939d4e7 | none | in_progress | CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS | CP-20260720-PHASE2-TASK6-STARTED | implement contract with TDD and two-stage review |
 
 ## Phase Ledgers
 
@@ -83,6 +83,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 6 started](checkpoints/CP-20260720-PHASE2-TASK6-STARTED.md)
 - [Controller health metrics accepted](checkpoints/CP-20260720-CONTROLLER-HEALTH-METRICS-ACCEPTED.md)
 - [Task 5 merged and project ledgers accepted](checkpoints/CP-20260720-PHASE2-TASK5-MERGED-PROJECT-LEDGERS.md)
 - [Phase 1 ledger](ledgers/phase-1-ledger.md)
