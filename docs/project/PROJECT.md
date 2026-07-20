@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: 9e25a7d14c860ae11adfce28883d53dcfaccf3a2
+baseline_commit: 86277ee20fc65cbbf1f80d426ccf09f20c2592bf
 baseline_status: current
-updated_at: 2026-07-20T21:28:20+08:00
+updated_at: 2026-07-20T21:37:10+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK7-ACCEPTED
+last_checkpoint: CP-20260720-PHASE2-TASK7-MERGED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `9e25a7d14c860ae11adfce28883d53dcfaccf3a2` |
-| Latest merged implementation | PR #66 `https://github.com/fuer121/Novel-Analysis/pull/66` |
+| Accepted implementation baseline | `86277ee20fc65cbbf1f80d426ccf09f20c2592bf` |
+| Latest merged implementation | PR #70 `https://github.com/fuer121/Novel-Analysis/pull/70` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -33,14 +33,14 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | --- | --- | --- |
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
-| Phase 2 | implementing | Task 0 至 Task 6 已完成，Task 7 ready |
+| Phase 2 | implementing | Task 0 至 Task 7 已完成，Task 8 ready |
 | Phase 3 | blocked | Phase 2 Gate 通过后才能推进 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | codex/phase2-task7-book-workspace | 9b11835aab1b71cf134a7dbe69f0827ede65c670 | 1bbd90dae5ee2ffa802096e8812514867434e85c | accepted | CP-20260720-PHASE2-TASK6-MERGED | CP-20260720-PHASE2-TASK7-ACCEPTED | push implementation, create PR, verify CI and merge under DEC-0002 |
+| PHASE2-TASK8 | phase-2 | Scale, recovery and Phase 2 acceptance | controller-agent | none | 86277ee20fc65cbbf1f80d426ccf09f20c2592bf | none | ready | CP-20260720-PHASE2-TASK7-MERGED | none | create and validate started contract before implementation |
 
 ## Phase Ledgers
 
@@ -78,7 +78,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，Task 7 implementation 已接受，可按 DEC-0002 创建 PR 并核验 CI
+无，Task 8 可在创建并核验 started contract 后实施
 
 ## Next Gate
 
@@ -86,6 +86,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 7 merged](checkpoints/CP-20260720-PHASE2-TASK7-MERGED.md)
 - [Phase 2 Task 7 accepted](checkpoints/CP-20260720-PHASE2-TASK7-ACCEPTED.md)
 - [Phase 2 Task 7 session cache correction](checkpoints/CP-20260720-PHASE2-TASK7-SESSION-CACHE-CORRECTION.md)
 - [Phase 2 Task 7 contract correction](checkpoints/CP-20260720-PHASE2-TASK7-CONTRACT-CORRECTION.md)
