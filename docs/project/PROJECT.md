@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 9e25a7d14c860ae11adfce28883d53dcfaccf3a2
 baseline_status: current
-updated_at: 2026-07-20T21:10:42+08:00
+updated_at: 2026-07-20T21:28:20+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK7-SESSION-CACHE-CORRECTION
+last_checkpoint: CP-20260720-PHASE2-TASK7-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | codex/phase2-task7-book-workspace | 4c117ba6243fddbfa1098470a37463e08f6788b9 | 06b2cdd301b5abdc0375b22b66950a890c11a1c7 | in_progress | CP-20260720-PHASE2-TASK6-MERGED | CP-20260720-PHASE2-TASK7-SESSION-CACHE-CORRECTION | implement authorized session cache correction, then repeat quality and browser review |
+| PHASE2-TASK7 | phase-2 | Book workspace and fact review | controller-agent | codex/phase2-task7-book-workspace | 9b11835aab1b71cf134a7dbe69f0827ede65c670 | 1bbd90dae5ee2ffa802096e8812514867434e85c | accepted | CP-20260720-PHASE2-TASK6-MERGED | CP-20260720-PHASE2-TASK7-ACCEPTED | push implementation, create PR, verify CI and merge under DEC-0002 |
 
 ## Phase Ledgers
 
@@ -78,7 +78,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，Task 7 可按 accepted session cache correction 实施
+无，Task 7 implementation 已接受，可按 DEC-0002 创建 PR 并核验 CI
 
 ## Next Gate
 
@@ -86,6 +86,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 7 accepted](checkpoints/CP-20260720-PHASE2-TASK7-ACCEPTED.md)
 - [Phase 2 Task 7 session cache correction](checkpoints/CP-20260720-PHASE2-TASK7-SESSION-CACHE-CORRECTION.md)
 - [Phase 2 Task 7 contract correction](checkpoints/CP-20260720-PHASE2-TASK7-CONTRACT-CORRECTION.md)
 - [Phase 2 Task 7 started](checkpoints/CP-20260720-PHASE2-TASK7-STARTED.md)
