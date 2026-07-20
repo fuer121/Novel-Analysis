@@ -74,9 +74,9 @@ const NOOP_BARRIER: ExecutionBarrier = {
   async afterAttemptStarted() {},
 };
 
-const LIBRARY_CONFIG_FIELDS = ["DIFY_BASE_URL", "DIFY_CHAPTER_IMPORT_KEY", "CONTENT_ENCRYPTION_KEY", "CONTENT_ENCRYPTION_KEY_VERSION", "CONTENT_HMAC_KEY"] as const;
+const LIBRARY_CONFIG_FIELDS = ["DIFY_BASE_URL", "DIFY_CHAPTER_IMPORT_KEY", "DIFY_L1_WORKFLOW_API_KEY", "CONTENT_ENCRYPTION_KEY", "CONTENT_ENCRYPTION_KEY_VERSION", "CONTENT_HMAC_KEY"] as const;
 
-export type LibraryRuntimeConfig = { baseUrl: string; chapterImportKey: string; contentKey: Buffer; contentKeyVersion: string; hmacKey: Buffer };
+export type LibraryRuntimeConfig = { baseUrl: string; chapterImportKey: string; l1WorkflowKey: string; contentKey: Buffer; contentKeyVersion: string; hmacKey: Buffer };
 
 function decodeBase64(value: string): Buffer | null {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) return null;
@@ -94,20 +94,21 @@ export function parseLibraryRuntimeConfig(environment: Record<string, string | u
   try { url = new URL(environment.DIFY_BASE_URL!); } catch { invalid.push("DIFY_BASE_URL"); }
   if (url && !["http:", "https:"].includes(url.protocol)) invalid.push("DIFY_BASE_URL");
   if (!environment.DIFY_CHAPTER_IMPORT_KEY!.trim()) invalid.push("DIFY_CHAPTER_IMPORT_KEY");
+  if (!environment.DIFY_L1_WORKFLOW_API_KEY!.trim()) invalid.push("DIFY_L1_WORKFLOW_API_KEY");
   if (!environment.CONTENT_ENCRYPTION_KEY_VERSION!.trim()) invalid.push("CONTENT_ENCRYPTION_KEY_VERSION");
   const contentKey = decodeBase64(environment.CONTENT_ENCRYPTION_KEY!);
   if (contentKey?.length !== 32) invalid.push("CONTENT_ENCRYPTION_KEY");
   const hmacKey = decodeBase64(environment.CONTENT_HMAC_KEY!);
   if (!hmacKey?.length) invalid.push("CONTENT_HMAC_KEY");
   if (invalid.length > 0) throw new Error(`Invalid library runtime configuration fields: ${[...new Set(invalid)].join(",")}`);
-  return { baseUrl: url!.toString().replace(/\/$/, ""), chapterImportKey: environment.DIFY_CHAPTER_IMPORT_KEY!, contentKey: contentKey!, contentKeyVersion: environment.CONTENT_ENCRYPTION_KEY_VERSION!, hmacKey: hmacKey! };
+  return { baseUrl: url!.toString().replace(/\/$/, ""), chapterImportKey: environment.DIFY_CHAPTER_IMPORT_KEY!, l1WorkflowKey: environment.DIFY_L1_WORKFLOW_API_KEY!, contentKey: contentKey!, contentKeyVersion: environment.CONTENT_ENCRYPTION_KEY_VERSION!, hmacKey: hmacKey! };
 }
 
 export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor }): StepExecutor {
   const example = new ExampleExecutor();
   return {
     execute(claim) {
-      if (claim.kind === "chapter-import") {
+      if (claim.kind === "chapter-import" || claim.kind === "l1-index") {
         return options.libraryExecutor
           ? options.libraryExecutor.execute(claim)
           : failImportClaim(options.database, claim, "configuration_error");

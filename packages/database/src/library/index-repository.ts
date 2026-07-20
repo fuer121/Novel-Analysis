@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { sql } from "kysely";
 import type { ContentCipher } from "./content-encryption.js";
 import type { DatabaseExecutor, FactCategory, FactRetrievalMetadata } from "../db.js";
@@ -18,14 +19,17 @@ function validateMetadata(value: FactRetrievalMetadata): void {
 
 export function createIndexRepository(db: DatabaseExecutor, cipher: ContentCipher) {
   return {
-    createPromptVersion(input: { target: "l1-index" | "l2-index"; version: string; contentHash: string }) { return db.insertInto("prompt_versions").values({ target: input.target, version: input.version, content_hash: input.contentHash }).returningAll().executeTakeFirstOrThrow(); },
+    async createPromptVersion(input: { target: "l1-index" | "l2-index"; version: string; content: string; contentHash: string }) {
+      if (!input.content.trim() || createHash("sha256").update(input.content).digest("hex") !== input.contentHash) throw new Error("Prompt content hash mismatch");
+      return db.insertInto("prompt_versions").values({ target: input.target, version: input.version, content: input.content, content_hash: input.contentHash }).returningAll().executeTakeFirstOrThrow();
+    },
     createWorkflowVersion(input: { target: "chapter-import" | "l1-index" | "l2-index"; contractVersion: string; dslHash: string }) { return db.insertInto("workflow_versions").values({ target: input.target, contract_version: input.contractVersion, dsl_hash: input.dslHash }).returningAll().executeTakeFirstOrThrow(); },
     createIndexGroup(input: { bookId: string; key: string; name: string; promptVersionId: string; configHash: string }) { return db.insertInto("index_groups").values({ book_id: input.bookId, key: input.key, name: input.name, prompt_version_id: input.promptVersionId, config_hash: input.configHash }).returningAll().executeTakeFirstOrThrow(); },
     async putL1Index(input: { chapterId: string; promptVersionId: string; workflowVersionId: string; inputSignature: string; status: "fresh" | "failed" | "stale"; route: Record<string, unknown> }) {
       const replace = async (executor: DatabaseExecutor) => {
         await sql`select id from chapters where id = ${input.chapterId} for update`.execute(executor);
         await executor.updateTable("l1_indexes").set({ is_current: false, status: "stale" }).where("chapter_id", "=", input.chapterId).where("is_current", "=", true).execute();
-        await executor.insertInto("l1_indexes").values({ chapter_id: input.chapterId, prompt_version_id: input.promptVersionId, workflow_version_id: input.workflowVersionId, input_signature: input.inputSignature, status: input.status, is_current: true, route: input.route }).execute();
+        return executor.insertInto("l1_indexes").values({ chapter_id: input.chapterId, prompt_version_id: input.promptVersionId, workflow_version_id: input.workflowVersionId, input_signature: input.inputSignature, status: input.status, is_current: true, route: input.route }).returning("id").executeTakeFirstOrThrow();
       };
       if (db.isTransaction) return replace(db);
       return db.transaction().execute(replace);

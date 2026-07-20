@@ -1,8 +1,8 @@
-import { createHmac } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { sql, type Transaction } from "kysely";
 
-import { ChapterImportOutputSchema } from "@novel-analysis/contracts";
-import { createLibraryRepository, type ContentCipher, type Database, type DatabaseConnection } from "@novel-analysis/database";
+import { ChapterImportOutputSchema, L1IndexOutputSchema } from "@novel-analysis/contracts";
+import { createIndexRepository, createLibraryRepository, type ContentCipher, type Database, type DatabaseConnection } from "@novel-analysis/database";
 import { DifyAdapterError, type DifyAdapter } from "@novel-analysis/dify";
 import { createImportL1Handoff, type ClaimedStep, type CompletionDisposition } from "@novel-analysis/jobs";
 
@@ -10,6 +10,13 @@ type JobConfig = {
   source: { sourceId: string; startChapter: number; endChapter: number };
   sourceVersion: string;
   autoStartL1: boolean;
+};
+
+type L1JobConfig = {
+  prompt: { id: string; content: string; contentHash: string };
+  workflow: { id: string };
+  schemaVersion: string;
+  chapters: Array<{ chapterId: string; chapterIndex: number; chapterTitle: string; sourceVersion: string; chapterHmac: string; inputSignature: string }>;
 };
 
 function readConfig(value: Record<string, unknown>): JobConfig {
@@ -22,6 +29,24 @@ function readConfig(value: Record<string, unknown>): JobConfig {
     throw new Error("Invalid import job configuration");
   }
   return { source: source as JobConfig["source"], sourceVersion: value.sourceVersion, autoStartL1: value.autoStartL1 };
+}
+
+function readL1Config(value: Record<string, unknown>): L1JobConfig {
+  const prompt = value.prompt as Record<string, unknown> | undefined;
+  const workflow = value.workflow as Record<string, unknown> | undefined;
+  const chapters = value.chapters;
+  if (!prompt || !workflow || !Array.isArray(chapters)
+    || typeof prompt.id !== "string" || typeof prompt.content !== "string" || !prompt.content.trim()
+    || typeof prompt.contentHash !== "string" || createHash("sha256").update(prompt.content).digest("hex") !== prompt.contentHash
+    || typeof workflow.id !== "string" || typeof value.schemaVersion !== "string") throw new Error("Invalid L1 job configuration");
+  const parsed = chapters.map((chapter) => {
+    if (!chapter || typeof chapter !== "object" || Array.isArray(chapter)) throw new Error("Invalid L1 job configuration");
+    const row = chapter as Record<string, unknown>;
+    if (typeof row.chapterId !== "string" || typeof row.chapterIndex !== "number" || typeof row.chapterTitle !== "string"
+      || typeof row.sourceVersion !== "string" || typeof row.chapterHmac !== "string" || typeof row.inputSignature !== "string") throw new Error("Invalid L1 job configuration");
+    return row as L1JobConfig["chapters"][number];
+  });
+  return { prompt: prompt as L1JobConfig["prompt"], workflow: workflow as L1JobConfig["workflow"], schemaVersion: value.schemaVersion, chapters: parsed };
 }
 
 export class LibraryImportExecutor {
@@ -39,7 +64,7 @@ export class LibraryImportExecutor {
       return await this.executeClaim(claim);
     } catch (error) {
       const errorCode = error instanceof DifyAdapterError ? error.code : "provider_invalid_response";
-      return failImportClaim(this.options.database, claim, errorCode);
+      return claim.kind === "l1-index" ? this.failL1Claim(claim, errorCode) : failImportClaim(this.options.database, claim, errorCode);
     }
   }
 
@@ -48,6 +73,7 @@ export class LibraryImportExecutor {
       .innerJoin("job_steps", "job_steps.job_id", "jobs.id")
       .select(["jobs.type", "jobs.scope", "jobs.config_snapshot", "job_steps.position"])
       .where("jobs.id", "=", claim.jobId).where("job_steps.id", "=", claim.stepId).executeTakeFirstOrThrow();
+    if (context.type === "l1-index") return this.executeL1Claim(claim, context.scope, context.config_snapshot, context.position);
     if (context.type !== "import") throw new Error("LibraryImportExecutor only accepts import jobs");
     const bookId = context.scope.bookId;
     if (typeof bookId !== "string") throw new Error("Invalid import job scope");
@@ -93,6 +119,97 @@ export class LibraryImportExecutor {
         chapterId = inserted.id;
       }
       return this.finish(transaction, claim, { chapterId, chapterIndex: chapter.chapter_index }, false, config.autoStartL1, bookId);
+    });
+  }
+
+  private async executeL1Claim(claim: ClaimedStep, scope: Record<string, unknown>, snapshot: Record<string, unknown>, position: number): Promise<{ disposition: CompletionDisposition }> {
+    const bookId = scope.bookId;
+    if (typeof bookId !== "string") throw new Error("Invalid L1 job scope");
+    const config = readL1Config(snapshot);
+    const chapterConfig = config.chapters.find((chapter) => chapter.chapterIndex === position);
+    if (!chapterConfig) throw new Error("Invalid L1 job configuration");
+    const chapter = await this.options.database.selectFrom("chapters").selectAll().where("id", "=", chapterConfig.chapterId).where("book_id", "=", bookId).executeTakeFirstOrThrow();
+    if (chapter.source_version !== chapterConfig.sourceVersion || chapter.content_hmac !== chapterConfig.chapterHmac) throw new Error("L1 chapter freshness changed");
+    const current = await this.options.database.selectFrom("l1_indexes").select(["id", "input_signature", "status"]).where("chapter_id", "=", chapter.id).where("is_current", "=", true).executeTakeFirst();
+    if (current?.status === "fresh" && current.input_signature === chapterConfig.inputSignature) {
+      return this.commitL1(claim, chapterConfig, current.id, true);
+    }
+    const chapterContent = this.options.cipher.decrypt({ ciphertext: chapter.content_ciphertext, nonce: chapter.content_nonce, tag: chapter.content_tag, keyVersion: chapter.content_key_version });
+    const raw = await this.options.adapter.runL1Index({ invocationKey: claim.stepId, bookId, chapterIndex: chapterConfig.chapterIndex, chapterTitle: chapterConfig.chapterTitle, chapterContent, indexPrompt: config.prompt.content });
+    const parsed = L1IndexOutputSchema.safeParse(raw);
+    if (!parsed.success || parsed.data.route_schema_version !== config.schemaVersion) throw new Error("Invalid L1 index output");
+    return this.options.database.transaction().execute(async (transaction) => {
+      const disposition = await validateImportClaim(transaction, claim);
+      if (disposition) return { disposition };
+      const lockedChapter = await transaction.selectFrom("chapters").select(["id", "source_version", "content_hmac"]).where("id", "=", chapterConfig.chapterId).forUpdate().executeTakeFirst();
+      if (!lockedChapter || lockedChapter.source_version !== chapterConfig.sourceVersion || lockedChapter.content_hmac !== chapterConfig.chapterHmac) throw new Error("L1 chapter freshness changed");
+      const fresh = await transaction.selectFrom("l1_indexes").select(["id", "input_signature", "status"]).where("chapter_id", "=", chapterConfig.chapterId).where("is_current", "=", true).executeTakeFirst();
+      if (fresh?.status === "fresh" && fresh.input_signature === chapterConfig.inputSignature) return this.finishL1(transaction, claim, chapterConfig, fresh.id, true);
+      const stored = await createIndexRepository(transaction, this.options.cipher).putL1Index({ chapterId: chapterConfig.chapterId, promptVersionId: config.prompt.id, workflowVersionId: config.workflow.id, inputSignature: chapterConfig.inputSignature, status: "fresh", route: parsed.data });
+      await transaction.updateTable("l2_chapter_statuses").set({ status: "stale", failure_code: null, updated_at: new Date() }).where("chapter_id", "=", chapterConfig.chapterId).execute();
+      return this.finishL1(transaction, claim, chapterConfig, stored.id, false);
+    });
+  }
+
+  private commitL1(claim: ClaimedStep, chapter: L1JobConfig["chapters"][number], l1IndexId: string, skipped: boolean) {
+    return this.options.database.transaction().execute(async (transaction) => {
+      const disposition = await validateImportClaim(transaction, claim);
+      if (disposition) return { disposition };
+      const currentChapter = await transaction.selectFrom("chapters").select(["source_version", "content_hmac"]).where("id", "=", chapter.chapterId).forUpdate().executeTakeFirst();
+      const currentIndex = await transaction.selectFrom("l1_indexes").select(["id", "input_signature", "status"]).where("chapter_id", "=", chapter.chapterId).where("is_current", "=", true).executeTakeFirst();
+      if (currentChapter?.source_version !== chapter.sourceVersion || currentChapter.content_hmac !== chapter.chapterHmac
+        || currentIndex?.id !== l1IndexId || currentIndex.status !== "fresh" || currentIndex.input_signature !== chapter.inputSignature) throw new Error("L1 chapter freshness changed");
+      return this.finishL1(transaction, claim, chapter, l1IndexId, skipped);
+    });
+  }
+
+  private async finishL1(transaction: Transaction<Database>, claim: ClaimedStep, chapter: L1JobConfig["chapters"][number], l1IndexId: string, skipped: boolean) {
+    const job = await transaction.selectFrom("jobs").select(["status", "progress"]).where("id", "=", claim.jobId).executeTakeFirstOrThrow();
+    const output = { l1IndexId, chapterId: chapter.chapterId, chapterIndex: chapter.chapterIndex };
+    await transaction.updateTable("job_steps").set({ status: "completed", output_ref: output, lease_owner: null, lease_expires_at: null, updated_at: new Date() }).where("id", "=", claim.stepId).execute();
+    await transaction.updateTable("job_attempts").set({ status: "completed", finished_at: new Date() }).where("id", "=", claim.attemptId).execute();
+    const progress: Record<string, unknown> = { ...job.progress, current: "l1-index" };
+    if (skipped) progress.skipped = Number(progress.skipped ?? 0) + 1;
+    else progress.completed = Number(progress.completed ?? 0) + 1;
+    await transaction.updateTable("jobs").set({ progress, updated_at: new Date() }).where("id", "=", claim.jobId).execute();
+    await transaction.insertInto("job_events").values({ job_id: claim.jobId, type: "progress", dedupe_key: `step:${claim.stepId}:completed`, payload: { stepId: claim.stepId, position: claim.position, progress } }).onConflict((conflict) => conflict.columns(["job_id", "dedupe_key"]).doNothing()).execute();
+    if (job.status === "paused") return { disposition: "paused-boundary" as const };
+    const remaining = await transaction.selectFrom("job_steps").select("id").where("job_id", "=", claim.jobId).where("status", "!=", "completed").executeTakeFirst();
+    if (remaining) {
+      await transaction.insertInto("job_outbox").values({ job_id: claim.jobId, topic: "jobs.wake", payload: { jobId: claim.jobId }, claimed_by: null, claim_expires_at: null, delivered_at: null }).execute();
+      return { disposition: "completed" as const };
+    }
+    await transaction.updateTable("jobs").set({ status: "completed", updated_at: new Date() }).where("id", "=", claim.jobId).execute();
+    await transaction.insertInto("job_events").values({ job_id: claim.jobId, type: "completed", dedupe_key: "completed", payload: { status: "completed", progress } }).onConflict((conflict) => conflict.columns(["job_id", "dedupe_key"]).doNothing()).execute();
+    return { disposition: "completed" as const };
+  }
+
+  private failL1Claim(claim: ClaimedStep, errorCode: string): Promise<{ disposition: CompletionDisposition | "failed" }> {
+    return this.options.database.transaction().execute(async (transaction) => {
+      const disposition = await validateImportClaim(transaction, claim);
+      if (disposition) return { disposition };
+      const job = await transaction.selectFrom("jobs").select(["progress", "config_snapshot"]).where("id", "=", claim.jobId).executeTakeFirstOrThrow();
+      let failedContext: { config: L1JobConfig; chapter: L1JobConfig["chapters"][number] } | undefined;
+      try {
+        const config = readL1Config(job.config_snapshot);
+        const chapter = config.chapters.find((item) => item.chapterIndex === claim.position);
+        if (chapter) failedContext = { config, chapter };
+      } catch {
+        // Malformed snapshots cannot safely reference an index
+      }
+      if (failedContext) {
+        const currentChapter = await transaction.selectFrom("chapters").select(["source_version", "content_hmac"]).where("id", "=", failedContext.chapter.chapterId).executeTakeFirst();
+        if (currentChapter?.source_version === failedContext.chapter.sourceVersion && currentChapter.content_hmac === failedContext.chapter.chapterHmac) {
+          await createIndexRepository(transaction, this.options.cipher).putL1Index({ chapterId: failedContext.chapter.chapterId, promptVersionId: failedContext.config.prompt.id, workflowVersionId: failedContext.config.workflow.id, inputSignature: failedContext.chapter.inputSignature, status: "failed", route: {} });
+          await transaction.updateTable("l2_chapter_statuses").set({ status: "stale", failure_code: null, updated_at: new Date() }).where("chapter_id", "=", failedContext.chapter.chapterId).execute();
+        }
+      }
+      const progress: Record<string, unknown> = { ...job.progress, failed: Number(job.progress.failed ?? 0) + 1, current: "l1-index" };
+      await transaction.updateTable("job_attempts").set({ status: "failed", error_code: errorCode, error_message: errorCode, finished_at: new Date() }).where("id", "=", claim.attemptId).execute();
+      await transaction.updateTable("job_steps").set({ status: "failed", lease_owner: null, lease_expires_at: null, updated_at: new Date() }).where("id", "=", claim.stepId).execute();
+      await transaction.updateTable("jobs").set({ status: "failed", progress, updated_at: new Date() }).where("id", "=", claim.jobId).execute();
+      await transaction.insertInto("job_events").values({ job_id: claim.jobId, type: "failed", dedupe_key: `step:${claim.stepId}:failed`, payload: { stepId: claim.stepId, position: claim.position, errorCode, progress } }).onConflict((conflict) => conflict.columns(["job_id", "dedupe_key"]).doNothing()).execute();
+      return { disposition: "failed" as const };
     });
   }
 
@@ -149,7 +266,7 @@ export function failImportClaim(database: DatabaseConnection, claim: ClaimedStep
     const disposition = await validateImportClaim(transaction, claim);
     if (disposition) return { disposition };
     const job = await transaction.selectFrom("jobs").select("progress").where("id", "=", claim.jobId).executeTakeFirstOrThrow();
-    const progress: Record<string, unknown> = { ...job.progress, failed: Number(job.progress.failed ?? 0) + 1, current: "chapter-import" };
+    const progress: Record<string, unknown> = { ...job.progress, failed: Number(job.progress.failed ?? 0) + 1, current: claim.kind === "l1-index" ? "l1-index" : "chapter-import" };
     await transaction.updateTable("job_attempts").set({ status: "failed", error_code: errorCode, error_message: errorCode, finished_at: new Date() }).where("id", "=", claim.attemptId).execute();
     await transaction.updateTable("job_steps").set({ status: "failed", lease_owner: null, lease_expires_at: null, updated_at: new Date() }).where("id", "=", claim.stepId).execute();
     await transaction.updateTable("jobs").set({ status: "failed", progress, updated_at: new Date() }).where("id", "=", claim.jobId).execute();

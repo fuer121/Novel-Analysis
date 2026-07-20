@@ -4,6 +4,7 @@ import type { PublicJob } from "@novel-analysis/contracts";
 import type { DatabaseConnection, DatabaseExecutor } from "@novel-analysis/database";
 
 import { jobRowToPublic, PUBLIC_JOB_COLUMNS } from "../job-repository.js";
+import { createImportL1Job } from "./l1-job.js";
 
 export class BookNotFoundError extends Error {}
 export class ScopeChangedError extends Error {}
@@ -52,7 +53,7 @@ function importRequestId(bookId: string, requestId: string): string {
   return `import:${bookId}:${createHash("sha256").update(requestId).digest("hex")}`;
 }
 
-function replayMatches(row: { type: string; scope: Record<string, unknown>; config_snapshot: Record<string, unknown> }, selection: Selection, bookId: string, autoStartL1: boolean): boolean {
+function selectionMatches(row: { type: string; scope: Record<string, unknown>; config_snapshot: Record<string, unknown> }, selection: Selection, bookId: string, autoStartL1: boolean): boolean {
   const source = row.config_snapshot.source as Record<string, unknown> | undefined;
   return row.type === "import" && row.scope.bookId === bookId
     && row.scope.startChapter === selection.source.startChapter && row.scope.endChapter === selection.source.endChapter
@@ -62,24 +63,19 @@ function replayMatches(row: { type: string; scope: Record<string, unknown>; conf
     && source.startChapter === selection.source.startChapter && source.endChapter === selection.source.endChapter;
 }
 
+function replayMatches(row: { type: string; scope: Record<string, unknown>; config_snapshot: Record<string, unknown> }, input: { bookId: string; scopeHash: string; autoStartL1: boolean }): boolean {
+  const source = row.config_snapshot.source as Record<string, unknown> | undefined;
+  if (row.type !== "import" || row.scope.bookId !== input.bookId || row.config_snapshot.scopeHash !== input.scopeHash
+    || row.config_snapshot.autoStartL1 !== input.autoStartL1 || !source
+    || typeof source.provider !== "string" || typeof source.sourceId !== "string"
+    || typeof source.startChapter !== "number" || typeof source.endChapter !== "number") return false;
+  const frozenSource = source as Source;
+  return row.scope.startChapter === frozenSource.startChapter && row.scope.endChapter === frozenSource.endChapter
+    && typeof row.config_snapshot.sourceVersion === "string";
+}
+
 export async function createImportL1Handoff(database: DatabaseExecutor, input: { importJobId: string; bookId: string; requestedBy: string }): Promise<void> {
-  const active = await database.selectFrom("jobs").select("id")
-    .where("concurrency_key", "=", `l1:${input.bookId}`)
-    .where("status", "in", ["queued", "running", "retrying", "paused"]).executeTakeFirst();
-  if (active) return;
-  const job = await database.insertInto("jobs").values({
-    type: "l1-index",
-    status: "queued",
-    requested_by: input.requestedBy,
-    request_id: `import-handoff:${input.importJobId}`,
-    scope: { bookId: input.bookId },
-    config_snapshot: { handoffFromImportJobId: input.importJobId },
-    concurrency_key: `l1:${input.bookId}`,
-    progress: { total: 0, completed: 0, failed: 0, skipped: 0, current: "" },
-  }).onConflict((conflict) => conflict.columns(["requested_by", "request_id"]).doNothing()).returning("id").executeTakeFirst();
-  if (job) {
-    await database.insertInto("job_events").values({ job_id: job.id, type: "created", dedupe_key: "created", payload: { status: "queued", handoffFromImportJobId: input.importJobId } }).execute();
-  }
+  await createImportL1Job(database, input);
 }
 
 async function selectImportScope(database: DatabaseExecutor, bookId: string): Promise<Selection> {
@@ -125,6 +121,8 @@ async function selectImportScope(database: DatabaseExecutor, bookId: string): Pr
   };
 }
 
+export * from "./l1-job.js";
+
 export class ImportJobService {
   constructor(private readonly database: DatabaseConnection) {}
 
@@ -144,22 +142,25 @@ export class ImportJobService {
       return await this.database.transaction().execute(async (transaction) => {
         const book = await transaction.selectFrom("books").select("id").where("id", "=", input.bookId).forUpdate().executeTakeFirst();
         if (!book) throw new BookNotFoundError();
-        const selection = await selectImportScope(transaction, input.bookId);
-        if (selection.scopeHash !== input.scopeHash) throw new ScopeChangedError();
         const storedRequestId = importRequestId(input.bookId, input.requestId);
         const replay = await transaction.selectFrom("jobs").select([...PUBLIC_JOB_COLUMNS, "config_snapshot"])
           .where("requested_by", "=", input.requestedBy).where("request_id", "=", storedRequestId).executeTakeFirst();
         if (replay) {
-          if (!replayMatches(replay, selection, input.bookId, input.autoStartL1)) throw new IdempotencyConflictError();
+          if (!replayMatches(replay, input)) throw new IdempotencyConflictError();
+          if (replay.status === "completed" && replay.config_snapshot.autoStartL1 === true) {
+            await createImportL1Handoff(transaction, { importJobId: replay.id, bookId: input.bookId, requestedBy: input.requestedBy });
+          }
           return jobRowToPublic(replay);
         }
+        const selection = await selectImportScope(transaction, input.bookId);
+        if (selection.scopeHash !== input.scopeHash) throw new ScopeChangedError();
         const concurrencyKey = `import:${input.bookId}`;
         const active = await transaction.selectFrom("jobs").select([...PUBLIC_JOB_COLUMNS, "config_snapshot"])
           .where("concurrency_key", "=", concurrencyKey)
           .where("status", "in", ["queued", "running", "retrying", "paused"])
           .executeTakeFirst();
         if (active) {
-          if (!replayMatches(active, selection, input.bookId, input.autoStartL1)) throw new IdempotencyConflictError();
+          if (!selectionMatches(active, selection, input.bookId, input.autoStartL1)) throw new IdempotencyConflictError();
           return jobRowToPublic(active);
         }
 
@@ -207,7 +208,7 @@ export class ImportJobService {
           expression.and([expression("concurrency_key", "=", `import:${input.bookId}`), expression("status", "in", ["queued", "running", "retrying", "paused"])]),
         ])).orderBy("created_at").executeTakeFirst();
       if (!existing) throw error;
-      if (!replayMatches(existing, selection, input.bookId, input.autoStartL1)) throw new IdempotencyConflictError();
+      if (!selectionMatches(existing, selection, input.bookId, input.autoStartL1)) throw new IdempotencyConflictError();
       return jobRowToPublic(existing);
     }
   }
