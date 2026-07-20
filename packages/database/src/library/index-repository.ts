@@ -48,6 +48,51 @@ export function createIndexRepository(db: DatabaseExecutor, cipher: ContentCiphe
       return sql`insert into l2_subjects (group_id, subject_key, display_name, aliases) values (${input.groupId}, ${input.subjectKey}, ${input.displayName}, ${JSON.stringify(input.aliases)}::jsonb)
         on conflict (group_id, subject_key) do update set display_name = excluded.display_name, aliases = excluded.aliases`.execute(db);
     },
+    async listVerifiedSubjects(groupId: string) {
+      const result = await sql<{ subject_key: string; display_name: string; aliases: unknown }>`select distinct s.subject_key, s.display_name, s.aliases
+        from l2_subjects s join l2_facts f on f.group_id = s.group_id and f.subject_key = s.subject_key
+        where s.group_id = ${groupId} and (f.metadata ->> 'scopeEligible')::boolean is true
+        order by s.subject_key`.execute(db);
+      return result.rows.map((row) => ({ subjectKey: row.subject_key, displayName: row.display_name, aliases: Array.isArray(row.aliases) ? row.aliases.map(String) : [] }));
+    },
+    async replaceL2ChapterResult(input: {
+      groupId: string;
+      chapterId: string;
+      inputSignature: string;
+      acceptedCount: number;
+      candidateCount: number;
+      rejectedCount: number;
+      facts: Array<{ subjectKey: string; displayName: string; aliases: string[]; factType: string; plaintext: string; metadata: FactRetrievalMetadata }>;
+    }) {
+      if (!db.isTransaction) throw new Error("L2 chapter replacement requires a caller transaction");
+      for (const fact of input.facts) {
+        if (!fact.subjectKey.trim() || !fact.displayName.trim() || !fact.factType.trim() || !fact.plaintext.trim()) throw new Error("Invalid L2 chapter result");
+        validateMetadata(fact.metadata);
+      }
+      if ([input.acceptedCount, input.candidateCount, input.rejectedCount].some((count) => !Number.isSafeInteger(count) || count < 0)
+        || input.acceptedCount + input.candidateCount !== input.facts.length) throw new Error("Invalid L2 admission counts");
+      const encrypted = input.facts.map((fact) => ({ ...fact, encrypted: cipher.encrypt(fact.plaintext) }));
+      const locked = await sql<{ book_id: string }>`select c.book_id from chapters c join index_groups g on g.book_id = c.book_id
+        where c.id = ${input.chapterId} and g.id = ${input.groupId} for update of c, g`.execute(db);
+      const bookId = locked.rows[0]?.book_id;
+      if (!bookId) throw new Error("Index group and chapter must belong to the same book");
+      for (const fact of encrypted) {
+        await sql`insert into l2_subjects (group_id, subject_key, display_name, aliases) values (${input.groupId}, ${fact.subjectKey}, ${fact.displayName}, ${JSON.stringify(fact.aliases)}::jsonb)
+          on conflict (group_id, subject_key) do update set display_name = excluded.display_name, aliases = excluded.aliases`.execute(db);
+      }
+      await db.deleteFrom("l2_facts").where("group_id", "=", input.groupId).where("chapter_id", "=", input.chapterId).execute();
+      for (const fact of encrypted) {
+        await db.insertInto("l2_facts").values({
+          group_id: input.groupId, chapter_id: input.chapterId, book_id: bookId, subject_key: fact.subjectKey, fact_type: fact.factType,
+          fact_ciphertext: fact.encrypted.ciphertext, fact_nonce: fact.encrypted.nonce, fact_tag: fact.encrypted.tag,
+          fact_key_version: fact.encrypted.keyVersion, metadata: fact.metadata,
+        }).execute();
+      }
+      await sql`insert into l2_chapter_statuses (group_id, chapter_id, book_id, input_signature, status, failure_code)
+        values (${input.groupId}, ${input.chapterId}, ${bookId}, ${input.inputSignature}, 'fresh', null)
+        on conflict (group_id, chapter_id) do update set input_signature = excluded.input_signature, status = 'fresh', failure_code = null, updated_at = now()`.execute(db);
+      return { acceptedCount: input.acceptedCount, candidateCount: input.candidateCount, rejectedCount: input.rejectedCount, factCount: input.facts.length };
+    },
     async addFact(input: { groupId: string; chapterId: string; subjectKey: string; factType: string; plaintext: string; metadata: FactRetrievalMetadata }) {
       validateMetadata(input.metadata);
       const encrypted = cipher.encrypt(input.plaintext);
