@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 86277ee20fc65cbbf1f80d426ccf09f20c2592bf
 baseline_status: current
-updated_at: 2026-07-20T21:37:10+08:00
+updated_at: 2026-07-20T21:50:38+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK7-MERGED
+last_checkpoint: CP-20260720-PHASE2-TASK8-STARTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK8 | phase-2 | Scale, recovery and Phase 2 acceptance | controller-agent | none | 86277ee20fc65cbbf1f80d426ccf09f20c2592bf | none | ready | CP-20260720-PHASE2-TASK7-MERGED | none | create and validate started contract before implementation |
+| PHASE2-TASK8 | phase-2 | Scale, recovery and Phase 2 acceptance | controller-agent | codex/phase2-task8-acceptance | 3f9cd304018497b835b743440c38ea459846b6a8 | none | in_progress | CP-20260720-PHASE2-TASK7-MERGED | CP-20260720-PHASE2-TASK8-STARTED | write and observe the independent RED Phase 2 composition test |
 
 ## Phase Ledgers
 
@@ -78,7 +78,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，Task 8 可在创建并核验 started contract 后实施
+无，Task 8 可按 accepted started contract 实施
 
 ## Next Gate
 
@@ -86,6 +86,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 8 started](checkpoints/CP-20260720-PHASE2-TASK8-STARTED.md)
 - [Phase 2 Task 7 merged](checkpoints/CP-20260720-PHASE2-TASK7-MERGED.md)
 - [Phase 2 Task 7 accepted](checkpoints/CP-20260720-PHASE2-TASK7-ACCEPTED.md)
 - [Phase 2 Task 7 session cache correction](checkpoints/CP-20260720-PHASE2-TASK7-SESSION-CACHE-CORRECTION.md)
