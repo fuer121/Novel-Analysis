@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T09:16:31+08:00
+updated_at: 2026-07-20T09:44:25+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK4-STARTED
+last_checkpoint: CP-20260720-PHASE2-TASK4-CONTRACT-CORRECTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -54,7 +54,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | main | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 95a73aedb0f41727d82f0058b0106c1f75403dcc | merged | DEC-0005 | CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED | complete; real Dify smoke passed; Task 2 remains unlocked |
 | PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | main | 153f6464139d579b5835c5bc68658287a18cfeaf | 78f2adf97c9598a3770a60be185e425df48dcfd6 | merged | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-MERGED | complete; start Task 3 |
 | PHASE2-TASK3 | phase-2 | Book creation and recoverable chapter import | controller-agent | main | 1fa158bf39af1cfadc51517fbb0733c439e65628 | 55560718147584ecf4eae434b6581b7748779c8e | merged | CP-20260719-PHASE2-TASK2-MERGED | CP-20260720-PHASE2-TASK3-MERGED | complete; start Task 4 |
-| PHASE2-TASK4 | phase-2 | Recoverable L1 build and coverage | controller-agent | refactor/phase2-task4-l1 | f8a7291f3c5bd1fb2300573368a267b52c31d228 | f8a7291f3c5bd1fb2300573368a267b52c31d228 | in_progress | CP-20260720-PHASE2-TASK3-MERGED | CP-20260720-PHASE2-TASK4-STARTED | implement L1 coverage, scope job and executor; Task 5 remains locked |
+| PHASE2-TASK4 | phase-2 | Recoverable L1 build and coverage | controller-agent | refactor/phase2-task4-l1 | f8a7291f3c5bd1fb2300573368a267b52c31d228 | f8a7291f3c5bd1fb2300573368a267b52c31d228 | in_progress | CP-20260720-PHASE2-TASK3-MERGED | CP-20260720-PHASE2-TASK4-CONTRACT-CORRECTED | implement corrected L1 contract under DEC-0006; Task 5 remains locked |
 
 ## Effective Decisions
 
@@ -63,6 +63,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [DEC-0003 One Chapter Per JobStep](decisions/DEC-0003-phase2-step-granularity.md) 以双候选 PostgreSQL 实测确定 Phase 2 采用一章一个 JobStep
 - [DEC-0004 Dify Smoke Credential Policy](decisions/DEC-0004-dify-smoke-credential-policy.md) 授权总控使用本地未跟踪凭证执行显式、脱敏、非正式数据 smoke，禁止凭证进入 Git、日志、CI 和项目源
 - [DEC-0005 Repository L2 Workflow Output Alignment](decisions/DEC-0005-repository-l2-workflow-output-alignment.md) 保持 accepted adapter contract，以仓库 L2 DSL 的可信 Workflow 输入补齐章节绑定；只提交仓库 DSL，由用户手动导入
+- [DEC-0006 Phase 2 Task 4 Contract Correction](decisions/DEC-0006-phase2-task4-contract-correction.md) 补齐自动 handoff、Worker L1 分派、credential 装配与不可变 Prompt 正文存储的最小实现范围
 - [已批准设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md) 是重构范围和架构的有效依据
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -83,7 +84,8 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- Task 4 已启动；等待 PostgreSQL RED/GREEN、双阶段独立审查和总控验收，Task 5 保持锁定
+- Task 4 首次委派在实现前发现 contract 缺口并保持 clean；用户已授权最小完整修复，按 DEC-0006 与 correction checkpoint 继续实施
+- Task 5 保持锁定，等待 Task 4 实现、双重独立审查和 merged checkpoint
 
 ## Next Gate
 
@@ -138,6 +140,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 Task 3 accepted checkpoint](checkpoints/CP-20260720-PHASE2-TASK3-ACCEPTED.md)
 - [Phase 2 Task 3 merged checkpoint](checkpoints/CP-20260720-PHASE2-TASK3-MERGED.md)
 - [Phase 2 Task 4 started checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-STARTED.md)
+- [Phase 2 Task 4 contract corrected checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-CONTRACT-CORRECTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
