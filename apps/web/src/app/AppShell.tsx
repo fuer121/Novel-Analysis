@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { BookOpen, ListTodo, Users } from "lucide-react";
 import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 
 import { subscribeSessionExpired } from "../shared/api.js";
@@ -7,7 +8,7 @@ import { useCurrentUser } from "../features/auth/useCurrentUser.js";
 import { useJobEvents } from "../features/task-center/useJobEvents.js";
 
 function loginTarget(pathname: string): string {
-  const returnTo = pathname === "/tasks"
+  const returnTo = pathname === "/tasks" || pathname === "/books" || /^\/books\/[^/?#]+\/(overview|import|l1|l2)$/.test(pathname)
     || pathname === "/admin/members"
     || /^\/tasks\/[^/?#]+$/.test(pathname)
     ? pathname
@@ -44,9 +45,10 @@ export function AppShell() {
       </header>
       <div className="shell-body">
         <nav className="sidebar" aria-label="主导航">
-          <NavLink to="/tasks">任务中心</NavLink>
+          <NavLink to="/books"><BookOpen size={17} />书库</NavLink>
+          <NavLink to="/tasks"><ListTodo size={17} />任务中心</NavLink>
           {currentUser.data.role === "admin"
-            ? <NavLink to="/admin/members">成员管理</NavLink>
+            ? <NavLink to="/admin/members"><Users size={17} />成员管理</NavLink>
             : null}
         </nav>
         <main className="workspace"><Outlet /></main>

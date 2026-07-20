@@ -14,11 +14,13 @@ export function useJobEvents(enabled = true): void {
     source.onmessage = (message) => {
       if (!active) return;
       void queryClient.invalidateQueries({ queryKey: ["jobs"] });
+      void queryClient.invalidateQueries({ queryKey: ["books"] });
       try {
         const event = JSON.parse(message.data) as { jobId?: unknown };
         if (typeof event.jobId === "string") {
           void queryClient.invalidateQueries({ queryKey: ["job", event.jobId] });
         }
+        void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "book" });
       } catch {
         // A malformed event cannot replace API-backed task state
       }
