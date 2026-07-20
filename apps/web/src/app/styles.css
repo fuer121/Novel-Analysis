@@ -136,7 +136,7 @@ progress { display: block; width: 92px; height: 5px; margin-top: 6px; accent-col
 .pagination { display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin-top: 12px; color: #697586; font-size: 13px; }
 
 @media (max-width: 1050px) {
-  .l2-layout { grid-template-columns: 1fr; }
+  .l2-layout { grid-template-columns: minmax(0, 1fr); }
   .book-create-form { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

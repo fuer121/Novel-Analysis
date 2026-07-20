@@ -103,6 +103,7 @@ describe("book workspace", () => {
     }));
     renderPath(`/books/${book.id}/l2`);
     expect(await screen.findByText("第一页事实")).toBeTruthy();
+    expect((screen.getByLabelText("结束章节") as HTMLInputElement).value).toBe(String(book.chapterCount));
     await userEvent.click(screen.getByRole("button", { name: "下一页" }));
     expect(await screen.findByText("第二页事实")).toBeTruthy();
     FakeEventSource.instance.onmessage?.(new MessageEvent("message", { data: JSON.stringify({ jobId: "job" }) }));

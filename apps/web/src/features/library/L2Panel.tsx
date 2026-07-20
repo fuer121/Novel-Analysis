@@ -1,17 +1,18 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useOutletContext, useParams } from "react-router-dom";
 
 import { apiRead } from "../../shared/api.js";
 import { FactReview } from "./FactReview.js";
 import { CoverageStrip } from "./ScopePreview.js";
-import type { IndexCoverage, IndexGroup } from "./types.js";
+import type { BookSummary, IndexCoverage, IndexGroup } from "./types.js";
 import { WritePanel } from "./WritePanel.js";
 
 export function L2Panel() {
   const { bookId = "" } = useParams();
+  const { book } = useOutletContext<{ book: BookSummary }>();
   const groups = useQuery({ queryKey: ["book", bookId, "index-groups"], queryFn: () => apiRead<{ indexGroups: IndexGroup[] }>(`/books/${bookId}/index-groups`) });
-  const [groupId, setGroupId] = useState(""); const [startChapter, setStartChapter] = useState(1); const [endChapter, setEndChapter] = useState(1); const [mode, setMode] = useState<"all" | "missing" | "retry_failed">("missing");
+  const [groupId, setGroupId] = useState(""); const [startChapter, setStartChapter] = useState(1); const [endChapter, setEndChapter] = useState(book.chapterCount); const [mode, setMode] = useState<"all" | "missing" | "retry_failed">("missing");
   useEffect(() => { if (!groupId && groups.data?.indexGroups[0]) setGroupId(groups.data.indexGroups[0].id); }, [groupId, groups.data]);
   const coverage = useQuery({ queryKey: ["book", bookId, "group", groupId, "coverage"], queryFn: () => apiRead<IndexCoverage>(`/books/${bookId}/index-groups/${groupId}/coverage`), enabled: Boolean(groupId) });
   if (groups.isPending) return <p className="empty-state">正在读取索引组...</p>;
