@@ -106,4 +106,9 @@ describe("admitL2FactsForIndexGroup", () => {
     expect(admitL2FactsForIndexGroup([eligible], { categoryScope: "general" }, []).accepted).toEqual([eligible]);
     expect(admitL2FactsForIndexGroup([fact({ entity: "普通人物" })], { categoryScope: "magical_creature" }, []).accepted).toEqual([]);
   });
+
+  it("does not assign an excluded related entity to a verified subject", () => {
+    const result = admitL2FactsForIndexGroup([fact({ entity: "飞剑", category: "item", related_entities: ["白鹿"], fact: "飞剑掠过白鹿身旁" })], { categoryScope: "magical_creature" }, [{ subjectKey: "white-deer", displayName: "白鹿", aliases: ["瑞兽"] }]);
+    expect(result).toMatchObject({ accepted: [], candidates: [], rejectedCount: 1, verifiedSubjects: [] });
+  });
 });

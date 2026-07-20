@@ -52,7 +52,7 @@ function explicitlyEligible(fact: L2AdmissionFact): boolean {
 }
 
 function matchingKnown(fact: L2AdmissionFact, subjects: readonly L2AdmissionSubject[]): L2AdmissionSubject | undefined {
-  const values = [fact.entity, ...fact.aliases, ...fact.related_entities].map((value) => value.trim()).filter(Boolean);
+  const values = [fact.entity, ...fact.aliases].map((value) => value.trim()).filter(Boolean);
   return subjects.find((subject) => values.some((value) => [subject.displayName, subject.subjectKey, ...subject.aliases]
     .some((name) => value === name || value.includes(name) || name.includes(value))));
 }
@@ -77,7 +77,7 @@ export function admitL2FactsForIndexGroup(
   const verifiedSubjects: L2AdmissionSubject[] = [];
   for (const fact of facts) {
     const explicit = explicitlyEligible(fact);
-    const known = explicit ? undefined : matchingKnown(fact, knownSubjects);
+    const known = explicit || !candidateEligible(fact) ? undefined : matchingKnown(fact, knownSubjects);
     if (explicit || known) {
       const subjectKey = known?.subjectKey ?? (fact.subject_key.trim() || fact.entity.trim());
       accepted.push({
