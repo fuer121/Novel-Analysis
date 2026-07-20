@@ -134,6 +134,18 @@ async function tableExists(database: DisposablePostgres["db"], table: string) {
   return result.rows[0]?.exists ?? false;
 }
 
+async function columnExists(database: DisposablePostgres["db"], table: string, column: string) {
+  const result = await sql<{ exists: boolean }>`
+    select exists (
+      select 1
+      from information_schema.columns
+      where table_schema = 'public' and table_name = ${table} and column_name = ${column}
+    ) as exists
+  `.execute(database);
+
+  return result.rows[0]?.exists ?? false;
+}
+
 async function expectConstraintViolation(
   operation: Promise<unknown>,
   constraint: string,
@@ -237,6 +249,11 @@ describe("phase 1 PostgreSQL schema", () => {
 
   test("migrates down in foreign-key reverse order and back up from empty", async () => {
     await migrateDown(postgres.db);
+    expect(await tableExists(postgres.db, "books")).toBe(true);
+    expect(await tableExists(postgres.db, "prompt_versions")).toBe(true);
+    expect(await columnExists(postgres.db, "prompt_versions", "content")).toBe(false);
+
+    await migrateDown(postgres.db);
     expect(await tableExists(postgres.db, "books")).toBe(false);
     expect(await tableExists(postgres.db, "jobs")).toBe(true);
     expect(await tableExists(postgres.db, "users")).toBe(true);
@@ -253,6 +270,7 @@ describe("phase 1 PostgreSQL schema", () => {
     expect(await tableExists(postgres.db, "users")).toBe(true);
     expect(await tableExists(postgres.db, "jobs")).toBe(true);
     expect(await tableExists(postgres.db, "books")).toBe(true);
+    expect(await columnExists(postgres.db, "prompt_versions", "content")).toBe(true);
   });
 
   test("enforces named role, user status, and shared job status checks", async () => {

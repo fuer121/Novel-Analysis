@@ -1,9 +1,10 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { createContentCipher, createLibraryRepository } from "@novel-analysis/database";
+import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../database/src/testing/postgres.js";
 
-import { buildImportSourceVersion, IdempotencyConflictError, ImportJobService, InvalidImportScopeError, ScopeChangedError } from "./import-job.js";
+import { buildImportSourceVersion, createImportL1Handoff, IdempotencyConflictError, ImportJobService, InvalidImportScopeError, L1IdempotencyConflictError, ScopeChangedError } from "./import-job.js";
 
 describe("chapter import job", () => {
   let postgres: DisposablePostgres;
@@ -125,12 +126,107 @@ describe("chapter import job", () => {
     const library = createLibraryRepository(postgres.db, createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 1) } }));
     await library.insertChapter({ bookId, chapterIndex: 2, title: "Two", plaintext: "two", contentHmac: "h2", sourceVersion: version });
     await library.insertChapter({ bookId, chapterIndex: 3, title: "Three", plaintext: "three", contentHmac: "h3", sourceVersion: version });
+    const indexes = createIndexRepository(postgres.db, createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 1) } }));
+    const content = "automatic L1 prompt";
+    await indexes.createPromptVersion({ target: "l1-index", version: "auto-v1", content, contentHash: createHash("sha256").update(content).digest("hex") });
+    await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "adapter-v1", dslHash: "workflow-v1" });
     const service = new ImportJobService(postgres.db);
     const preview = await service.preview({ bookId });
     expect(preview.executable).toBe(0);
     const job = await service.create({ bookId, requestedBy: userId, requestId: "complete", scopeHash: preview.scopeHash, autoStartL1: true });
     expect(job.status).toBe("completed");
+    const l1Job = await postgres.db.selectFrom("jobs").selectAll().where("type", "=", "l1-index").executeTakeFirstOrThrow();
+    expect(l1Job.progress).toMatchObject({ total: 3, completed: 0, failed: 0, skipped: 0 });
+    expect(l1Job.config_snapshot).toMatchObject({ scopeHash: expect.stringMatching(/^[a-f0-9]{64}$/), prompt: { content }, handoffFromImportJobId: job.id });
+    expect(await postgres.db.selectFrom("job_steps").select(["position", "kind"]).where("job_id", "=", l1Job.id).orderBy("position").execute()).toEqual([
+      { position: 1, kind: "l1-index" },
+      { position: 2, kind: "l1-index" },
+      { position: 3, kind: "l1-index" },
+    ]);
+    expect(await postgres.db.selectFrom("job_outbox").select("topic").where("job_id", "=", l1Job.id).execute()).toEqual([{ topic: "jobs.wake" }]);
+    expect((await service.create({ bookId, requestedBy: userId, requestId: "complete", scopeHash: preview.scopeHash, autoStartL1: true })).id).toBe(job.id);
     expect(await postgres.db.selectFrom("jobs").select("id").where("type", "=", "l1-index").execute()).toHaveLength(1);
     expect(await postgres.db.selectFrom("job_outbox").selectAll().where("job_id", "=", job.id).execute()).toEqual([]);
+  });
+
+  it("expands a Task 3 legacy queued L1 handoff in place exactly once", async () => {
+    const version = buildImportSourceVersion({ provider: "dify", sourceId: "source-1", startChapter: 1, endChapter: 3 });
+    await postgres.db.updateTable("chapters").set({ source_version: version }).where("book_id", "=", bookId).execute();
+    const library = createLibraryRepository(postgres.db, createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 1) } }));
+    await library.insertChapter({ bookId, chapterIndex: 3, title: "Three", plaintext: "three", contentHmac: "h3", sourceVersion: version });
+    const indexes = createIndexRepository(postgres.db, createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 1) } }));
+    const content = "legacy handoff prompt";
+    await indexes.createPromptVersion({ target: "l1-index", version: "legacy-handoff", content, contentHash: createHash("sha256").update(content).digest("hex") });
+    await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "adapter-v1", dslHash: "workflow-v1" });
+    const importJob = await postgres.db.insertInto("jobs").values({ type: "import", status: "completed", requested_by: userId, request_id: "legacy-import", scope: { bookId }, config_snapshot: {}, concurrency_key: null, progress: { total: 0, completed: 0, failed: 0, skipped: 0, current: "" } }).returning("id").executeTakeFirstOrThrow();
+    const legacy = await postgres.db.insertInto("jobs").values({ type: "l1-index", status: "queued", requested_by: userId, request_id: `import-handoff:${importJob.id}`, scope: { bookId }, config_snapshot: { handoffFromImportJobId: importJob.id }, concurrency_key: `l1:${bookId}`, progress: { total: 0, completed: 0, failed: 0, skipped: 0, current: "" } }).returning("id").executeTakeFirstOrThrow();
+    await postgres.db.insertInto("job_events").values({ job_id: legacy.id, type: "created", dedupe_key: "created", payload: { status: "queued", handoffFromImportJobId: importJob.id } }).execute();
+
+    await postgres.db.transaction().execute((transaction) => createImportL1Handoff(transaction, { importJobId: importJob.id, bookId, requestedBy: userId }));
+    await postgres.db.transaction().execute((transaction) => createImportL1Handoff(transaction, { importJobId: importJob.id, bookId, requestedBy: userId }));
+
+    const expanded = await postgres.db.selectFrom("jobs").selectAll().where("id", "=", legacy.id).executeTakeFirstOrThrow();
+    expect(expanded.config_snapshot).toMatchObject({ scopeHash: expect.stringMatching(/^[a-f0-9]{64}$/), prompt: { content }, handoffFromImportJobId: importJob.id });
+    expect(expanded.progress).toMatchObject({ total: 3, completed: 0, failed: 0, skipped: 0 });
+    expect(await postgres.db.selectFrom("job_steps").select(["position", "kind"]).where("job_id", "=", legacy.id).orderBy("position").execute()).toEqual([
+      { position: 1, kind: "l1-index" },
+      { position: 2, kind: "l1-index" },
+      { position: 3, kind: "l1-index" },
+    ]);
+    expect(await postgres.db.selectFrom("job_outbox").select("topic").where("job_id", "=", legacy.id).execute()).toEqual([{ topic: "jobs.wake" }]);
+    expect(await postgres.db.selectFrom("job_events").select("id").where("job_id", "=", legacy.id).execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("jobs").select("id").where("type", "=", "l1-index").execute()).toEqual([{ id: legacy.id }]);
+  });
+
+  it("recovers a legacy automatic L1 handoff when the completed import is exactly replayed", async () => {
+    const service = new ImportJobService(postgres.db);
+    const preview = await service.preview({ bookId });
+    const importJob = await service.create({ bookId, requestedBy: userId, requestId: "recover-completed", scopeHash: preview.scopeHash, autoStartL1: true });
+    const version = buildImportSourceVersion({ provider: "dify", sourceId: "source-1", startChapter: 1, endChapter: 3 });
+    await postgres.db.updateTable("chapters").set({ source_version: version }).where("book_id", "=", bookId).execute();
+    const library = createLibraryRepository(postgres.db, createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 1) } }));
+    await library.insertChapter({ bookId, chapterIndex: 3, title: "Three", plaintext: "three", contentHmac: "h3", sourceVersion: version });
+    await postgres.db.updateTable("jobs").set({ status: "completed", concurrency_key: null, progress: { total: 2, completed: 2, failed: 0, skipped: 0, current: "" } }).where("id", "=", importJob.id).execute();
+    const indexes = createIndexRepository(postgres.db, createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 1) } }));
+    const content = "recovered handoff prompt";
+    await indexes.createPromptVersion({ target: "l1-index", version: "recover-handoff", content, contentHash: createHash("sha256").update(content).digest("hex") });
+    await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "adapter-v1", dslHash: "workflow-v1" });
+    const legacy = await postgres.db.insertInto("jobs").values({ type: "l1-index", status: "queued", requested_by: userId, request_id: `import-handoff:${importJob.id}`, scope: { bookId }, config_snapshot: { handoffFromImportJobId: importJob.id }, concurrency_key: `l1:${bookId}`, progress: { total: 0, completed: 0, failed: 0, skipped: 0, current: "" } }).returning("id").executeTakeFirstOrThrow();
+    await postgres.db.insertInto("job_events").values({ job_id: legacy.id, type: "created", dedupe_key: "created", payload: { status: "queued", handoffFromImportJobId: importJob.id } }).execute();
+
+    expect((await service.create({ bookId, requestedBy: userId, requestId: "recover-completed", scopeHash: preview.scopeHash, autoStartL1: true })).id).toBe(importJob.id);
+    expect((await service.create({ bookId, requestedBy: userId, requestId: "recover-completed", scopeHash: preview.scopeHash, autoStartL1: true })).id).toBe(importJob.id);
+
+    const expanded = await postgres.db.selectFrom("jobs").select("config_snapshot").where("id", "=", legacy.id).executeTakeFirstOrThrow();
+    expect(expanded.config_snapshot).toMatchObject({ prompt: { content }, handoffFromImportJobId: importJob.id });
+    expect(await postgres.db.selectFrom("job_steps").select("id").where("job_id", "=", legacy.id).execute()).toHaveLength(3);
+    expect(await postgres.db.selectFrom("job_outbox").select("id").where("job_id", "=", legacy.id).execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("jobs").select("id").where("type", "=", "l1-index").execute()).toEqual([{ id: legacy.id }]);
+  });
+
+  it("does not start L1 when an automatic-disabled completed import is exactly replayed", async () => {
+    const service = new ImportJobService(postgres.db);
+    const preview = await service.preview({ bookId });
+    const importJob = await service.create({ bookId, requestedBy: userId, requestId: "completed-manual", scopeHash: preview.scopeHash, autoStartL1: false });
+    const version = buildImportSourceVersion({ provider: "dify", sourceId: "source-1", startChapter: 1, endChapter: 3 });
+    await postgres.db.updateTable("chapters").set({ source_version: version }).where("book_id", "=", bookId).execute();
+    await createLibraryRepository(postgres.db, createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 1) } })).insertChapter({ bookId, chapterIndex: 3, title: "Three", plaintext: "three", contentHmac: "h3", sourceVersion: version });
+    await postgres.db.updateTable("jobs").set({ status: "completed", concurrency_key: null, progress: { total: 2, completed: 2, failed: 0, skipped: 0, current: "" } }).where("id", "=", importJob.id).execute();
+
+    const replay = await service.create({ bookId, requestedBy: userId, requestId: "completed-manual", scopeHash: preview.scopeHash, autoStartL1: false });
+
+    expect(replay.id).toBe(importJob.id);
+    expect(await postgres.db.selectFrom("jobs").select("id").where("type", "=", "l1-index").execute()).toEqual([]);
+  });
+
+  it("rejects a legacy handoff with a partial frozen snapshot without effects", async () => {
+    const importJob = await postgres.db.insertInto("jobs").values({ type: "import", status: "completed", requested_by: userId, request_id: "malformed-import", scope: { bookId }, config_snapshot: {}, concurrency_key: null, progress: { total: 0, completed: 0, failed: 0, skipped: 0, current: "" } }).returning("id").executeTakeFirstOrThrow();
+    const malformed = await postgres.db.insertInto("jobs").values({ type: "l1-index", status: "queued", requested_by: userId, request_id: `import-handoff:${importJob.id}`, scope: { bookId }, config_snapshot: { handoffFromImportJobId: importJob.id, scopeHash: "0".repeat(64) }, concurrency_key: `l1:${bookId}`, progress: { total: 0, completed: 0, failed: 0, skipped: 0, current: "" } }).returning("id").executeTakeFirstOrThrow();
+
+    await expect(postgres.db.transaction().execute((transaction) => createImportL1Handoff(transaction, { importJobId: importJob.id, bookId, requestedBy: userId }))).rejects.toBeInstanceOf(L1IdempotencyConflictError);
+
+    expect(await postgres.db.selectFrom("job_steps").select("id").where("job_id", "=", malformed.id).execute()).toEqual([]);
+    expect(await postgres.db.selectFrom("job_outbox").select("id").where("job_id", "=", malformed.id).execute()).toEqual([]);
+    expect((await postgres.db.selectFrom("jobs").select("config_snapshot").where("id", "=", malformed.id).executeTakeFirstOrThrow()).config_snapshot).toEqual({ handoffFromImportJobId: importJob.id, scopeHash: "0".repeat(64) });
   });
 });

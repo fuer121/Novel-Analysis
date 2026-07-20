@@ -4,7 +4,19 @@ import { z } from "zod";
 
 import { BookSummarySchema, JobResponseSchema } from "@novel-analysis/contracts";
 import type { DatabaseConnection } from "@novel-analysis/database";
-import { BookNotFoundError, IdempotencyConflictError, ImportJobService, MAX_IMPORT_CHAPTER_INDEX, MAX_IMPORT_CHAPTERS, ScopeChangedError } from "@novel-analysis/jobs";
+import {
+  BookNotFoundError,
+  IdempotencyConflictError,
+  ImportJobService,
+  L1BookNotFoundError,
+  L1IdempotencyConflictError,
+  L1JobService,
+  L1PromptConfigurationError,
+  L1ScopeChangedError,
+  MAX_IMPORT_CHAPTER_INDEX,
+  MAX_IMPORT_CHAPTERS,
+  ScopeChangedError,
+} from "@novel-analysis/jobs";
 
 import { requireCsrf } from "../auth/csrf.js";
 import { type AuthenticatedRequest, requireSession } from "../auth/session-middleware.js";
@@ -19,6 +31,7 @@ const createSchema = z.strictObject({
   if (value.source.endChapter < value.source.startChapter || value.source.endChapter - value.source.startChapter + 1 > MAX_IMPORT_CHAPTERS) context.addIssue({ code: "custom", path: ["source", "endChapter"], message: "invalid import range" });
 });
 const createJobSchema = z.strictObject({ scopeHash: z.string().regex(/^[a-f0-9]{64}$/), autoStartL1: z.boolean() });
+const createL1JobSchema = z.strictObject({ scopeHash: z.string().regex(/^[a-f0-9]{64}$/) });
 
 function idempotencyKey(request: AuthenticatedRequest, response: Response): string | null {
   const parsed = keySchema.safeParse(request.get("Idempotency-Key"));
@@ -38,6 +51,7 @@ export function createBooksRouter(database: DatabaseConnection, config: ApiConfi
   const session = requireSession(database, config);
   const csrf = requireCsrf(database, config);
   const jobs = new ImportJobService(database);
+  const l1Jobs = new L1JobService(database);
 
   router.post("/", ...csrf, async (request: AuthenticatedRequest, response, next) => {
     const key = idempotencyKey(request, response);
@@ -90,6 +104,47 @@ export function createBooksRouter(database: DatabaseConnection, config: ApiConfi
     } catch { next(new Error("book detail failed")); }
   });
 
+  router.get("/:id/l1-coverage", session, async (request, response, next) => {
+    const params = idSchema.safeParse(request.params);
+    if (!params.success) { response.status(400).json({ error: "invalid_request" }); return; }
+    try {
+      const { total, fresh, missing, failed, stale } = await l1Jobs.preview({ bookId: params.data.id });
+      response.json({ total, fresh, missing, failed, stale });
+    } catch (error) {
+      if (error instanceof L1BookNotFoundError) { response.status(404).json({ error: "book_not_found" }); return; }
+      if (error instanceof L1PromptConfigurationError) { response.status(409).json({ error: "l1_configuration_invalid" }); return; }
+      next(new Error("L1 coverage failed"));
+    }
+  });
+
+  router.post("/:id/l1-preview", ...csrf, async (request, response, next) => {
+    const params = idSchema.safeParse(request.params);
+    if (!params.success || Object.keys((request.body ?? {}) as object).length > 0) { response.status(400).json({ error: "invalid_request" }); return; }
+    try { response.json(await l1Jobs.preview({ bookId: params.data.id })); }
+    catch (error) {
+      if (error instanceof L1BookNotFoundError) { response.status(404).json({ error: "book_not_found" }); return; }
+      if (error instanceof L1PromptConfigurationError) { response.status(409).json({ error: "l1_configuration_invalid" }); return; }
+      next(new Error("L1 preview failed"));
+    }
+  });
+
+  router.post("/:id/l1-jobs", ...csrf, async (request: AuthenticatedRequest, response, next) => {
+    const params = idSchema.safeParse(request.params);
+    const key = idempotencyKey(request, response);
+    const body = createL1JobSchema.safeParse(request.body);
+    if (!params.success || !key || !body.success) { if (!response.headersSent) response.status(400).json({ error: "invalid_request" }); return; }
+    try {
+      const job = await l1Jobs.create({ bookId: params.data.id, requestedBy: request.auth!.userId, requestId: key, scopeHash: body.data.scopeHash });
+      response.status(201).json(JobResponseSchema.parse({ job }));
+    } catch (error) {
+      if (error instanceof L1ScopeChangedError) { response.status(409).json({ error: "scope_changed" }); return; }
+      if (error instanceof L1IdempotencyConflictError) { response.status(409).json({ error: "idempotency_conflict" }); return; }
+      if (error instanceof L1BookNotFoundError) { response.status(404).json({ error: "book_not_found" }); return; }
+      if (error instanceof L1PromptConfigurationError) { response.status(409).json({ error: "l1_configuration_invalid" }); return; }
+      next(new Error("L1 job creation failed"));
+    }
+  });
+
   router.post("/:id/import-preview", ...csrf, async (request, response, next) => {
     const params = idSchema.safeParse(request.params);
     if (!params.success || Object.keys((request.body ?? {}) as object).length > 0) { response.status(400).json({ error: "invalid_request" }); return; }
@@ -112,6 +167,7 @@ export function createBooksRouter(database: DatabaseConnection, config: ApiConfi
       if (error instanceof ScopeChangedError) { response.status(409).json({ error: "scope_changed" }); return; }
       if (error instanceof IdempotencyConflictError) { response.status(409).json({ error: "idempotency_conflict" }); return; }
       if (error instanceof BookNotFoundError) { response.status(404).json({ error: "book_not_found" }); return; }
+      if (error instanceof L1PromptConfigurationError) { response.status(409).json({ error: "l1_configuration_invalid" }); return; }
       next(new Error("import job creation failed"));
     }
   });
