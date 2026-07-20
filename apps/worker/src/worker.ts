@@ -9,6 +9,7 @@ import {
   type ExecutionBarrier,
   type StepExecutor,
 } from "@novel-analysis/jobs";
+import { failImportClaim, type LibraryImportExecutor } from "./library-executor.js";
 
 const WAKE_QUEUE = "jobs.wake";
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
@@ -72,6 +73,49 @@ export function createCoordinatedShutdown(options: {
 const NOOP_BARRIER: ExecutionBarrier = {
   async afterAttemptStarted() {},
 };
+
+const LIBRARY_CONFIG_FIELDS = ["DIFY_BASE_URL", "DIFY_CHAPTER_IMPORT_KEY", "CONTENT_ENCRYPTION_KEY", "CONTENT_ENCRYPTION_KEY_VERSION", "CONTENT_HMAC_KEY"] as const;
+
+export type LibraryRuntimeConfig = { baseUrl: string; chapterImportKey: string; contentKey: Buffer; contentKeyVersion: string; hmacKey: Buffer };
+
+function decodeBase64(value: string): Buffer | null {
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) return null;
+  const decoded = Buffer.from(value, "base64");
+  return decoded.toString("base64") === value ? decoded : null;
+}
+
+export function parseLibraryRuntimeConfig(environment: Record<string, string | undefined>): LibraryRuntimeConfig | undefined {
+  const present = LIBRARY_CONFIG_FIELDS.filter((field) => environment[field] !== undefined);
+  if (present.length === 0) return undefined;
+  const missing = LIBRARY_CONFIG_FIELDS.filter((field) => environment[field] === undefined);
+  if (missing.length > 0) throw new Error(`Invalid library runtime configuration fields: ${missing.join(",")}`);
+  const invalid: string[] = [];
+  let url: URL | undefined;
+  try { url = new URL(environment.DIFY_BASE_URL!); } catch { invalid.push("DIFY_BASE_URL"); }
+  if (url && !["http:", "https:"].includes(url.protocol)) invalid.push("DIFY_BASE_URL");
+  if (!environment.DIFY_CHAPTER_IMPORT_KEY!.trim()) invalid.push("DIFY_CHAPTER_IMPORT_KEY");
+  if (!environment.CONTENT_ENCRYPTION_KEY_VERSION!.trim()) invalid.push("CONTENT_ENCRYPTION_KEY_VERSION");
+  const contentKey = decodeBase64(environment.CONTENT_ENCRYPTION_KEY!);
+  if (contentKey?.length !== 32) invalid.push("CONTENT_ENCRYPTION_KEY");
+  const hmacKey = decodeBase64(environment.CONTENT_HMAC_KEY!);
+  if (!hmacKey?.length) invalid.push("CONTENT_HMAC_KEY");
+  if (invalid.length > 0) throw new Error(`Invalid library runtime configuration fields: ${[...new Set(invalid)].join(",")}`);
+  return { baseUrl: url!.toString().replace(/\/$/, ""), chapterImportKey: environment.DIFY_CHAPTER_IMPORT_KEY!, contentKey: contentKey!, contentKeyVersion: environment.CONTENT_ENCRYPTION_KEY_VERSION!, hmacKey: hmacKey! };
+}
+
+export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor }): StepExecutor {
+  const example = new ExampleExecutor();
+  return {
+    execute(claim) {
+      if (claim.kind === "chapter-import") {
+        return options.libraryExecutor
+          ? options.libraryExecutor.execute(claim)
+          : failImportClaim(options.database, claim, "configuration_error");
+      }
+      return example.execute(claim);
+    },
+  };
+}
 
 function throwCollected(errors: unknown[], message: string): void {
   if (errors.length === 1) throw errors[0];
@@ -223,6 +267,11 @@ export class JobWorker {
         attemptNo: claim.attemptNo,
       });
       const output = await this.executor.execute(claim);
+      if (claim.kind === "chapter-import" && output && typeof output === "object" && "disposition" in output) {
+        const disposition = (output as { disposition?: string }).disposition;
+        if (disposition !== "completed") return;
+        continue;
+      }
       const result = await this.leases.completeStep(claim, output);
       if (result.disposition !== "completed") return;
     }

@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@novel-analysis/database": "*",
+    "@novel-analysis/dify": "*",
     "@novel-analysis/jobs": "*",
     "tsx": "4.20.6"
   }
