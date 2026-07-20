@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 86277ee20fc65cbbf1f80d426ccf09f20c2592bf
 baseline_status: current
-updated_at: 2026-07-20T21:50:38+08:00
+updated_at: 2026-07-20T22:51:09+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK8-STARTED
+last_checkpoint: CP-20260720-PHASE2-TASK8-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -33,14 +33,14 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | --- | --- | --- |
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
-| Phase 2 | implementing | Task 0 至 Task 7 已完成，Task 8 ready |
+| Phase 2 | implementing | Task 0 至 Task 7 已合并，Task 8 accepted awaiting PR/CI |
 | Phase 3 | blocked | Phase 2 Gate 通过后才能推进 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE2-TASK8 | phase-2 | Scale, recovery and Phase 2 acceptance | controller-agent | codex/phase2-task8-acceptance | 3f9cd304018497b835b743440c38ea459846b6a8 | none | in_progress | CP-20260720-PHASE2-TASK7-MERGED | CP-20260720-PHASE2-TASK8-STARTED | write and observe the independent RED Phase 2 composition test |
+| PHASE2-TASK8 | phase-2 | Scale, recovery and Phase 2 acceptance | controller-agent | codex/phase2-task8-acceptance | 11f55a26d2b4de42cde7addcc0aa6e4dda07e17f | d21ccba871f4a087d5da94447035dc96faafd304 | accepted | CP-20260720-PHASE2-TASK7-MERGED | CP-20260720-PHASE2-TASK8-ACCEPTED | create PR and verify CI |
 
 ## Phase Ledgers
 
@@ -74,11 +74,11 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- 当前无阻塞 Task 7 implementation 的证据冲突
+- 当前无阻塞 Task 8 PR 和 CI 验证的证据冲突
 
 ## Pending Feedback
 
-无，Task 8 可按 accepted started contract 实施
+无，Task 8 可按 DEC-0002 创建 PR 并核验 CI
 
 ## Next Gate
 
@@ -86,6 +86,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 2 Task 8 accepted](checkpoints/CP-20260720-PHASE2-TASK8-ACCEPTED.md)
 - [Phase 2 Task 8 started](checkpoints/CP-20260720-PHASE2-TASK8-STARTED.md)
 - [Phase 2 Task 7 merged](checkpoints/CP-20260720-PHASE2-TASK7-MERGED.md)
 - [Phase 2 Task 7 accepted](checkpoints/CP-20260720-PHASE2-TASK7-ACCEPTED.md)
