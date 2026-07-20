@@ -105,17 +105,45 @@ Use one project source
 Project governance review
 `;
 
+const taskContractTemplate = `# Task Contract Template
+
+## Core Allowed Modules
+## Mechanical Adjacent Scope
+## Base Commit
+## Success Criteria
+## Prohibited Changes
+## Required Verification
+## Escalation Conditions
+## Resource Budget
+`;
+
+const checkpointTemplate = `# Checkpoint Submission Template
+
+## Assigned Scope
+## Prohibited Changes Audit
+## Actual Changes
+## Verification By Role
+## Scope Deviations
+## Escalations
+## Risks And Blockers
+## Recommended Next Action
+## Acceptance Request
+`;
+
 async function createFixture(t) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "project-source-"));
   t.after(() => fs.rm(root, { recursive: true, force: true }));
 
   await fs.mkdir(path.join(root, "docs/project/checkpoints"), { recursive: true });
   await fs.mkdir(path.join(root, "docs/project/decisions"), { recursive: true });
+  await fs.mkdir(path.join(root, "docs/project/templates"), { recursive: true });
   await fs.mkdir(path.join(root, "dify-workflows"), { recursive: true });
   await Promise.all([
     fs.writeFile(path.join(root, "docs/project/PROJECT.md"), projectDocument),
     fs.writeFile(path.join(root, "docs/project/checkpoints/checkpoint-001.md"), checkpointDocument),
     fs.writeFile(path.join(root, "docs/project/decisions/decision-001.md"), decisionDocument),
+    fs.writeFile(path.join(root, "docs/project/templates/task-contract.md"), taskContractTemplate),
+    fs.writeFile(path.join(root, "docs/project/templates/checkpoint.md"), checkpointTemplate),
     fs.writeFile(
       path.join(root, "dify-workflows/manifest.json"),
       `${JSON.stringify({ schemaVersion: 1, workflows: {} }, null, 2)}\n`,
@@ -165,6 +193,19 @@ test("accepts a complete project source fixture", async (t) => {
   const root = await createFixture(t);
 
   assert.deepEqual(await validateProjectSource(root, { checkGit: false }), []);
+});
+
+test("rejects missing governance templates and required sections", async (t) => {
+  const root = await createFixture(t);
+  await fs.rm(path.join(root, "docs/project/templates/task-contract.md"));
+  await fs.writeFile(
+    path.join(root, "docs/project/templates/checkpoint.md"),
+    checkpointTemplate.replace("## Verification By Role\n", ""),
+  );
+
+  const errors = await validateProjectSource(root, { checkGit: false });
+  assert.match(errors.join("\n"), /Could not read governance template task-contract\.md/);
+  assert.match(errors.join("\n"), /checkpoint\.md.*Verification By Role/);
 });
 
 test("accepts a percent-encoded local reference", async (t) => {
