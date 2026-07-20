@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T10:18:53+08:00
+updated_at: 2026-07-20T11:43:12+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK4-TEST-SCOPE-CORRECTED
+last_checkpoint: CP-20260720-PHASE2-TASK4-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -54,7 +54,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-L2-DSL-ALIGNMENT | phase-2 | Repository L2 Workflow output alignment and smoke timeout | controller-agent | main | d81c08d39e24635b27f85e4cacf9302e53b74cfc | 95a73aedb0f41727d82f0058b0106c1f75403dcc | merged | DEC-0005 | CP-20260719-PHASE2-L2-REAL-SMOKE-ACCEPTED | complete; real Dify smoke passed; Task 2 remains unlocked |
 | PHASE2-TASK2 | phase-2 | Encrypted library and index persistence | controller-agent | main | 153f6464139d579b5835c5bc68658287a18cfeaf | 78f2adf97c9598a3770a60be185e425df48dcfd6 | merged | CP-20260719-PHASE2-TASK1-MERGED | CP-20260719-PHASE2-TASK2-MERGED | complete; start Task 3 |
 | PHASE2-TASK3 | phase-2 | Book creation and recoverable chapter import | controller-agent | main | 1fa158bf39af1cfadc51517fbb0733c439e65628 | 55560718147584ecf4eae434b6581b7748779c8e | merged | CP-20260719-PHASE2-TASK2-MERGED | CP-20260720-PHASE2-TASK3-MERGED | complete; start Task 4 |
-| PHASE2-TASK4 | phase-2 | Recoverable L1 build and coverage | controller-agent | refactor/phase2-task4-l1 | f8a7291f3c5bd1fb2300573368a267b52c31d228 | f8a7291f3c5bd1fb2300573368a267b52c31d228 | in_progress | CP-20260720-PHASE2-TASK3-MERGED | CP-20260720-PHASE2-TASK4-TEST-SCOPE-CORRECTED | finish corrected L1 contract and migration roundtrip test; Task 5 remains locked |
+| PHASE2-TASK4 | phase-2 | Recoverable L1 build and coverage | controller-agent | refactor/phase2-task4-l1 | f8a7291f3c5bd1fb2300573368a267b52c31d228 | c2733e25f8bce5283a3d2482dbf59bc47c0333b1 | accepted | CP-20260720-PHASE2-TASK3-MERGED | CP-20260720-PHASE2-TASK4-ACCEPTED | merge governance record, then publish implementation PR; Task 5 remains locked |
 
 ## Effective Decisions
 
@@ -84,8 +84,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- Task 4 实现验证已通过 focused 36/36、lint、typecheck、new、legacy 与项目源检查；用户已授权修正 schema migration roundtrip test 后完成提交
-- Task 5 保持锁定，等待 Task 4 实现、双重独立审查和 merged checkpoint
+- Task 4 已接受；等待治理记录与实现 PR 按顺序合并，Task 5 保持锁定
 
 ## Next Gate
 
@@ -142,6 +141,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Phase 2 Task 4 started checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-STARTED.md)
 - [Phase 2 Task 4 contract corrected checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-CONTRACT-CORRECTED.md)
 - [Phase 2 Task 4 test scope corrected checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-TEST-SCOPE-CORRECTED.md)
+- [Phase 2 Task 4 accepted checkpoint](checkpoints/CP-20260720-PHASE2-TASK4-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
