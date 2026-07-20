@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 820b30a1cfae0b0a19be9fa763f44801742d38e9
 baseline_status: current
-updated_at: 2026-07-20T17:57:50+08:00
+updated_at: 2026-07-20T18:19:47+08:00
 updated_by: controller-agent
 current_phase: phase-2-implementation
-last_checkpoint: CP-20260720-PHASE2-TASK5-CONTRACT-CORRECTED
+last_checkpoint: CP-20260720-PHASE2-TASK5-ACCEPTED
 next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -56,7 +56,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 | PHASE2-TASK3 | phase-2 | Book creation and recoverable chapter import | controller-agent | main | 1fa158bf39af1cfadc51517fbb0733c439e65628 | 55560718147584ecf4eae434b6581b7748779c8e | merged | CP-20260719-PHASE2-TASK2-MERGED | CP-20260720-PHASE2-TASK3-MERGED | complete; start Task 4 |
 | PHASE2-TASK4 | phase-2 | Recoverable L1 build and coverage | controller-agent | main | f8a7291f3c5bd1fb2300573368a267b52c31d228 | 1d04f01545b8c1c83dd1baf00990f1eefe26cc7d | merged | CP-20260720-PHASE2-TASK3-MERGED | CP-20260720-PHASE2-TASK4-MERGED | complete; start Task 5 |
 | GOV-MECHANISMS | governance | Task contract, workspace lifecycle tools and layered verification | controller-agent | main | fc80285e69a97e3d979054f36439a6d4c097104e | 01aaa83002a01f58832d3303bfb4d222b0988feb | merged | DEC-0007 | CP-20260720-GOV-MECHANISMS-MERGED-PHASE2-TASK5-STARTED | complete; Task 5 started |
-| PHASE2-TASK5 | phase-2 | L2 index groups and scope contract | controller-agent | codex/phase2-task5-l2-scope | 553c803dbd7ce2dd18930c08b770832433e92355 | 553c803dbd7ce2dd18930c08b770832433e92355 | in_progress | CP-20260720-PHASE2-TASK4-MERGED | CP-20260720-PHASE2-TASK5-CONTRACT-CORRECTED | implement corrected contract |
+| PHASE2-TASK5 | phase-2 | L2 index groups and scope contract | controller-agent | codex/phase2-task5-l2-scope | 373782cd46598ff6c3270569143c7893f4c17f1c | 96913e59550cfc82597d53152da3235d002ec737 | accepted | CP-20260720-PHASE2-TASK4-MERGED | CP-20260720-PHASE2-TASK5-ACCEPTED | create PR, verify CI, merge, then start Task 6 |
 
 ## Effective Decisions
 
@@ -89,7 +89,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-- Task 5 按 create-only API 与 corrected contract 实施；索引组绑定 Prompt，L2 job snapshot 冻结 Workflow
+- Task 5 已通过本地完整验证并接受，等待 PR 与 CI 核验；Task 6 在 merged checkpoint 前保持锁定
 
 ## Next Gate
 
@@ -151,6 +151,7 @@ next_gate: GATE-PHASE2-IMPLEMENTATION-ACCEPTED
 - [Governance mechanisms accepted checkpoint](checkpoints/CP-20260720-GOV-MECHANISMS-ACCEPTED.md)
 - [Governance mechanisms merged and Phase 2 Task 5 started checkpoint](checkpoints/CP-20260720-GOV-MECHANISMS-MERGED-PHASE2-TASK5-STARTED.md)
 - [Phase 2 Task 5 contract corrected checkpoint](checkpoints/CP-20260720-PHASE2-TASK5-CONTRACT-CORRECTED.md)
+- [Phase 2 Task 5 accepted checkpoint](checkpoints/CP-20260720-PHASE2-TASK5-ACCEPTED.md)
 - [Legacy project control baseline](../PROJECT_CONTROL_BASELINE.md)
 
 ## Update Protocol
