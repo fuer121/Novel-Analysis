@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import request from "supertest";
 
-import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
+import { QueryTurnDetailSchema, QueryTurnHistoryPageSchema } from "@novel-analysis/contracts";
+import { createContentCipher, createIndexRepository, createLibraryRepository, createQueryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../../packages/database/src/testing/postgres.js";
 
 import { createApp } from "../app.js";
@@ -16,6 +17,7 @@ describe("query session routes", () => {
   let postgres: DisposablePostgres;
   let bookId: string;
   let groupId: string;
+  let factId: string;
   const identities: Record<string, { id: string; cookie: string; csrf: string }> = {};
 
   beforeEach(async () => {
@@ -32,10 +34,14 @@ describe("query session routes", () => {
     const prompt = await indexes.createPromptVersion({ target: "l2-index", version: "v1", content: "prompt", contentHash: createHash("sha256").update("prompt").digest("hex") });
     groupId = (await indexes.createIndexGroup({ bookId, key: "people", name: "People", categoryScope: "general", promptVersionId: prompt.id, configHash: "group-v1" })).id;
     await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "summary-v1", dslHash: "summary-dsl-v1" });
+    let firstChapterId = "";
     for (let chapterIndex = 1; chapterIndex <= 2; chapterIndex += 1) {
       const chapter = await library.insertChapter({ bookId, chapterIndex, title: `C${chapterIndex}`, plaintext: `body-${chapterIndex}`, contentHmac: `h-${chapterIndex}`, sourceVersion: "source" });
+      if (chapterIndex === 1) firstChapterId = chapter.id;
       await indexes.putL2ChapterStatus({ groupId, chapterId: chapter.id, inputSignature: `coverage-${chapterIndex}`, status: "fresh" });
     }
+    await indexes.registerSubject({ groupId, subjectKey: "hero", displayName: "Hero", aliases: [] });
+    factId = (await indexes.addFact({ groupId, chapterId: firstChapterId, subjectKey: "hero", factType: "event", plaintext: "EVIDENCE_BODY_SENTINEL", metadata: {} })).id;
   });
 
   afterEach(async () => postgres.destroy());
@@ -48,6 +54,13 @@ describe("query session routes", () => {
     const response = await request(app()).post(`/api/books/${bookId}/query-sessions`).set(write("owner")).send({ groupId, title: "Research", visibility, defaultStartChapter: 1, defaultEndChapter: 2 });
     expect(response.status).toBe(201);
     return response.body.session.id as string;
+  }
+
+  async function createTurn(sessionId: string, question: string, name = "owner") {
+    const preview = await request(app()).post(`/api/books/${bookId}/query-sessions/${sessionId}/turn-preview`).set(write(name)).send({ question, startChapter: 1, endChapter: 2 });
+    const created = await request(app()).post(`/api/books/${bookId}/query-sessions/${sessionId}/turns`).set(write(name)).send({ question, startChapter: 1, endChapter: 2, scopeHash: preview.body.scopeHash });
+    expect(created.status).toBe(201);
+    return created.body.turn.id as string;
   }
 
   it("hides private sessions from members while owner and admin can read", async () => {
@@ -85,6 +98,129 @@ describe("query session routes", () => {
   it("keeps existing book and job routes mounted", async () => {
     expect((await request(app()).get(`/api/books/${bookId}`).set(auth("owner"))).status).toBe(200);
     expect((await request(app()).get("/api/jobs").set(auth("owner"))).status).toBe(200);
+  });
+
+  it("returns bounded opaque turn history without evidence or unsafe trace fields", async () => {
+    const sessionId = await createSession("team");
+    const turnIds = [
+      await createTurn(sessionId, "one"),
+      await createTurn(sessionId, "two"),
+      await createTurn(sessionId, "three"),
+    ];
+    const tiedAt = new Date("2026-07-21T08:00:00.000Z");
+    await postgres.db.updateTable("query_turns").set({ created_at: tiedAt }).where("id", "in", turnIds).execute();
+    const tracedId = turnIds[0]!;
+    await postgres.db.updateTable("query_turns").set({
+      intent_snapshot: { kind: "single-target", target: "Hero", aliases: ["H"], referents: ["he"], categories: ["character"], keywords: ["return"], rawSnapshot: "RAW_SENTINEL" },
+      source_snapshot: { candidates: 7, used: 3, excluded: 4, gaps: 2, providerError: "PROVIDER_SENTINEL" },
+      gap_snapshot: { count: 2, credential: "CREDENTIAL_SENTINEL" },
+      config_snapshot: { recallPolicyVersion: "query-recall-v1", summaryWorkflowVersion: "summary-v1", maxCandidates: 50, executionSignature: "SIGNATURE_SENTINEL" },
+      status: "completed",
+      completed_at: tiedAt,
+    }).where("id", "=", tracedId).execute();
+
+    const firstResponse = await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns?limit=2`).set(auth("member"));
+    expect(firstResponse.status).toBe(200);
+    const first = QueryTurnHistoryPageSchema.parse(firstResponse.body);
+    expect(first.turns).toHaveLength(2);
+    expect(first.nextCursor).not.toContain(first.turns[1]!.id);
+    expect(JSON.stringify(first)).not.toContain("EVIDENCE_BODY_SENTINEL");
+    expect(JSON.stringify(first)).not.toMatch(/RAW_SENTINEL|PROVIDER_SENTINEL|CREDENTIAL_SENTINEL|SIGNATURE_SENTINEL/);
+
+    const secondResponse = await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns?limit=2&cursor=${encodeURIComponent(first.nextCursor!)}`).set(auth("member"));
+    expect(secondResponse.status).toBe(200);
+    const second = QueryTurnHistoryPageSchema.parse(secondResponse.body);
+    expect(second.turns).toHaveLength(1);
+    expect(second.nextCursor).toBeNull();
+    expect(new Set([...first.turns, ...second.turns].map((turn) => turn.id))).toEqual(new Set(turnIds));
+    const allTurns = [...first.turns, ...second.turns];
+    expect(allTurns.find((turn) => turn.id === tracedId)!.trace).toEqual({
+      kind: "single-target", target: "Hero", aliases: ["H"], referents: ["he"], categories: ["character"], keywords: ["return"],
+      sourceCounts: { candidates: 7, used: 3, excluded: 4 }, gapCount: 2,
+      recallPolicyVersion: "query-recall-v1", summaryWorkflowVersion: "summary-v1",
+    });
+    expect(allTurns.find((turn) => turn.id !== tracedId)!.trace).toMatchObject({ kind: null, target: null, recallPolicyVersion: "query-recall-v1", summaryWorkflowVersion: "summary-v1" });
+
+    expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns?limit=101`).set(auth("owner"))).status).toBe(400);
+    expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns?cursor=not-opaque`).set(auth("owner"))).status).toBe(400);
+  });
+
+  it("reuses history authorization and keeps selected-turn evidence with the same safe trace", async () => {
+    const privateSessionId = await createSession();
+    const privateTurnId = await createTurn(privateSessionId, "private");
+    expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${privateSessionId}/turns`).set(auth("member"))).status).toBe(404);
+    expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${privateSessionId}/turns`).set(auth("admin"))).status).toBe(200);
+
+    const teamSessionId = await createSession("team");
+    const teamTurnId = await createTurn(teamSessionId, "detail");
+    const repository = createQueryRepository(postgres.db, cipher);
+    await repository.commitEvidence({ turnId: teamTurnId, actor: { id: identities.owner!.id, role: "member" }, evidence: [{ factId, rank: 1, recallReason: "subject", disposition: "used" }] });
+    const detailResponse = await request(app()).get(`/api/books/${bookId}/query-sessions/${teamSessionId}/turns/${teamTurnId}`).set(auth("member"));
+    expect(detailResponse.status).toBe(200);
+    const detail = QueryTurnDetailSchema.parse(detailResponse.body.turn);
+    expect(detail.evidence[0]!.body).toBe("EVIDENCE_BODY_SENTINEL");
+
+    const cursor = Buffer.from(privateTurnId, "utf8").toString("base64url");
+    expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${teamSessionId}/turns?cursor=${cursor}`).set(auth("member"))).status).toBe(404);
+    const otherBookId = (await createLibraryRepository(postgres.db, cipher).createBook({ title: "Other history", createdBy: identities.owner!.id })).id;
+    expect((await request(app()).get(`/api/books/${otherBookId}/query-sessions/${teamSessionId}/turns`).set(auth("owner"))).status).toBe(404);
+  });
+
+  it("defaults history pages to twenty turns", async () => {
+    const sessionId = await createSession("team");
+    const repository = createQueryRepository(postgres.db, cipher);
+    for (let index = 0; index < 21; index += 1) {
+      await repository.createTurn({ sessionId, actor: { id: identities.owner!.id, role: "member" }, question: `history-${index}`, questionHmac: "a".repeat(64), startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "b".repeat(64) });
+    }
+    const response = await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns`).set(auth("owner"));
+    expect(response.status).toBe(200);
+    const page = QueryTurnHistoryPageSchema.parse(response.body);
+    expect(page.turns).toHaveLength(20);
+    expect(page.nextCursor).not.toBeNull();
+  });
+
+  it("normalizes legacy snapshots safely in history and selected-turn detail", async () => {
+    const sessionId = await createSession("team");
+    const turnId = await createTurn(sessionId, "legacy snapshot");
+    const aliases = Array.from({ length: 24 }, (_, index) => ` alias-${index} `);
+    const keywords = Array.from({ length: 54 }, (_, index) => ` keyword-${index} `);
+    await postgres.db.updateTable("query_turns").set({
+      intent_snapshot: {
+        kind: "unsupported",
+        target: "  Hero  ",
+        aliases: [...aliases, "   ", 42],
+        referents: ["  he  ", "", false],
+        categories: [...aliases, { unsafe: "CATEGORY_SENTINEL" }],
+        keywords: [...keywords, "   ", null],
+        rawSnapshot: "RAW_SNAPSHOT_SENTINEL",
+      },
+      source_snapshot: { candidates: "7", used: 3, excluded: -1, gaps: 2, providerError: "PROVIDER_ERROR_SENTINEL" },
+      gap_snapshot: { count: 2, credential: "CREDENTIAL_SENTINEL" },
+      config_snapshot: { recallPolicyVersion: "  recall-v1  ", summaryWorkflowVersion: "   ", executionSignature: "EXECUTION_SIGNATURE_SENTINEL" },
+    }).where("id", "=", turnId).execute();
+
+    const historyResponse = await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns`).set(auth("member"));
+    expect(historyResponse.status).toBe(200);
+    const history = QueryTurnHistoryPageSchema.parse(historyResponse.body);
+    const item = history.turns.find((turn) => turn.id === turnId)!;
+    expect(item.trace).toMatchObject({
+      kind: null,
+      target: "Hero",
+      aliases: aliases.slice(0, 20).map((value) => value.trim()),
+      referents: ["he"],
+      categories: aliases.slice(0, 20).map((value) => value.trim()),
+      keywords: keywords.slice(0, 50).map((value) => value.trim()),
+      sourceCounts: { candidates: 0, used: 3, excluded: 0 },
+      gapCount: 2,
+      recallPolicyVersion: "recall-v1",
+      summaryWorkflowVersion: null,
+    });
+
+    const detailResponse = await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns/${turnId}`).set(auth("member"));
+    expect(detailResponse.status).toBe(200);
+    const detail = QueryTurnDetailSchema.parse(detailResponse.body.turn);
+    expect(detail.trace).toEqual(item.trace);
+    expect(JSON.stringify({ history: historyResponse.body, detail: detailResponse.body })).not.toMatch(/RAW_SNAPSHOT_SENTINEL|PROVIDER_ERROR_SENTINEL|CREDENTIAL_SENTINEL|EXECUTION_SIGNATURE_SENTINEL|CATEGORY_SENTINEL/);
   });
 
   it("returns idempotency conflict for cross-book session replay and stores no plaintext-derived audit fingerprint", async () => {

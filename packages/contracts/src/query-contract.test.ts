@@ -3,6 +3,8 @@ import {
   QueryEvidenceSchema,
   QueryIntentSchema,
   QuerySessionSchema,
+  QueryTurnDetailSchema,
+  QueryTurnHistoryPageSchema,
   QueryTurnSchema,
 } from "./query-contract.js";
 
@@ -97,4 +99,92 @@ describe("query contracts", () => {
       exclusionReason: "candidate_budget",
     });
   });
+
+  it("strictly exposes safe trace fields in history without evidence", () => {
+    const parsed = QueryTurnHistoryPageSchema.parse({
+      turns: [{
+        id: ids.turn,
+        sessionId: ids.session,
+        createdBy: ids.user,
+        question: "之后发生了什么？",
+        startChapter: 420,
+        endChapter: 860,
+        status: "completed",
+        answer: "他返回了小镇",
+        degradation: null,
+        sourceStats: { candidates: 12, used: 8, excluded: 4, gaps: 1 },
+        trace: {
+          kind: "single-target",
+          target: "陈平安",
+          aliases: ["陈好人"],
+          referents: ["他"],
+          categories: ["人物"],
+          keywords: ["小镇"],
+          sourceCounts: { candidates: 12, used: 8, excluded: 4 },
+          gapCount: 1,
+          recallPolicyVersion: "query-recall-v1",
+          summaryWorkflowVersion: "summary-v1",
+        },
+      }],
+      nextCursor: "opaque",
+    });
+
+    expect(parsed.turns[0]).not.toHaveProperty("evidence");
+    expect(parsed.turns[0]!.trace).not.toHaveProperty("executionSignature");
+    expect(parsed.turns[0]!.trace).not.toHaveProperty("questionHmac");
+    expect(parsed.turns[0]!.trace).not.toHaveProperty("evidenceSnapshotHash");
+  });
+
+  it("represents queued empty snapshots without fabricated trace values", () => {
+    const parsed = QueryTurnDetailSchema.parse({
+      id: ids.turn,
+      sessionId: ids.session,
+      createdBy: ids.user,
+      question: "之后发生了什么？",
+      startChapter: 420,
+      endChapter: 860,
+      status: "queued",
+      answer: null,
+      degradation: null,
+      sourceStats: { candidates: 0, used: 0, excluded: 0, gaps: 0 },
+      trace: {
+        kind: null,
+        target: null,
+        aliases: [],
+        referents: [],
+        categories: [],
+        keywords: [],
+        sourceCounts: { candidates: 0, used: 0, excluded: 0 },
+        gapCount: 0,
+        recallPolicyVersion: null,
+        summaryWorkflowVersion: null,
+      },
+      evidence: [],
+    });
+
+    expect(parsed.trace.kind).toBeNull();
+    expect(parsed.trace.recallPolicyVersion).toBeNull();
+  });
+
+  it.each(["executionSignature", "questionHmac", "evidenceSnapshotHash", "jobId", "attemptId", "rawSnapshot", "providerError", "credential"])(
+    "rejects the unsafe trace key %s",
+    (key) => {
+      const result = QueryTurnHistoryPageSchema.safeParse({
+        turns: [{
+          id: ids.turn, sessionId: ids.session, createdBy: ids.user,
+          question: "问题", startChapter: 1, endChapter: 2, status: "queued",
+          answer: null, degradation: null,
+          sourceStats: { candidates: 0, used: 0, excluded: 0, gaps: 0 },
+          trace: {
+            kind: null, target: null, aliases: [], referents: [], categories: [], keywords: [],
+            sourceCounts: { candidates: 0, used: 0, excluded: 0 }, gapCount: 0,
+            recallPolicyVersion: null, summaryWorkflowVersion: null,
+            [key]: "SENTINEL",
+          },
+        }],
+        nextCursor: null,
+      });
+      expect(result.success).toBe(false);
+    },
+  );
 });

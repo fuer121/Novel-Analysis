@@ -15,6 +15,7 @@ export interface QuerySession { id: string; bookId: string; groupId: string; cre
 export interface QueryTurn { id: string; sessionId: string; createdBy: string; question: string; answer: string | null; questionHmac: string; startChapter: number; endChapter: number; intentSnapshot: JsonObject; sourceSnapshot: JsonObject; gapSnapshot: JsonObject; configSnapshot: JsonObject; executionSignature: string; evidenceSnapshotHash: string | null; status: QueryTurnStatus; jobId: string | null; attemptId: string | null; degradation: string | null; createdAt: Date; updatedAt: Date; completedAt: Date | null }
 export interface QueryTurnEvidence { factId: string; chapterId: string; chapterIndex: number; rank: number; recallReason: string; disposition: "used" | "excluded"; exclusionReason: string | null; subjectKey: string; factType: string; body: string }
 export interface QueryTurnDetail extends QueryTurn { evidence: QueryTurnEvidence[] }
+export interface QueryTurnPage { turns: QueryTurn[]; nextCursor: string | null }
 export interface CreateQuerySessionInput { bookId: string; groupId: string; createdBy: string; title: string; visibility?: QueryVisibility; defaultStartChapter: number; defaultEndChapter: number }
 export interface ManageQuerySessionInput { sessionId: string; actor: QueryActor; title?: string; visibility?: QueryVisibility }
 export interface CreateQueryTurnInput { sessionId: string; actor: QueryActor; question: string; questionHmac: string; startChapter: number; endChapter: number; intentSnapshot: JsonObject; sourceSnapshot: JsonObject; gapSnapshot: JsonObject; configSnapshot: JsonObject; executionSignature: string; jobId?: string; attemptId?: string }
@@ -143,6 +144,26 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
         const row = await executor.insertInto("query_turns").values({ session_id: input.sessionId, created_by: input.actor.id, question_ciphertext: question.ciphertext, question_nonce: question.nonce, question_tag: question.tag, question_key_version: question.keyVersion, question_hmac: input.questionHmac, start_chapter: input.startChapter, end_chapter: input.endChapter, intent_snapshot: input.intentSnapshot, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, config_snapshot: input.configSnapshot, execution_signature: input.executionSignature, job_id: input.jobId ?? null, attempt_id: input.attemptId ?? null }).returningAll().executeTakeFirstOrThrow();
         return mapTurn(row);
         } catch (error) { stableError(error, "Invalid query turn"); }
+      });
+    },
+    async listTurns(input: { sessionId: string; actor: QueryActor; limit: number; cursor?: string }): Promise<QueryTurnPage> {
+      return inTransaction(async (executor) => {
+        await lockSession(executor, input.sessionId);
+        const session = await executor.selectFrom("query_sessions").select(["created_by", "visibility"]).where("id", "=", input.sessionId).executeTakeFirst();
+        if (!session || (input.actor.role !== "admin" && session.created_by !== input.actor.id && session.visibility !== "team")) throw new Error("Query access denied");
+
+        let cursor: { created_at: Date; id: string } | undefined;
+        if (input.cursor) {
+          cursor = await executor.selectFrom("query_turns").select(["created_at", "id"]).where("id", "=", input.cursor).where("session_id", "=", input.sessionId).executeTakeFirst();
+          if (!cursor) throw new Error("Query access denied");
+        }
+
+        let query = executor.selectFrom("query_turns").selectAll().where("session_id", "=", input.sessionId);
+        if (cursor) query = query.where(sql<boolean>`(created_at, id) < (${cursor.created_at}, ${cursor.id})`);
+        const rows = await query.orderBy("created_at", "desc").orderBy("id", "desc").limit(input.limit + 1).execute();
+        const hasMore = rows.length > input.limit;
+        const pageRows = rows.slice(0, input.limit);
+        return { turns: pageRows.map(mapTurn), nextCursor: hasMore ? pageRows.at(-1)!.id : null };
       });
     },
     async commitEvidence(input: CommitTurnEvidenceInput): Promise<void> {

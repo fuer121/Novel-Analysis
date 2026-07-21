@@ -55,6 +55,27 @@ export const QueryTurnSchema = z.strictObject({
   sourceStats: QuerySourceStatsSchema,
 });
 
+export const QueryTraceSchema = z.strictObject({
+  kind: z.enum(["single-target", "collection", "general"]).nullable(),
+  target: z.string().trim().min(1).nullable(),
+  aliases: z.array(z.string().trim().min(1)).max(20),
+  referents: z.array(z.string().trim().min(1)).max(20),
+  categories: z.array(z.string().trim().min(1)).max(20),
+  keywords: z.array(z.string().trim().min(1)).max(50),
+  sourceCounts: z.strictObject({
+    candidates: z.number().int().nonnegative(),
+    used: z.number().int().nonnegative(),
+    excluded: z.number().int().nonnegative(),
+  }),
+  gapCount: z.number().int().nonnegative(),
+  recallPolicyVersion: z.string().trim().min(1).nullable(),
+  summaryWorkflowVersion: z.string().trim().min(1).nullable(),
+});
+
+export const QueryTurnHistoryItemSchema = QueryTurnSchema.extend({
+  trace: QueryTraceSchema,
+});
+
 export const QueryEvidenceSchema = z.strictObject({
   turnId: IdSchema,
   factId: IdSchema,
@@ -66,7 +87,20 @@ export const QueryEvidenceSchema = z.strictObject({
   exclusionReason: z.string().trim().min(1).nullable(),
 });
 
+export const QueryTurnDetailSchema = QueryTurnHistoryItemSchema.extend({
+  evidence: z.array(QueryEvidenceSchema),
+});
+
+export const QueryTurnHistoryPageSchema = z.strictObject({
+  turns: z.array(QueryTurnHistoryItemSchema),
+  nextCursor: z.string().min(1).nullable(),
+});
+
 export type QueryIntent = z.infer<typeof QueryIntentSchema>;
 export type QuerySession = z.infer<typeof QuerySessionSchema>;
 export type QueryTurn = z.infer<typeof QueryTurnSchema>;
+export type QueryTrace = z.infer<typeof QueryTraceSchema>;
+export type QueryTurnHistoryItem = z.infer<typeof QueryTurnHistoryItemSchema>;
+export type QueryTurnDetail = z.infer<typeof QueryTurnDetailSchema>;
+export type QueryTurnHistoryPage = z.infer<typeof QueryTurnHistoryPageSchema>;
 export type QueryEvidence = z.infer<typeof QueryEvidenceSchema>;

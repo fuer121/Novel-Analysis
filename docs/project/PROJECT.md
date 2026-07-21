@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f4d47958a5c410c24d6d280aa298374318b18a11
 baseline_status: current
-updated_at: 2026-07-21T16:58:24+08:00
+updated_at: 2026-07-21T17:40:34+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
 last_checkpoint: CP-20260721-PHASE3-TASK5-MERGED
@@ -34,13 +34,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementing | Task 1-5 merged，Task 6 paused for approved API correction |
+| Phase 3 | implementing | Task 1-5 merged，Task 6 API correction accepted and pending PR/CI |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK6-API-CORRECTION | phase-3 | Authorized turn history and safe Trace projection | implementation-agent | codex/phase3-task6-api-correction | bc965c3fff67ed64a44386b97a0c1095d36f1e0b | none | in_progress | CP-20260721-PHASE3-TASK6-STARTED | CP-20260721-PHASE3-TASK6-API-CORRECTION-STARTED | merge correction contract, implement with TDD, then resume Task 6 |
+| PHASE3-TASK6-API-CORRECTION | phase-3 | Authorized turn history and safe Trace projection | implementation-agent | codex/phase3-task6-api-correction | 05abfb31ecbc04aa351aabc613635ec634170842 | 9ebb7214a54de3be3de22c76ea80a3edac78eac5 | accepted | CP-20260721-PHASE3-TASK6-STARTED | CP-20260721-PHASE3-TASK6-API-CORRECTION-ACCEPTED | push branch, create PR and verify CI under DEC-0002 |
 
 ## Phase Ledgers
 
@@ -80,11 +80,11 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
 - Task 6 依赖已批准的 turns 分页读取与安全 Trace 投影 correction，correction 不得改变 evidence、fallback、权限、加密或 Worker 语义
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
-- Task 6 preflight 已确认现有 API 无法恢复 turn history 或展示 Trace，用户已批准方案 A correction，Web 实施保持暂停
+- Task 6 API correction 已通过实现、规格、质量、安全和总控验收，Web 实施保持暂停直至 correction 合并
 
 ## Pending Feedback
 
-无，用户已批准 DEC-0015，先合并并实施 PHASE3-TASK6-API-CORRECTION，再恢复 Task 6
+无，PHASE3-TASK6-API-CORRECTION implementation 已接受，可按 DEC-0002 创建 PR 并核验 CI
 
 ## Next Gate
 
@@ -92,6 +92,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 6 API correction accepted](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-ACCEPTED.md)
 - [Phase 3 Task 6 API correction started](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-STARTED.md)
 - [Phase 3 Task 6 started](checkpoints/CP-20260721-PHASE3-TASK6-STARTED.md)
 - [Phase 3 Task 5 merged](checkpoints/CP-20260721-PHASE3-TASK5-MERGED.md)

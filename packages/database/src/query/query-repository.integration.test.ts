@@ -194,6 +194,37 @@ describe("continuous query repository", () => {
     await expect(repository.archiveSession({ sessionId: team.id, actor: member })).rejects.toThrow("Query access denied");
   });
 
+  test("paginates visible session turns newest-first with a stable tie-breaker", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "history", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
+    const otherSession = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "other-history", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
+    const create = (sessionId: string, question: string) => repository.createTurn({ sessionId, actor: owner, question, questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    const turns = [await create(session.id, "one"), await create(session.id, "two"), await create(session.id, "three")];
+    const otherTurn = await create(otherSession.id, "other");
+    const tiedAt = new Date("2026-07-21T08:00:00.000Z");
+    await postgres.db.updateTable("query_turns").set({ created_at: tiedAt }).where("id", "in", [...turns.map((turn) => turn.id), otherTurn.id]).execute();
+
+    const expected = [...turns].sort((left, right) => right.id.localeCompare(left.id));
+    const first = await repository.listTurns({ sessionId: session.id, actor: member, limit: 2 });
+    expect(first.turns.map((turn) => turn.id)).toEqual(expected.slice(0, 2).map((turn) => turn.id));
+    expect(first.nextCursor).toBe(expected[1]!.id);
+    const second = await repository.listTurns({ sessionId: session.id, actor: member, limit: 2, cursor: first.nextCursor! });
+    expect(second.turns.map((turn) => turn.id)).toEqual(expected.slice(2).map((turn) => turn.id));
+    expect(second.nextCursor).toBeNull();
+    expect(new Set([...first.turns, ...second.turns].map((turn) => turn.id))).toEqual(new Set(turns.map((turn) => turn.id)));
+
+    await expect(repository.listTurns({ sessionId: session.id, actor: owner, limit: 2, cursor: otherTurn.id })).rejects.toThrow("Query access denied");
+    await repository.archiveSession({ sessionId: session.id, actor: owner });
+    await expect(repository.listTurns({ sessionId: session.id, actor: admin, limit: 2 })).resolves.toMatchObject({ turns: expect.any(Array) });
+  });
+
+  test("does not reveal private turn history to another member", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "private-history", defaultStartChapter: 1, defaultEndChapter: 3 });
+    await repository.createTurn({ sessionId: session.id, actor: owner, question: "private-question", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    await expect(repository.listTurns({ sessionId: session.id, actor: member, limit: 20 })).rejects.toThrow("Query access denied");
+  });
+
   test("lets a member create and manage only their own turn in a team session", async () => {
     const repository = createQueryRepository(postgres.db, cipher);
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "shared", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
@@ -285,6 +316,22 @@ describe("continuous query repository", () => {
       await expect(protectedOperation).rejects.toThrow("Query access denied");
     }
     expect((await postgres.db.selectFrom("query_turns").select(["answer_ciphertext", "completed_at"]).where("id", "=", turn.id).executeTakeFirstOrThrow())).toMatchObject({ answer_ciphertext: null, completed_at: null });
+  });
+
+  test("does not list turns after a visibility revocation wins the session lock", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "history-revoked", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
+    await repository.createTurn({ sessionId: session.id, actor: member, question: "history-revoked-question", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    const locked = deferred(); const release = deferred();
+    const revoke = postgres.db.transaction().execute(async (transaction) => {
+      await sql`select id from query_sessions where id = ${session.id} for update`.execute(transaction);
+      locked.resolve(); await release.promise;
+      await transaction.updateTable("query_sessions").set({ visibility: "private" }).where("id", "=", session.id).execute();
+    });
+    await locked.promise;
+    const list = repository.listTurns({ sessionId: session.id, actor: member, limit: 20 });
+    release.resolve(); await revoke;
+    await expect(list).rejects.toThrow("Query access denied");
   });
 
   test("does not create a turn after archival wins the session lock", async () => {
