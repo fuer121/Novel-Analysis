@@ -168,7 +168,7 @@ progress { display: block; width: 92px; height: 5px; margin-top: 6px; accent-col
 .query-preview strong { color: #17202a; overflow-wrap: anywhere; }
 .query-preview small { color: #697586; }
 .query-evidence { min-width: 0; border-left: 1px solid #dfe4ea; overflow-y: auto; background: #fff; }
-.query-evidence-desktop-toggle { position: absolute; z-index: 4; top: 12px; right: calc(34% + 10px); }
+.query-evidence-desktop-toggle { position: absolute; z-index: 4; top: 12px; right: calc(34% + 4px); }
 .query-evidence-tabs { position: sticky; top: 0; z-index: 1; display: flex; border-bottom: 1px solid #dfe4ea; background: #fff; }
 .query-evidence-tabs button { flex: 1; min-height: 48px; border: 0; border-bottom: 2px solid transparent; color: #596579; background: transparent; cursor: pointer; font-size: 12px; }
 .query-evidence-tabs button[aria-selected="true"] { color: #155eef; border-bottom-color: #155eef; font-weight: 700; }
@@ -201,6 +201,23 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
   .query-mobile-tools { display: flex; position: absolute; z-index: 3; right: 8px; margin-top: -51px; gap: 7px; }
   .query-mobile-tools button:first-child { display: none; }
   .query-evidence-desktop-toggle { display: none; }
+}
+
+@media (min-width: 721px) and (max-width: 900px) {
+  .query-workspace { display: block; height: calc(100vh - 215px); min-height: 520px; overflow: visible; }
+  .query-session-rail { display: none; }
+  .query-conversation { height: 100%; }
+  .query-workspace.evidence-open .query-conversation { height: 100%; padding-bottom: min(55vh, 360px); }
+  .query-conversation > header { padding: 10px 12px; }
+  .query-turns { padding: 12px; }
+  .query-composer { padding: 11px 12px; }
+  .query-range { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .query-mobile-tools { position: static; display: flex; margin: 0 0 9px; }
+  .query-mobile-tools button:first-child { display: inline-block; }
+  .query-drawer-backdrop { display: block; }
+  .query-evidence { left: 0; right: 0; max-height: 55vh; border-bottom: 0; }
+  .query-create { position: fixed; inset: 70px 16px auto; width: auto; margin: 0; grid-template-columns: 1fr; max-height: calc(100vh - 90px); overflow-y: auto; }
+  .query-create label { grid-column: 1; }
 }
 
 @media (max-width: 720px) {

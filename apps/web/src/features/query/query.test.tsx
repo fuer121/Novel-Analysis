@@ -3,6 +3,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { readFileSync } from "node:fs";
+import { URL as NodeUrl } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppRouter } from "../../app/router.js";
@@ -58,6 +60,13 @@ function baseRead(url: string): Response | undefined {
 describe("continuous query workspace", () => {
   beforeEach(() => { setCsrfToken("csrf"); vi.stubGlobal("EventSource", FakeEventSource); });
   afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+  it("uses the compact query layout before the desktop columns can clip", () => {
+    const styles = readFileSync(new NodeUrl("../../app/styles.css", import.meta.url), "utf8");
+    expect(styles).toContain("@media (min-width: 721px) and (max-width: 900px)");
+    expect(styles).toContain(".query-session-rail { display: none; }");
+    expect(styles).toContain(".query-mobile-tools button:first-child { display: inline-block; }");
+  });
 
   it("lists, creates, selects and restores sessions from the route", async () => {
     const created = { ...session, id: ids.session2, title: "新研究会话", visibility: "team" };
