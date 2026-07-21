@@ -1,4 +1,5 @@
 import type {
+  AnalysisSummaryOutput,
   ChapterImportOutput,
   DifyTarget,
   L1IndexOutput,
@@ -6,6 +7,7 @@ import type {
 } from "@novel-analysis/contracts";
 import {
   DifyAdapterError,
+  type AnalysisSummaryInput,
   type ChapterImportInput,
   type DifyAdapter,
   type L1IndexInput,
@@ -13,6 +15,7 @@ import {
 } from "./adapter.js";
 import {
   normalizeChapterImportOutput,
+  normalizeAnalysisSummaryOutput,
   normalizeL1IndexOutput,
   normalizeL2IndexOutput,
 } from "./normalizers.js";
@@ -20,7 +23,8 @@ import {
 type HttpDifyAdapterOptions = {
   fetch: typeof globalThis.fetch;
   baseUrl: string;
-  credentials: Record<DifyTarget, string>;
+  credentials: Record<Exclude<DifyTarget, "analysis-summary">, string>
+    & Partial<Record<"analysis-summary", string>>;
   timeoutMs: number;
 };
 
@@ -32,12 +36,13 @@ const targets: Record<DifyTarget, TargetDefinition> = {
   "chapter-import": { endpoint: "/workflows/run" },
   "l1-index": { endpoint: "/workflows/run" },
   "l2-index": { endpoint: "/workflows/run" },
+  "analysis-summary": { endpoint: "/workflows/run" },
 };
 
 export class HttpDifyAdapter implements DifyAdapter {
   readonly #fetch: typeof globalThis.fetch;
   readonly #baseUrl: string;
-  readonly #credentials: Record<DifyTarget, string>;
+  readonly #credentials: HttpDifyAdapterOptions["credentials"];
   readonly #timeoutMs: number;
 
   constructor(options: HttpDifyAdapterOptions) {
@@ -78,11 +83,40 @@ export class HttpDifyAdapter implements DifyAdapter {
     }, normalizeL2IndexOutput);
   }
 
+  async runAnalysisSummary(input: AnalysisSummaryInput): Promise<AnalysisSummaryOutput> {
+    const inputs = {
+      task_type: input.taskType,
+      prompt: input.prompt,
+      model: "",
+      reasoning_effort: "",
+      schema_name: "",
+      schema_json: "",
+      strict_json_schema: "false",
+      max_output_tokens: "",
+      context_json: input.contextJson,
+    };
+
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await this.#run("analysis-summary", inputs, normalizeAnalysisSummaryOutput);
+      } catch (error) {
+        if (!(error instanceof DifyAdapterError)
+          || error.code === "provider_invalid_response"
+          || attempt === 3) {
+          throw error;
+        }
+      }
+    }
+    throw new DifyAdapterError("provider_unavailable");
+  }
+
   async #run<T>(
     target: DifyTarget,
     inputs: Record<string, unknown>,
     normalize: (raw: unknown) => { ok: true; value: T } | { ok: false },
   ): Promise<T> {
+    const credential = this.#credentials[target];
+    if (!credential) throw new DifyAdapterError("provider_unavailable");
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.#timeoutMs);
     let response: Response;
@@ -90,7 +124,7 @@ export class HttpDifyAdapter implements DifyAdapter {
       response = await this.#fetch(`${this.#baseUrl}${targets[target].endpoint}`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${this.#credentials[target]}`,
+          Authorization: `Bearer ${credential}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({ inputs, response_mode: "blocking", user: "novel-analysis-adapter" }),

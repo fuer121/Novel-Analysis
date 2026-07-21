@@ -17,11 +17,21 @@ import {
   type L1IndexInput,
 } from "./index.js";
 
+type ExistingDifyTarget = Exclude<DifyTarget, "analysis-summary">;
+
 const credentials = {
   "chapter-import": "chapter-secret",
   "l1-index": "l1-secret",
   "l2-index": "l2-secret",
+  "analysis-summary": "summary-secret",
 } as const;
+
+const summaryInput = {
+  invocationKey: "turn-1:attempt-1",
+  taskType: "l2_query" as const,
+  prompt: "只依据证据回答",
+  contextJson: JSON.stringify({ question: "之后呢？", evidence: [] }),
+};
 
 const typedL1Output = l1IndexOutput as L1IndexOutput;
 
@@ -102,13 +112,46 @@ function adapter(fetch: typeof globalThis.fetch, timeoutMs = 100): HttpDifyAdapt
   });
 }
 
-async function runTarget(client: DifyAdapter, target: DifyTarget): Promise<unknown> {
+async function runTarget(client: DifyAdapter, target: ExistingDifyTarget): Promise<unknown> {
   if (target === "chapter-import") return client.runChapterImport(inputs[target]);
   if (target === "l1-index") return client.runL1Index(inputs[target]);
   return client.runL2Index(inputs[target]);
 }
 
 describe("HttpDifyAdapter request mapping", () => {
+  it("calls the tracked analysis-summary workflow contract", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response({
+      data: { outputs: { result: "基于证据的回答" } },
+    }));
+
+    await expect(adapter(fetch).runAnalysisSummary(summaryInput)).resolves.toEqual({
+      text: "基于证据的回答",
+    });
+
+    expect(fetch).toHaveBeenCalledOnce();
+    const [url, init] = fetch.mock.calls[0]!;
+    expect(url).toBe("https://dify.invalid/api/workflows/run");
+    expect(init?.headers).toEqual({
+      Authorization: `Bearer ${credentials["analysis-summary"]}`,
+      "Content-Type": "application/json",
+    });
+    expect(JSON.parse(String(init?.body))).toEqual({
+      inputs: {
+        task_type: "l2_query",
+        prompt: "只依据证据回答",
+        model: "",
+        reasoning_effort: "",
+        schema_name: "",
+        schema_json: "",
+        strict_json_schema: "false",
+        max_output_tokens: "",
+        context_json: summaryInput.contextJson,
+      },
+      response_mode: "blocking",
+      user: "novel-analysis-adapter",
+    });
+  });
+
   it.each(["chapter-import", "l1-index", "l2-index"] as const)(
     "maps only declared %s inputs into a blocking workflow request",
     async (target) => {
@@ -147,6 +190,49 @@ describe("HttpDifyAdapter request mapping", () => {
 });
 
 describe("HttpDifyAdapter failures", () => {
+  it.each([
+    ["network", () => Promise.reject(new Error("network failure"))],
+    ["rate limit", () => Promise.resolve(response({}, 429))],
+    ["server failure", () => Promise.resolve(response({}, 503))],
+  ] as const)("retries analysis-summary %s failures up to three attempts", async (_name, failure) => {
+    const fetch = vi.fn<typeof globalThis.fetch>()
+      .mockImplementationOnce(failure)
+      .mockImplementationOnce(failure)
+      .mockResolvedValueOnce(response({ data: { outputs: { result: "第三次成功" } } }));
+
+    await expect(adapter(fetch).runAnalysisSummary(summaryInput)).resolves.toEqual({ text: "第三次成功" });
+    expect(fetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries analysis-summary timeouts up to three attempts", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation((_url, init) => new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+      }));
+      const pending = adapter(fetch, 5).runAnalysisSummary(summaryInput);
+      const rejection = expect(pending).rejects.toMatchObject({ code: "provider_timeout" });
+
+      await vi.advanceTimersByTimeAsync(15);
+      await rejection;
+      expect(fetch).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { data: { outputs: { result: "" } } },
+    { data: { outputs: { result: { unexpected: true } } } },
+  ])("does not retry invalid analysis-summary output", async (body) => {
+    const fetch = vi.fn<typeof globalThis.fetch>().mockResolvedValue(response(body));
+
+    await expect(adapter(fetch).runAnalysisSummary(summaryInput)).rejects.toMatchObject({
+      code: "provider_invalid_response",
+    });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+
   it("maps timeout aborts without retrying", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>().mockImplementation((_url, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
@@ -203,6 +289,21 @@ describe("HttpDifyAdapter failures", () => {
 });
 
 describe("FakeDifyAdapter", () => {
+  it("scripts and records analysis-summary calls", async () => {
+    const fake = new FakeDifyAdapter([{
+      target: "analysis-summary",
+      invocationKey: summaryInput.invocationKey,
+      output: { text: "本地测试回答" },
+    }]);
+
+    await expect(fake.runAnalysisSummary(summaryInput)).resolves.toEqual({ text: "本地测试回答" });
+    expect(fake.calls).toEqual([{
+      target: "analysis-summary",
+      invocationKey: summaryInput.invocationKey,
+      input: summaryInput,
+    }]);
+  });
+
   it("returns target-and-key scripted typed output after the requested delay and records calls", async () => {
     vi.useFakeTimers();
     const fake = new FakeDifyAdapter([{ target: "l1-index", invocationKey: inputs["l1-index"].invocationKey, output: typedL1Output, delayMs: 20 }]);

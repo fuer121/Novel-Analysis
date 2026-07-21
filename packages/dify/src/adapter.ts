@@ -1,4 +1,5 @@
 import type {
+  AnalysisSummaryOutput,
   ChapterImportOutput,
   L1IndexOutput,
   L2IndexOutput,
@@ -29,6 +30,12 @@ export class DifyAdapterError extends Error {
 
 type Invocation = { invocationKey: string };
 
+export type AnalysisSummaryInput = Invocation & {
+  taskType: "l2_query";
+  prompt: string;
+  contextJson: string;
+};
+
 export type ChapterImportInput = Invocation & {
   bookId: number;
   startChapter: number;
@@ -58,4 +65,5 @@ export interface DifyAdapter {
   runChapterImport(input: ChapterImportInput): Promise<ChapterImportOutput>;
   runL1Index(input: L1IndexInput): Promise<L1IndexOutput>;
   runL2Index(input: L2IndexInput): Promise<L2IndexOutput>;
+  runAnalysisSummary(input: AnalysisSummaryInput): Promise<AnalysisSummaryOutput>;
 }

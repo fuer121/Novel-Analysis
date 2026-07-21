@@ -74,10 +74,15 @@ export const L2IndexOutputSchema = z.strictObject({
   facts: z.array(L2FactSchema),
 });
 
-export type DifyTarget = "chapter-import" | "l1-index" | "l2-index";
+export const AnalysisSummaryOutputSchema = z.strictObject({
+  text: z.string().trim().min(1),
+});
+
+export type DifyTarget = "chapter-import" | "l1-index" | "l2-index" | "analysis-summary";
 export type ChapterImportOutput = z.infer<typeof ChapterImportOutputSchema>;
 export type L1IndexOutput = z.infer<typeof L1IndexOutputSchema>;
 export type L2IndexOutput = z.infer<typeof L2IndexOutputSchema>;
+export type AnalysisSummaryOutput = z.infer<typeof AnalysisSummaryOutputSchema>;
 
 export type DifyContractErrorCode =
   | "MALFORMED_JSON"
@@ -96,6 +101,7 @@ type OutputByTarget = {
   "chapter-import": ChapterImportOutput;
   "l1-index": L1IndexOutput;
   "l2-index": L2IndexOutput;
+  "analysis-summary": AnalysisSummaryOutput;
 };
 
 type NormalizeResult<T> = { ok: true; value: T } | { ok: false; error: DifyContractError };
@@ -104,6 +110,7 @@ const schemas = {
   "chapter-import": ChapterImportOutputSchema,
   "l1-index": L1IndexOutputSchema,
   "l2-index": L2IndexOutputSchema,
+  "analysis-summary": AnalysisSummaryOutputSchema,
 } as const;
 
 function failure(code: DifyContractErrorCode, message: string): NormalizeResult<never> {
@@ -220,6 +227,16 @@ function canonicalizeL2(value: unknown): unknown {
 }
 
 export function normalizeDifyOutput<T extends DifyTarget>(target: T, raw: unknown): NormalizeResult<OutputByTarget[T]> {
+  if (target === "analysis-summary") {
+    const result = raw && typeof raw === "object" && !Array.isArray(raw)
+      ? (raw as { result?: unknown }).result
+      : undefined;
+    const parsed = AnalysisSummaryOutputSchema.safeParse({ text: result });
+    return parsed.success
+      ? { ok: true, value: parsed.data as OutputByTarget[T] }
+      : failure("INVALID_OUTPUT", "Dify output does not match the declared contract");
+  }
+
   const unwrapped = unwrap(raw);
   if (!unwrapped.ok) return unwrapped;
 

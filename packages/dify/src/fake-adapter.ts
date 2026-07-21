@@ -1,4 +1,5 @@
 import type {
+  AnalysisSummaryOutput,
   ChapterImportOutput,
   DifyTarget,
   L1IndexOutput,
@@ -6,6 +7,7 @@ import type {
 } from "@novel-analysis/contracts";
 import {
   DifyAdapterError,
+  type AnalysisSummaryInput,
   type ChapterImportInput,
   type DifyAdapter,
   type DifyAdapterErrorCode,
@@ -17,6 +19,7 @@ type OutputByTarget = {
   "chapter-import": ChapterImportOutput;
   "l1-index": L1IndexOutput;
   "l2-index": L2IndexOutput;
+  "analysis-summary": AnalysisSummaryOutput;
 };
 
 type SuccessScript<T extends DifyTarget = DifyTarget> = {
@@ -42,7 +45,7 @@ export type FakeDifyScript = {
 export type FakeDifyCall = {
   target: DifyTarget;
   invocationKey: string;
-  input: ChapterImportInput | L1IndexInput | L2IndexInput;
+  input: ChapterImportInput | L1IndexInput | L2IndexInput | AnalysisSummaryInput;
 };
 
 type StoredScript = {
@@ -90,9 +93,13 @@ export class FakeDifyAdapter implements DifyAdapter {
     return this.#run("l2-index", input);
   }
 
+  runAnalysisSummary(input: AnalysisSummaryInput): Promise<AnalysisSummaryOutput> {
+    return this.#run("analysis-summary", input);
+  }
+
   async #run<T extends DifyTarget>(
     target: T,
-    input: ChapterImportInput | L1IndexInput | L2IndexInput,
+    input: ChapterImportInput | L1IndexInput | L2IndexInput | AnalysisSummaryInput,
   ): Promise<OutputByTarget[T]> {
     this.#calls.push({ target, invocationKey: input.invocationKey, input: snapshot(input) });
     const script = this.#scripts.get(scriptKey(target, input.invocationKey))?.shift();
