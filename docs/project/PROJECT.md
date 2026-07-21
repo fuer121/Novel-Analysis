@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: 4b4cc227e9540f5a0764ae476c54a2090aa54a24
+baseline_commit: 3347c4f57951e1e744f5fd93ba1f5c329ab496d8
 baseline_status: current
-updated_at: 2026-07-21T09:16:19+08:00
+updated_at: 2026-07-21T09:22:24+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-TASK1-ACCEPTED
+last_checkpoint: CP-20260721-PHASE3-TASK1-MERGED
 next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `4b4cc227e9540f5a0764ae476c54a2090aa54a24` |
-| Latest merged implementation | PR #73 `https://github.com/fuer121/Novel-Analysis/pull/73` |
+| Accepted implementation baseline | `3347c4f57951e1e744f5fd93ba1f5c329ab496d8` |
+| Latest merged implementation | PR #80 `https://github.com/fuer121/Novel-Analysis/pull/80` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK1 | phase-3 | Query and analysis-summary contracts | controller-agent | codex/phase3-task1-query-contracts | d620e9625f4df3468c88b0fb820b5cc3a7c92fa3 | 6f4af6d8874f5499aecdba52d8155b82b7f5df59 | accepted | CP-20260721-PHASE3-TASK1-STARTED | CP-20260721-PHASE3-TASK1-ACCEPTED | create PR, verify CI and merge under DEC-0002 |
+| PHASE3-TASK2 | phase-3 | Query schema, encrypted repository and sharing authorization | controller-agent | main | 3347c4f57951e1e744f5fd93ba1f5c329ab496d8 | none | ready | CP-20260721-PHASE3-TASK1-MERGED | none | confirm new-table and migration scope before Started Contract |
 
 ## Phase Ledgers
 
@@ -76,12 +76,12 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- Phase 3 `analysis-summary` DSL 已存在，但新 TypeScript adapter 当前只支持 chapter/L1/L2，Task 1 必须先验证无 YAML 修改的接入契约
-- 当前无阻塞 Phase 3 Task 1 的证据冲突
+- Task 2 将新增 Query tables 并修改 workflow target constraint，必须在 Started Contract 中保持 ciphertext、transaction、authorization 与 immutable evidence 边界
+- 当前无证据冲突，Task 2 仅等待数据模型与 migration 范围确认
 
 ## Pending Feedback
 
-无，PHASE3-TASK1 已接受并可按 DEC-0002 进入 PR、CI 与合并流程
+等待用户确认 PHASE3-TASK2 已批准的新表与 migration scope 后创建 Started Contract
 
 ## Next Gate
 
@@ -89,6 +89,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 1 merged](checkpoints/CP-20260721-PHASE3-TASK1-MERGED.md)
 - [Phase 3 Task 1 accepted](checkpoints/CP-20260721-PHASE3-TASK1-ACCEPTED.md)
 - [Phase 3 Task 1 started](checkpoints/CP-20260721-PHASE3-TASK1-STARTED.md)
 - [Phase 3 plan approved](checkpoints/CP-20260721-PHASE3-PLAN-APPROVED.md)
