@@ -77,6 +77,21 @@ describe("recallFacts", () => {
     expect(result.used.map((item) => item.id)).toEqual(["target-a", "target-b", "related"]);
   });
 
+  it("keeps target facts ahead of related facts regardless of keyword count", () => {
+    const keywords = Array.from({ length: 11 }, (_, index) => `keyword-${index}`);
+    const result = recallFacts({
+      intent: { kind: "single-target", target: "chen", aliases: [], referents: [], categories: [], keywords },
+      windows: [{ windowIndex: 1, facts: [
+        fact("related", 1, { relatedSubjectKeys: ["chen"], body: keywords.join(" ") }),
+        fact("target", 2, { subjectKey: "chen" }),
+      ] }],
+      maxCandidates: 2,
+      maxUsed: 2,
+    });
+
+    expect(result.used.map((item) => item.id)).toEqual(["target", "related"]);
+  });
+
   it("applies candidate and used limits after considering every fact and explains every exclusion", () => {
     const intent = resolveQueryIntent({ question: "有哪些事件", recentQuestions: [], knownSubjects });
     const result = recallFacts({

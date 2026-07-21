@@ -39,7 +39,7 @@ export function resolveQueryIntent(input: {
 }): QueryIntent {
   const question = input.question.trim();
   const collection = COLLECTION_PATTERN.test(question);
-  const explicit = collection ? undefined : findSubject(question, input.knownSubjects);
+  const explicit = findSubject(question, input.knownSubjects);
   const referents = [...new Set(question.match(PRONOUN_PATTERN) ?? [])];
   let resolved = explicit;
 
@@ -51,7 +51,7 @@ export function resolveQueryIntent(input: {
   }
 
   return {
-    kind: collection ? "collection" : resolved ? "single-target" : "general",
+    kind: resolved ? "single-target" : collection ? "collection" : "general",
     target: resolved?.subject.subjectKey ?? null,
     aliases: explicit && explicit.matched !== explicit.subject.displayName ? [explicit.matched] : [],
     referents,

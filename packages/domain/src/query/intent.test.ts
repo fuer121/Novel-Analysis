@@ -52,6 +52,20 @@ describe("resolveQueryIntent", () => {
     })).toMatchObject({ kind: "single-target", target: "chen", aliases: ["平安"] });
   });
 
+  it("keeps collection wording scoped to an explicit known subject", () => {
+    expect(resolveQueryIntent({
+      question: "陈平安有哪些飞剑？",
+      recentQuestions: [],
+      knownSubjects: subjects,
+    })).toMatchObject({ kind: "single-target", target: "chen" });
+
+    expect(resolveQueryIntent({
+      question: "有哪些重要法宝？",
+      recentQuestions: [],
+      knownSubjects: subjects,
+    })).toMatchObject({ kind: "collection", target: null });
+  });
+
   it.each([
     ["各境界最强的人分别是谁", "collection"],
     ["有哪些重要法宝", "collection"],

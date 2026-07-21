@@ -55,8 +55,8 @@ function scoreFact(intent: QueryIntent, fact: RecallFact): Pick<ScoredFact, "sco
   const categoryMatch = intent.categories.includes(fact.category ?? "") ? 1 : 0;
 
   if (intent.kind === "single-target") {
-    if (fact.subjectKey === intent.target) return { score: 300 + keywordMatches * 10, recallReason: "target", eligible: true };
-    if (intent.target && fact.relatedSubjectKeys?.includes(intent.target)) return { score: 200 + keywordMatches * 10, recallReason: "related", eligible: true };
+    if (fact.subjectKey === intent.target) return { score: 300, recallReason: "target", eligible: true };
+    if (intent.target && fact.relatedSubjectKeys?.includes(intent.target)) return { score: 200, recallReason: "related", eligible: true };
     return { score: keywordMatches * 10 + categoryMatch, recallReason: "structured_match", eligible: false };
   }
 
