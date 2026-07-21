@@ -71,12 +71,14 @@ describe("advanced analysis contracts", () => {
       bookId: ids.book, templateVersionId: ids.version, mode: "balanced",
       startChapter: 3, endChapter: 12, chapterCount: 10,
       reviewChapterCount: 3, readsL1: true, readsL2: true,
-      readsOriginalChapters: true, scopeHash: "sha256:scope-v1",
+      readsOriginalChapters: true, scopeHash: "a".repeat(64),
     };
 
     expect(AnalysisScopePreviewSchema.parse(preview)).toEqual(preview);
     expect(AnalysisScopePreviewSchema.safeParse({ ...preview, endChapter: 2 }).success).toBe(false);
-    expect(AnalysisScopePreviewSchema.safeParse({ ...preview, scopeHash: " " }).success).toBe(false);
+    for (const scopeHash of ["sha256:scope-v1", "a".repeat(63), "A".repeat(64), "g".repeat(64)]) {
+      expect(AnalysisScopePreviewSchema.safeParse({ ...preview, scopeHash }).success).toBe(false);
+    }
 
     const previewInput = {
       bookId: ids.book, templateId: ids.template, mode: "balanced",
@@ -90,7 +92,7 @@ describe("advanced analysis contracts", () => {
       scopeHash: preview.scopeHash, idempotencyKey: "analysis-request-1",
     };
     expect(AnalysisRunCreateInputSchema.parse(createInput)).toEqual(createInput);
-    expect(AnalysisRunCreateInputSchema.safeParse({ ...createInput, scopeHash: " " }).success).toBe(false);
+    expect(AnalysisRunCreateInputSchema.safeParse({ ...createInput, scopeHash: "a".repeat(65) }).success).toBe(false);
   });
 
   it("exposes owner run summaries, details, results and part progress", () => {

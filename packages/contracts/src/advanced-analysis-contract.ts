@@ -5,6 +5,8 @@ const ChapterSchema = z.number().int().positive();
 const TimestampSchema = z.string().datetime();
 const NonEmptyStringSchema = z.string().trim().min(1);
 
+export const AnalysisScopeHashSchema = z.string().regex(/^[0-9a-f]{64}$/);
+
 export const AnalysisModeSchema = z.enum([
   "fast_index",
   "balanced",
@@ -82,7 +84,7 @@ export const AnalysisRunCreateInputSchema = z.strictObject({
   templateVersionId: IdSchema,
   mode: AnalysisModeSchema,
   ...ChapterRangeSchema,
-  scopeHash: NonEmptyStringSchema,
+  scopeHash: AnalysisScopeHashSchema,
   idempotencyKey: NonEmptyStringSchema,
 }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
 
@@ -96,7 +98,7 @@ export const AnalysisScopePreviewSchema = z.strictObject({
   readsL1: z.boolean(),
   readsL2: z.boolean(),
   readsOriginalChapters: z.boolean(),
-  scopeHash: NonEmptyStringSchema,
+  scopeHash: AnalysisScopeHashSchema,
 }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
 
 export const AnalysisRunSummarySchema = z.strictObject({
