@@ -76,21 +76,6 @@ export function createAnalysisRepository(db: DatabaseExecutor, cipher: ContentCi
         return executor.updateTable("analysis_parts").set({ status: "completed", result_ciphertext: result.ciphertext, result_nonce: result.nonce, result_tag: result.tag, result_key_version: result.keyVersion, updated_at: new Date() }).where("id", "=", input.partId).where("status", "in", ["queued", "running"]).returningAll().executeTakeFirstOrThrow();
       });
     },
-    async completeRun(input: { runId: string; actor: AnalysisActor; result: unknown }) {
-      return inTransaction(async (executor) => {
-        if (input.actor.role === "admin") throw new Error("Analysis access denied");
-        const reference = await executor.selectFrom("analysis_runs").select(["job_id", "created_by"]).where("id", "=", input.runId).executeTakeFirst();
-        if (!reference || reference.created_by !== input.actor.id) throw new Error("Analysis access denied");
-        const job = await executor.selectFrom("jobs").select(["id", "type", "status", "requested_by"]).where("id", "=", reference.job_id).forUpdate().executeTakeFirst();
-        if (!job || job.type !== "advanced-analysis" || job.requested_by !== input.actor.id || !["running", "retrying", "paused"].includes(job.status)) throw new Error("Analysis run cannot be completed");
-        const run = await executor.selectFrom("analysis_runs").select(["job_id", "status", "result_ciphertext"]).where("id", "=", input.runId).where("created_by", "=", input.actor.id).forUpdate().executeTakeFirst();
-        if (!run || run.job_id !== job.id || !["running", "retrying", "paused"].includes(run.status) || run.result_ciphertext !== null) throw new Error("Analysis run cannot be completed");
-        const result = encryptJson(cipher, input.result);
-        const completed = await executor.updateTable("analysis_runs").set({ status: "completed", result_ciphertext: result.ciphertext, result_nonce: result.nonce, result_tag: result.tag, result_key_version: result.keyVersion, updated_at: new Date() }).where("id", "=", input.runId).where("status", "in", ["running", "retrying", "paused"]).where("result_ciphertext", "is", null).returningAll().executeTakeFirst();
-        if (!completed) throw new Error("Analysis run cannot be completed");
-        return completed;
-      });
-    },
     async getRunResult(input: { runId: string; actor: AnalysisActor }) {
       const row = await authorizeRun(db, input.runId, input.actor);
       const result = encrypted(row);

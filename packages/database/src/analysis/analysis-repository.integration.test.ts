@@ -33,6 +33,10 @@ describe("private analysis repository", () => {
 
   afterAll(async () => postgres?.destroy());
 
+  test("does not expose a run completion path before Worker lease authority exists", () => {
+    expect(createAnalysisRepository(postgres.db, cipher)).not.toHaveProperty("completeRun");
+  });
+
   test("encrypts template versions and filters all template content by owner", async () => {
     const repository = createAnalysisRepository(postgres.db, cipher);
     const prompt = "analysis-prompt-plaintext-sentinel";
@@ -78,9 +82,8 @@ describe("private analysis repository", () => {
     ]) expect(await repository.findReusablePart({ runId: run.id, actor: owner, ...mismatch })).toBeNull();
     await expect(repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "e".repeat(64), actor: admin })).rejects.toThrow("Analysis access denied");
     const finalResult = { marker: "analysis-final-result-plaintext-sentinel" };
-    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", job.id).execute();
-    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", run.id).execute();
-    await repository.completeRun({ runId: run.id, actor: owner, result: finalResult });
+    const encryptedFinalResult = encryptJson(cipher, finalResult);
+    await postgres.db.updateTable("analysis_runs").set({ status: "completed", result_ciphertext: encryptedFinalResult.ciphertext, result_nonce: encryptedFinalResult.nonce, result_tag: encryptedFinalResult.tag, result_key_version: encryptedFinalResult.keyVersion }).where("id", "=", run.id).execute();
     expect(await repository.getRunResult({ runId: run.id, actor: owner })).toEqual(finalResult);
     await expect(repository.getRunResult({ runId: run.id, actor: member })).rejects.toThrow("Analysis access denied");
     await expect(repository.getRunResult({ runId: run.id, actor: admin })).rejects.toThrow("Analysis access denied");
@@ -183,16 +186,10 @@ describe("private analysis repository", () => {
     await expect(racingInsert).rejects.toThrow();
   });
 
-  test("binds only queued advanced-analysis Jobs and completes runs once from active Job state", async () => {
+  test("binds only queued advanced-analysis Jobs", async () => {
     const repository = createAnalysisRepository(postgres.db, cipher);
     const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Lifecycle", prompt: "prompt", outputSchema: {}, contentHash: "f".repeat(64), indexGroupId: null });
     const createJob = (type: string, status: "queued" | "running" | "retrying" | "paused" | "completed" | "failed" | "cancelled") => postgres.db.insertInto("jobs").values({ type, status, requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
-    const createRun = async () => {
-      const job = await createJob("advanced-analysis", "queued");
-      const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: randomUUID(), totalParts: 1 });
-      return { job, run };
-    };
-
     const wrongType = await createJob("query", "queued");
     await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: wrongType.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: randomUUID(), totalParts: 1 })).rejects.toThrow();
     for (const status of ["completed", "failed", "cancelled"] as const) {
@@ -200,49 +197,8 @@ describe("private analysis repository", () => {
       await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: terminalJob.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: randomUUID(), totalParts: 1 })).rejects.toThrow();
     }
 
-    const unclaimed = await createRun();
-    await expect(repository.completeRun({ runId: unclaimed.run.id, actor: owner, result: { queued: true } })).rejects.toThrow();
-    for (const status of ["retrying", "paused"] as const) {
-      const active = await createRun();
-      await postgres.db.updateTable("jobs").set({ status }).where("id", "=", active.job.id).execute();
-      await postgres.db.updateTable("analysis_runs").set({ status }).where("id", "=", active.run.id).execute();
-      await expect(repository.completeRun({ runId: active.run.id, actor: owner, result: { status } })).resolves.toMatchObject({ status: "completed" });
-    }
-
-    for (const status of ["cancelled", "failed"] as const) {
-      const { job, run } = await createRun();
-      await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", job.id).execute();
-      await postgres.db.updateTable("analysis_runs").set({ status }).where("id", "=", run.id).execute();
-      await expect(repository.completeRun({ runId: run.id, actor: owner, result: { status } })).rejects.toThrow();
-    }
-    for (const status of ["completed", "failed", "cancelled"] as const) {
-      const { job, run } = await createRun();
-      await postgres.db.updateTable("jobs").set({ status }).where("id", "=", job.id).execute();
-      await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", run.id).execute();
-      await expect(repository.completeRun({ runId: run.id, actor: owner, result: { status } })).rejects.toThrow();
-    }
-
-    const concurrent = await createRun();
-    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", concurrent.job.id).execute();
-    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", concurrent.run.id).execute();
-    const completions = await Promise.allSettled([
-      repository.completeRun({ runId: concurrent.run.id, actor: owner, result: { winner: 1 } }),
-      repository.completeRun({ runId: concurrent.run.id, actor: owner, result: { winner: 2 } }),
-    ]);
-    expect(completions.filter((result) => result.status === "fulfilled")).toHaveLength(1);
-    expect(completions.filter((result) => result.status === "rejected")).toHaveLength(1);
-    const firstResult = await repository.getRunResult({ runId: concurrent.run.id, actor: owner });
-    await expect(repository.completeRun({ runId: concurrent.run.id, actor: owner, result: { overwrite: true } })).rejects.toThrow();
-    expect(await repository.getRunResult({ runId: concurrent.run.id, actor: owner })).toEqual(firstResult);
-
-    const rollback = await createRun();
-    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", rollback.job.id).execute();
-    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", rollback.run.id).execute();
-    await expect(postgres.db.transaction().execute(async (transaction) => {
-      await createAnalysisRepository(transaction, cipher).completeRun({ runId: rollback.run.id, actor: owner, result: { rollback: true } });
-      throw new Error("rollback run completion");
-    })).rejects.toThrow("rollback run completion");
-    expect(await postgres.db.selectFrom("analysis_runs").select(["status", "result_ciphertext"]).where("id", "=", rollback.run.id).executeTakeFirstOrThrow()).toEqual({ status: "running", result_ciphertext: null });
+    const validJob = await createJob("advanced-analysis", "queued");
+    await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: validJob.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: randomUUID(), totalParts: 1 })).resolves.toBeDefined();
   });
 
   test("rejects repository payloads outside the approved JSON schema", async () => {
@@ -257,10 +213,7 @@ describe("private analysis repository", () => {
 
     await expect(repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "8".repeat(64), actor: owner })).rejects.toThrow(z.ZodError);
 
-    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", job.id).execute();
-    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", run.id).execute();
-    await repository.completeRun({ runId: run.id, actor: owner, result: { valid: true } });
-    await postgres.db.updateTable("analysis_runs").set({ result_ciphertext: malformed.ciphertext, result_nonce: malformed.nonce, result_tag: malformed.tag, result_key_version: malformed.keyVersion }).where("id", "=", run.id).execute();
+    await postgres.db.updateTable("analysis_runs").set({ status: "completed", result_ciphertext: malformed.ciphertext, result_nonce: malformed.nonce, result_tag: malformed.tag, result_key_version: malformed.keyVersion }).where("id", "=", run.id).execute();
     await expect(repository.getRunResult({ runId: run.id, actor: owner })).rejects.toThrow(z.ZodError);
 
     const prompt = cipher.encrypt("prompt");
