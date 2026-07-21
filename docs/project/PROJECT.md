@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 638df045745be567ca1cedbb9cd44676269a01fe
 baseline_status: current
-updated_at: 2026-07-21T22:08:34+08:00
+updated_at: 2026-07-21T22:25:44+08:00
 updated_by: controller-agent
-current_phase: phase-4-plan-review
-last_checkpoint: CP-20260721-PHASE4-DESIGN-ACCEPTED
-next_gate: GATE-PHASE4-PLAN-APPROVED
+current_phase: phase-4-implementation
+last_checkpoint: CP-20260721-PHASE4-TASK1-STARTED
+next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -35,19 +35,20 @@ next_gate: GATE-PHASE4-PLAN-APPROVED
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 4 | plan-submitted | 设计已接受，七任务实施计划待 Gate 决策，实施尚未授权 |
+| Phase 4 | implementing-task-1 | Plan Gate 已通过，Task 1 contract 已接受 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE4-PLAN | phase-4 | Advanced analysis and legacy history design and seven-task implementation plan | controller-agent | codex/phase4-plan | 5a853744dfdef06d08bab6514eb0f022d50937c3 | none | review | CP-20260721-PHASE4-DESIGN-ACCEPTED | CP-20260721-PHASE4-PLAN-SUBMITTED | wait for explicit GATE-PHASE4-PLAN-APPROVED decision |
+| PHASE4-TASK1 | phase-4 | Public contracts and compatible mode policy | implementation-agent | codex/phase4-task1-contracts | ca6d5d240110e6c54beebd7d50c9012190e6ec3d | none | ready | CP-20260721-PHASE4-PLAN-APPROVED | CP-20260721-PHASE4-TASK1-STARTED | implement with TDD and independent reviews after governance merge |
 
 ## Phase Ledgers
 
 - [Phase 1 ledger](ledgers/phase-1-ledger.md)
 - [Phase 2 ledger](ledgers/phase-2-ledger.md)
 - [Phase 3 ledger](ledgers/phase-3-ledger.md)
+- [Phase 4 ledger](ledgers/phase-4-ledger.md)
 
 ## Effective Decisions
 
@@ -85,14 +86,17 @@ next_gate: GATE-PHASE4-PLAN-APPROVED
 
 ## Pending Feedback
 
-需要用户明确决定是否通过 `GATE-PHASE4-PLAN-APPROVED`
+无待处理反馈，PHASE4-TASK1 可按 accepted contract 推进
 
 ## Next Gate
 
-下一阶段门禁为 `GATE-PHASE4-PLAN-APPROVED`，Phase 4 实施保持锁定，直到设计与计划完成审查并由用户明确批准
+下一阶段门禁为 `GATE-PHASE4-IMPLEMENTATION-ACCEPTED`，只有 Tasks 1 至 7 全部 accepted 并 merged 后才可请求明确 Gate 决策
 
 ## Evidence Index
 
+- [Phase 4 Task 1 started](checkpoints/CP-20260721-PHASE4-TASK1-STARTED.md)
+- [Phase 4 plan approved](checkpoints/CP-20260721-PHASE4-PLAN-APPROVED.md)
+- [Phase 4 ledger](ledgers/phase-4-ledger.md)
 - [Phase 4 plan submitted](checkpoints/CP-20260721-PHASE4-PLAN-SUBMITTED.md)
 - [Phase 4 implementation plan](../superpowers/plans/2026-07-21-phase-4-advanced-analysis-implementation-plan.md)
 - [Phase 4 design accepted](checkpoints/CP-20260721-PHASE4-DESIGN-ACCEPTED.md)
