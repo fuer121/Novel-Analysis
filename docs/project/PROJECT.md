@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 3347c4f57951e1e744f5fd93ba1f5c329ab496d8
 baseline_status: current
-updated_at: 2026-07-21T09:22:24+08:00
+updated_at: 2026-07-21T09:43:06+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-TASK1-MERGED
+last_checkpoint: CP-20260721-PHASE3-TASK2-STARTED
 next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -34,13 +34,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementing | Plan Gate 已通过，Task 1 ready |
+| Phase 3 | implementing | Task 1 merged，Task 2 Started Contract 已接受 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK2 | phase-3 | Query schema, encrypted repository and sharing authorization | controller-agent | main | 3347c4f57951e1e744f5fd93ba1f5c329ab496d8 | none | ready | CP-20260721-PHASE3-TASK1-MERGED | none | confirm new-table and migration scope before Started Contract |
+| PHASE3-TASK2 | phase-3 | Query schema, encrypted repository and sharing authorization | implementation-agent | codex/phase3-task2-query-repository | 9928ac334659cc6c3c877ab70724db5b391ee923 | none | in_progress | CP-20260721-PHASE3-TASK1-MERGED | CP-20260721-PHASE3-TASK2-STARTED | implement approved schema and repository with TDD after contract merge |
 
 ## Phase Ledgers
 
@@ -81,7 +81,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-等待用户确认 PHASE3-TASK2 已批准的新表与 migration scope 后创建 Started Contract
+无，PHASE3-TASK2 Started Contract 合并后可按批准范围实施
 
 ## Next Gate
 
@@ -89,6 +89,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 2 started](checkpoints/CP-20260721-PHASE3-TASK2-STARTED.md)
 - [Phase 3 Task 1 merged](checkpoints/CP-20260721-PHASE3-TASK1-MERGED.md)
 - [Phase 3 Task 1 accepted](checkpoints/CP-20260721-PHASE3-TASK1-ACCEPTED.md)
 - [Phase 3 Task 1 started](checkpoints/CP-20260721-PHASE3-TASK1-STARTED.md)
