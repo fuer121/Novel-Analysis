@@ -18,6 +18,7 @@ import { ImportPanel } from "../features/library/ImportPanel.js";
 import { L1Panel } from "../features/library/L1Panel.js";
 import { L2Panel } from "../features/library/L2Panel.js";
 import { LibraryPage } from "../features/library/LibraryPage.js";
+import { QueryWorkspacePage } from "../features/query/QueryWorkspacePage.js";
 import { AppShell } from "./AppShell.js";
 
 const routes: RouteObject[] = [
@@ -33,6 +34,7 @@ const routes: RouteObject[] = [
         { path: "import", element: <ImportPanel /> },
         { path: "l1", element: <L1Panel /> },
         { path: "l2", element: <L2Panel /> },
+        { path: "query", element: <QueryWorkspacePage /> },
       ] },
       { path: "/tasks", element: <TaskCenterPage /> },
       { path: "/tasks/:id", element: <TaskDetailPage /> },

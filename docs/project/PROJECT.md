@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 3083c74725133d6275aea7c96d0b345f2ec4575a
 baseline_status: current
-updated_at: 2026-07-21T17:46:55+08:00
+updated_at: 2026-07-21T18:47:55+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-TASK6-API-CORRECTION-MERGED
+last_checkpoint: CP-20260721-PHASE3-TASK6-ACCEPTED
 next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK6 | phase-3 | Continuous-query responsive workspace | implementation-agent | codex/phase3-task6-workspace | 3083c74725133d6275aea7c96d0b345f2ec4575a | none | in_progress | CP-20260721-PHASE3-TASK6-API-CORRECTION-MERGED | CP-20260721-PHASE3-TASK6-STARTED | fast-forward the clean implementation worktree, then resume TDD |
+| PHASE3-TASK6 | phase-3 | Continuous-query responsive workspace | implementation-agent | codex/phase3-task6-workspace | 308e43f700f1e9f23eaec441521d0bd4f3612eb5 | 1c0b4c1edeeca465a8da59af427f56ef50d52305 | accepted | CP-20260721-PHASE3-TASK6-API-CORRECTION-MERGED | CP-20260721-PHASE3-TASK6-ACCEPTED | push branch, create PR and verify CI under DEC-0002 |
 
 ## Phase Ledgers
 
@@ -84,7 +84,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，PHASE3-TASK6 API prerequisite 已合并，可从新 baseline 恢复 Web 实施
+无，PHASE3-TASK6 implementation 已接受，等待 PR 与 CI 验证
 
 ## Next Gate
 
@@ -92,6 +92,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 6 accepted](checkpoints/CP-20260721-PHASE3-TASK6-ACCEPTED.md)
 - [Phase 3 Task 6 API correction merged](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-MERGED.md)
 - [Phase 3 Task 6 API correction accepted](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-ACCEPTED.md)
 - [Phase 3 Task 6 API correction started](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-STARTED.md)

@@ -13,7 +13,7 @@ export function BookWorkspacePage() {
   return <section className="book-workspace">
     <div className="workspace-heading"><div><p className="eyebrow">书籍工作区</p><h1>{book.data.book.title}</h1></div><span>{book.data.book.chapterCount} 章</span></div>
     <nav className="workspace-tabs" aria-label="书籍工作区">
-      <NavLink to="overview">概览</NavLink><NavLink to="import">导入</NavLink><NavLink to="l1">L1 索引</NavLink><NavLink to="l2">L2 索引与事实</NavLink>
+      <NavLink to="overview">概览</NavLink><NavLink to="import">导入</NavLink><NavLink to="l1">L1 索引</NavLink><NavLink to="l2">L2 索引与事实</NavLink><NavLink to="query">连续提问</NavLink>
     </nav>
     <Outlet context={{ book: book.data.book }} />
   </section>;
