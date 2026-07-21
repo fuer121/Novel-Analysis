@@ -27,7 +27,7 @@ export const advancedAnalysisMigration: Migration = {
       .addCheckConstraint("analysis_template_versions_version_check", sql`version > 0`).execute();
     await sql`alter table analysis_templates add constraint analysis_templates_current_version_id_fk foreign key (current_version_id, id) references analysis_template_versions(id, template_id)`.execute(db);
     await sql`create function reject_analysis_template_version_mutation() returns trigger language plpgsql as $$ begin raise exception 'analysis template versions are immutable'; end $$`.execute(db);
-    await sql`create trigger analysis_template_versions_immutable before update on analysis_template_versions for each row execute function reject_analysis_template_version_mutation()`.execute(db);
+    await sql`create trigger analysis_template_versions_immutable before update or delete on analysis_template_versions for each row execute function reject_analysis_template_version_mutation()`.execute(db);
 
     await db.schema.createTable("analysis_runs")
       .addColumn("id", "uuid", uuid).addColumn("book_id", "uuid", (c) => c.notNull()).addColumn("created_by", "uuid", (c) => c.notNull()).addColumn("template_version_id", "uuid", (c) => c.notNull()).addColumn("job_id", "uuid", (c) => c.notNull().unique())
@@ -42,6 +42,30 @@ export const advancedAnalysisMigration: Migration = {
       .addCheckConstraint("analysis_runs_range_check", sql`start_chapter > 0 and end_chapter >= start_chapter`).addCheckConstraint("analysis_runs_progress_check", sql`total_parts >= 0 and completed_parts >= 0 and completed_parts <= total_parts`)
       .addCheckConstraint("analysis_runs_execution_signature_check", sql`length(btrim(execution_signature)) > 0`)
       .addCheckConstraint("analysis_runs_result_tuple_check", sql`((result_ciphertext is null and result_nonce is null and result_tag is null and result_key_version is null) or (result_ciphertext is not null and result_nonce is not null and result_tag is not null and result_key_version is not null)) and (status <> 'completed' or result_ciphertext is not null)`).execute();
+    await sql`
+      create function enforce_analysis_run_identity() returns trigger language plpgsql as $$
+      begin
+        if not exists (
+          select 1 from analysis_template_versions v
+          join analysis_templates t on t.id = v.template_id
+          where v.id = new.template_version_id
+            and t.book_id = new.book_id
+            and t.created_by = new.created_by
+        ) then
+          raise exception 'analysis run template identity mismatch'
+            using errcode = '23514', constraint = 'analysis_runs_template_identity_check';
+        end if;
+        if not exists (
+          select 1 from jobs j
+          where j.id = new.job_id and j.requested_by = new.created_by
+        ) then
+          raise exception 'analysis run job requester mismatch'
+            using errcode = '23514', constraint = 'analysis_runs_job_requester_check';
+        end if;
+        return new;
+      end $$
+    `.execute(db);
+    await sql`create trigger analysis_runs_identity before insert or update of book_id, created_by, template_version_id, job_id on analysis_runs for each row execute function enforce_analysis_run_identity()`.execute(db);
     await db.schema.createIndex("analysis_runs_book_owner_updated_idx").on("analysis_runs").columns(["book_id", "created_by", "updated_at", "id"]).execute();
 
     await db.schema.createTable("analysis_parts")
@@ -57,6 +81,7 @@ export const advancedAnalysisMigration: Migration = {
   async down(db) {
     await db.schema.dropTable("analysis_parts").execute();
     await db.schema.dropTable("analysis_runs").execute();
+    await sql`drop function enforce_analysis_run_identity()`.execute(db);
     await sql`alter table analysis_templates drop constraint analysis_templates_current_version_id_fk`.execute(db);
     await db.schema.dropTable("analysis_template_versions").execute();
     await sql`drop function reject_analysis_template_version_mutation()`.execute(db);

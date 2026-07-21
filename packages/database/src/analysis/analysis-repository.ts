@@ -1,8 +1,10 @@
+import { z } from "zod";
+
 import type { AnalysisMode, AnalysisPartStatus, AnalysisRunStatus, DatabaseExecutor } from "../db.js";
 import type { ContentCipher, EncryptedContent } from "../library/content-encryption.js";
 import { decryptJson, encryptJson } from "./content.js";
 
-const JsonSchema = { parse(value: unknown) { return value; } };
+const JsonSchema = z.json();
 export interface AnalysisActor { id: string; role: "admin" | "member" }
 export interface CreateAnalysisTemplateInput { bookId: string; createdBy: string; name: string; prompt: string; outputSchema: unknown; contentHash: string; indexGroupId: string | null }
 export interface UpdateAnalysisTemplateInput { templateId: string; actor: AnalysisActor; name: string; prompt: string; outputSchema: unknown; contentHash: string; indexGroupId: string | null }

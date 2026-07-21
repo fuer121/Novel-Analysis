@@ -56,6 +56,7 @@ describe("private analysis repository", () => {
     expect(JSON.stringify(raw.rows)).not.toContain("analysis-schema-plaintext-sentinel");
     expect(JSON.stringify(raw.rows)).not.toContain(updatedPrompt);
     await expect(sql`update analysis_template_versions set content_hash = ${"b".repeat(64)} where id = ${template.currentVersionId}`.execute(postgres.db)).rejects.toThrow();
+    await expect(sql`delete from analysis_template_versions where id = ${template.currentVersionId}`.execute(postgres.db)).rejects.toThrow();
   });
 
   test("binds valid runs and parts and reuses only exact completed inputs", async () => {
@@ -112,6 +113,50 @@ describe("private analysis repository", () => {
       throw new Error("rollback completion");
     })).rejects.toThrow("rollback completion");
     expect(await postgres.db.selectFrom("analysis_parts").select(["status", "result_ciphertext"]).where("id", "=", part.id).executeTakeFirstOrThrow()).toEqual({ status: "running", result_ciphertext: null });
+  });
+
+  test("rejects direct run inserts with mismatched template, book, creator, or Job requester", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Identity", prompt: "prompt", outputSchema: {}, contentHash: "4".repeat(64), indexGroupId: null });
+    const otherBookId = (await postgres.db.insertInto("books").values({ title: "Other", created_by: member.id, status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+    const jobs = await postgres.db.insertInto("jobs").values([
+      { type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+      { type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+      { type: "analysis", status: "queued", requested_by: member.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+      { type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+    ]).returning("id").execute();
+    const insertRun = (runBookId: string, createdBy: string, jobId: string) => sql`
+      insert into analysis_runs (book_id, created_by, template_version_id, job_id, mode, start_chapter, end_chapter, status, execution_signature, total_parts, diagnostics)
+      values (${runBookId}, ${createdBy}, ${template.currentVersionId}, ${jobId}, 'balanced', 1, 1, 'queued', ${"5".repeat(64)}, 1, '{}'::jsonb)
+    `.execute(postgres.db);
+
+    await expect(insertRun(bookId, member.id, jobs[0]!.id)).rejects.toThrow();
+    await expect(insertRun(otherBookId, owner.id, jobs[1]!.id)).rejects.toThrow();
+    await expect(insertRun(bookId, owner.id, jobs[2]!.id)).rejects.toThrow();
+    await expect(insertRun(bookId, owner.id, jobs[3]!.id)).resolves.toBeDefined();
+  });
+
+  test("rejects repository payloads outside the approved JSON schema", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Malformed", prompt: "prompt", outputSchema: {}, contentHash: "6".repeat(64), indexGroupId: null });
+    const job = await postgres.db.insertInto("jobs").values({ type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "7".repeat(64), totalParts: 1 });
+    const part = await repository.createPart({ runId: run.id, position: 0, kind: "chapter", status: "running", inputSignature: "8".repeat(64) });
+    await repository.completePart({ partId: part.id, actor: owner, result: { valid: true } });
+    const malformed = cipher.encrypt("1e400");
+    await postgres.db.updateTable("analysis_parts").set({ result_ciphertext: malformed.ciphertext, result_nonce: malformed.nonce, result_tag: malformed.tag, result_key_version: malformed.keyVersion }).where("id", "=", part.id).execute();
+
+    await expect(repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "8".repeat(64), actor: owner })).rejects.toThrow(z.ZodError);
+
+    await repository.completeRun({ runId: run.id, actor: owner, result: { valid: true } });
+    await postgres.db.updateTable("analysis_runs").set({ result_ciphertext: malformed.ciphertext, result_nonce: malformed.nonce, result_tag: malformed.tag, result_key_version: malformed.keyVersion }).where("id", "=", run.id).execute();
+    await expect(repository.getRunResult({ runId: run.id, actor: owner })).rejects.toThrow(z.ZodError);
+
+    const prompt = cipher.encrypt("prompt");
+    const rawTemplate = await postgres.db.insertInto("analysis_templates").values({ book_id: bookId, created_by: owner.id, name: "Malformed schema", current_version_id: null, index_group_id: null }).returning("id").executeTakeFirstOrThrow();
+    const rawVersion = await postgres.db.insertInto("analysis_template_versions").values({ template_id: rawTemplate.id, version: 1, prompt_ciphertext: prompt.ciphertext, prompt_nonce: prompt.nonce, prompt_tag: prompt.tag, prompt_key_version: prompt.keyVersion, schema_ciphertext: malformed.ciphertext, schema_nonce: malformed.nonce, schema_tag: malformed.tag, schema_key_version: malformed.keyVersion, content_hash: "9".repeat(64) }).returning("id").executeTakeFirstOrThrow();
+    await postgres.db.updateTable("analysis_templates").set({ current_version_id: rawVersion.id }).where("id", "=", rawTemplate.id).execute();
+    await expect(repository.getTemplate({ templateId: rawTemplate.id, actor: owner })).rejects.toThrow(z.ZodError);
   });
 
   test("validates decrypted typed JSON with Zod", () => {
