@@ -154,6 +154,13 @@ export type QueryTurnStatus = "queued" | "running" | "awaiting_fallback" | "comp
 interface QuerySessionsTable { id: Generated<string>; book_id: string; group_id: string; created_by: string; visibility: Generated<QueryVisibility>; default_start_chapter: number; default_end_chapter: number; title_ciphertext: Buffer; title_nonce: Buffer; title_tag: Buffer; title_key_version: string; archived_at: Timestamp | null; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
 interface QueryTurnsTable { id: Generated<string>; session_id: string; created_by: string; question_ciphertext: Buffer; question_nonce: Buffer; question_tag: Buffer; question_key_version: string; question_hmac: string; answer_ciphertext: Buffer | null; answer_nonce: Buffer | null; answer_tag: Buffer | null; answer_key_version: string | null; start_chapter: number; end_chapter: number; intent_snapshot: Json; source_snapshot: Json; gap_snapshot: Json; config_snapshot: Json; execution_signature: string; evidence_snapshot_hash: string | null; status: Generated<QueryTurnStatus>; job_id: string | null; attempt_id: string | null; degradation: string | null; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp; completed_at: Timestamp | null }
 interface TurnEvidenceTable { id: Generated<string>; turn_id: string; fact_id: string; rank: number; recall_reason: string; disposition: "used" | "excluded"; exclusion_reason: string | null; created_at: GeneratedTimestamp }
+interface AnalysisTemplatesTable { id: Generated<string>; book_id: string; created_by: string; name: string; current_version_id: string | null; index_group_id: string | null; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
+interface AnalysisTemplateVersionsTable { id: Generated<string>; template_id: string; version: number; prompt_ciphertext: Buffer; prompt_nonce: Buffer; prompt_tag: Buffer; prompt_key_version: string; schema_ciphertext: Buffer; schema_nonce: Buffer; schema_tag: Buffer; schema_key_version: string; content_hash: string; created_at: GeneratedTimestamp }
+export type AnalysisMode = "fast_index" | "balanced" | "precision" | "full_text";
+export type AnalysisRunStatus = "queued" | "running" | "retrying" | "paused" | "completed" | "failed" | "cancelled";
+export type AnalysisPartStatus = "queued" | "running" | "completed" | "failed" | "cancelled";
+interface AnalysisRunsTable { id: Generated<string>; book_id: string; created_by: string; template_version_id: string; job_id: string; mode: AnalysisMode; start_chapter: number; end_chapter: number; status: AnalysisRunStatus; execution_signature: string; completed_parts: Generated<number>; total_parts: number; result_ciphertext: Buffer | null; result_nonce: Buffer | null; result_tag: Buffer | null; result_key_version: string | null; diagnostics: Json; error_code: string | null; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
+interface AnalysisPartsTable { id: Generated<string>; run_id: string; position: number; kind: string; status: AnalysisPartStatus; input_signature: string; result_ciphertext: Buffer | null; result_nonce: Buffer | null; result_tag: Buffer | null; result_key_version: string | null; error_code: string | null; output_ref: Json | null; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
 
 export interface Database {
   users: UsersTable;
@@ -179,6 +186,10 @@ export interface Database {
   query_sessions: QuerySessionsTable;
   query_turns: QueryTurnsTable;
   turn_evidence: TurnEvidenceTable;
+  analysis_templates: AnalysisTemplatesTable;
+  analysis_template_versions: AnalysisTemplateVersionsTable;
+  analysis_runs: AnalysisRunsTable;
+  analysis_parts: AnalysisPartsTable;
 }
 
 export type DatabaseConnection = Kysely<Database>;
