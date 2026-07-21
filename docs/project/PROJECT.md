@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 8b26f2887230f220bdba8e55b76e6c94998cd08c
 baseline_status: current
-updated_at: 2026-07-21T11:38:32+08:00
+updated_at: 2026-07-21T12:49:09+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
 last_checkpoint: CP-20260721-PHASE3-TASK3-MERGED
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK4 | phase-3 | Query sessions API, preview and transactional Query job | implementation-agent | codex/phase3-task4-query-api | 2195e09389bc9b17fa9f108c1ba0515caf7817c9 | none | in_progress | CP-20260721-PHASE3-TASK3-MERGED | CP-20260721-PHASE3-TASK4-STARTED | merge Started Contract, then implement with TDD from its merge SHA |
+| PHASE3-TASK4 | phase-3 | Query sessions API, preview and transactional Query job | controller-agent | codex/phase3-task4-query-api | e95d5fca215e61b1adeacf99ff5fa4e5b2228f17 | c60f87f3c8a0b95e405fbf180745b92282e404dd | accepted | CP-20260721-PHASE3-TASK3-MERGED | CP-20260721-PHASE3-TASK4-ACCEPTED | create implementation PR, verify CI and merge under DEC-0002 |
 
 ## Phase Ledgers
 
@@ -63,6 +63,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - [DEC-0011 Task 7 Fact Review API](decisions/DEC-0011-task7-fact-review-api.md)
 - [DEC-0012 Task 7 Session Cache Boundary](decisions/DEC-0012-task7-session-cache-boundary.md)
 - [DEC-0013 Phase 3 Query Session Sharing](decisions/DEC-0013-phase3-query-session-sharing.md)
+- [DEC-0014 Query HMAC Key Policy](decisions/DEC-0014-query-hmac-key-policy.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -76,12 +77,12 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- Task 4 必须保持 preview scope hash、RBAC、turn/job/step/outbox transaction 与 idempotency conflict 的一致边界
+- Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
 - 当前无证据冲突或 blocker，Task 4 可在 Started Contract 合并后实施
 
 ## Pending Feedback
 
-无，PHASE3-TASK4 Started Contract 已接受，可在其合并后按批准计划实施
+无，PHASE3-TASK4 implementation 已接受，可按 DEC-0002 创建 PR 并在 CI 通过后合并
 
 ## Next Gate
 
@@ -89,6 +90,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 4 accepted](checkpoints/CP-20260721-PHASE3-TASK4-ACCEPTED.md)
 - [Phase 3 Task 4 started](checkpoints/CP-20260721-PHASE3-TASK4-STARTED.md)
 - [Phase 3 Task 3 merged](checkpoints/CP-20260721-PHASE3-TASK3-MERGED.md)
 - [Phase 3 Task 3 accepted](checkpoints/CP-20260721-PHASE3-TASK3-ACCEPTED.md)

@@ -6,3 +6,4 @@ export * from "./outbox-dispatcher.js";
 export * from "./step-leases.js";
 export * from "./library/import-job.js";
 export * from "./library/l2-job.js";
+export * from "./query/query-job.js";
