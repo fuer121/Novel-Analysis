@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 638df045745be567ca1cedbb9cd44676269a01fe
 baseline_status: current
-updated_at: 2026-07-21T22:25:44+08:00
+updated_at: 2026-07-21T23:13:17+08:00
 updated_by: controller-agent
 current_phase: phase-4-implementation
-last_checkpoint: CP-20260721-PHASE4-TASK1-STARTED
+last_checkpoint: CP-20260721-PHASE4-TASK1-ACCEPTED
 next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -35,13 +35,13 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 4 | implementing-task-1 | Plan Gate 已通过，Task 1 contract 已接受 |
+| Phase 4 | task-1-accepted | Task 1 实现已接受，等待实现 PR 合并 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE4-TASK1 | phase-4 | Public contracts and compatible mode policy | implementation-agent | codex/phase4-task1-contracts | ca6d5d240110e6c54beebd7d50c9012190e6ec3d | none | ready | CP-20260721-PHASE4-PLAN-APPROVED | CP-20260721-PHASE4-TASK1-STARTED | implement with TDD and independent reviews after governance merge |
+| PHASE4-TASK1 | phase-4 | Public contracts and compatible mode policy | implementation-agent | codex/phase4-task1-contracts | 556faca85db8603e58ffb3d2f18c8440d24bfd01 | 3661a49efbd450d89626eea258eff340603d590e | accepted | CP-20260721-PHASE4-PLAN-APPROVED | CP-20260721-PHASE4-TASK1-ACCEPTED | merge PR #107 after accepted checkpoint merge |
 
 ## Phase Ledgers
 
@@ -94,6 +94,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 4 Task 1 accepted](checkpoints/CP-20260721-PHASE4-TASK1-ACCEPTED.md)
 - [Phase 4 Task 1 started](checkpoints/CP-20260721-PHASE4-TASK1-STARTED.md)
 - [Phase 4 plan approved](checkpoints/CP-20260721-PHASE4-PLAN-APPROVED.md)
 - [Phase 4 ledger](ledgers/phase-4-ledger.md)
