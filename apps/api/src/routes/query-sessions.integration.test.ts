@@ -86,4 +86,19 @@ describe("query session routes", () => {
     expect((await request(app()).get(`/api/books/${bookId}`).set(auth("owner"))).status).toBe(200);
     expect((await request(app()).get("/api/jobs").set(auth("owner"))).status).toBe(200);
   });
+
+  it("returns idempotency conflict for cross-book session replay and stores no plaintext-derived audit fingerprint", async () => {
+    const key = "session-cross-book";
+    const body = { groupId, title: "SENTINEL_SESSION_TITLE", visibility: "private", defaultStartChapter: 1, defaultEndChapter: 2 } as const;
+    const first = await request(app()).post(`/api/books/${bookId}/query-sessions`).set(write("owner", key)).send(body);
+    expect(first.status).toBe(201);
+    const otherBookId = (await createLibraryRepository(postgres.db, cipher).createBook({ title: "Other", createdBy: identities.owner!.id })).id;
+    const replay = await request(app()).post(`/api/books/${otherBookId}/query-sessions`).set(write("owner", key)).send(body);
+    expect(replay.status).toBe(409); expect(replay.body).toEqual({ error: "idempotency_conflict" });
+    const formerFingerprint = createHash("sha256").update(JSON.stringify(body)).digest("hex");
+    const audits = JSON.stringify(await postgres.db.selectFrom("audit_logs").selectAll().where("action", "=", "query_session.create").execute());
+    expect(audits).not.toContain(body.title);
+    expect(audits).not.toContain(formerFingerprint);
+    expect(await postgres.db.selectFrom("query_sessions").select("id").execute()).toHaveLength(1);
+  });
 });

@@ -442,6 +442,7 @@ describe("job event stream", () => {
         FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
         CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
+        CONTENT_HMAC_KEY: Buffer.from("query-hmac-key").toString("base64"),
         PORT: String(port),
       },
     });
@@ -489,6 +490,7 @@ describe("job event stream", () => {
         FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
         CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
+        CONTENT_HMAC_KEY: Buffer.from("query-hmac-key").toString("base64"),
         PORT: String(port),
       },
     });
@@ -516,5 +518,26 @@ describe("job event stream", () => {
       if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
       await expectExit(exited).catch(() => undefined);
     }
+  });
+
+  it("rejects production startup without an independent content HMAC key", async () => {
+    const child = spawn("npm", ["start", "-w", "apps/api"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        APP_ORIGIN: "https://app.test",
+        DATABASE_URL: postgres.databaseUrl,
+        FEISHU_APP_ID: "test-app-id",
+        FEISHU_APP_SECRET: "test-app-secret",
+        FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
+        CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+        CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
+        CONTENT_HMAC_KEY: "",
+        PORT: "3001",
+      },
+    });
+    let stderr = ""; child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    await expect(expectExit(waitForExit(child))).resolves.toMatchObject({ code: 1 });
+    expect(stderr).toContain("CONTENT_HMAC_KEY");
   });
 });

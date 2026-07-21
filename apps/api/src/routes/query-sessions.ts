@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac } from "node:crypto";
 import { Router, type Response } from "express";
 import { sql } from "kysely";
 import { z } from "zod";
@@ -53,7 +53,9 @@ export function createQuerySessionsRouter(database: DatabaseConnection, config: 
     const params = paramsSchema.safeParse(request.params); const body = createSessionSchema.safeParse(request.body); const key = idempotencyKey(request, response);
     if (!params.success || !body.success || !key) { if (!response.headersSent) response.status(400).json({ error: "invalid_request" }); return; }
     try {
-      const current = actor(request); const requestFingerprint = fingerprint(body.data);
+      const current = actor(request);
+      const titleHmac = createHmac("sha256", hmacKey).update(body.data.title).digest("hex");
+      const requestFingerprint = fingerprint({ bookId: params.data.bookId, groupId: body.data.groupId, titleHmac, visibility: body.data.visibility, defaultStartChapter: body.data.defaultStartChapter, defaultEndChapter: body.data.defaultEndChapter });
       const created = await database.transaction().execute(async (transaction) => {
         await sql`select pg_advisory_xact_lock(hashtext(${`${current.id}:query-session:${key}`}))`.execute(transaction);
         const audit = await transaction.selectFrom("audit_logs").select(["target_id", "metadata"]).where("actor_user_id", "=", current.id).where("action", "=", "query_session.create").where(sql<boolean>`metadata ->> 'requestId' = ${key}`).executeTakeFirst();

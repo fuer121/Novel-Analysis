@@ -114,10 +114,12 @@ export class QueryJobService {
   async createTurn(input: QueryCreateInput): Promise<{ turn: QueryTurn; job: PublicJob }> {
     return this.database.transaction().execute(async (transaction) => {
       await sql`select pg_advisory_xact_lock(hashtext(${`${input.actor.id}:query-turn:${input.requestId}`}))`.execute(transaction);
+      const requestQuestionHmac = createHmac("sha256", this.options.hmacKey).update(input.question).digest("hex");
+      const requestFingerprint = sha256({ bookId: input.bookId, sessionId: input.sessionId, questionHmac: requestQuestionHmac, startChapter: input.startChapter, endChapter: input.endChapter, scopeHash: input.scopeHash });
       const existing = await transaction.selectFrom("jobs").select(PUBLIC_JOB_COLUMNS).where("requested_by", "=", input.actor.id).where("request_id", "=", input.requestId).executeTakeFirst();
       if (existing) {
         const config = await transaction.selectFrom("jobs").select("config_snapshot").where("id", "=", existing.id).executeTakeFirstOrThrow();
-        if (config.config_snapshot.requestFingerprint !== sha256({ sessionId: input.sessionId, question: input.question, startChapter: input.startChapter, endChapter: input.endChapter, scopeHash: input.scopeHash })) throw new QueryIdempotencyConflictError();
+        if (config.config_snapshot.requestFingerprint !== requestFingerprint) throw new QueryIdempotencyConflictError();
         const turnId = (await transaction.selectFrom("query_turns").select("id").where("job_id", "=", existing.id).executeTakeFirstOrThrow()).id;
         const turn = await createQueryRepository(transaction, this.cipher).getTurn({ turnId, actor: input.actor });
         return { turn, job: jobRowToPublic(existing) };
@@ -126,7 +128,6 @@ export class QueryJobService {
       try { selection = await this.select(input, transaction); }
       catch (error) { if (error instanceof QueryInvalidRequestError) throw new QueryScopeChangedError(); throw error; }
       if (selection.scopeHash !== input.scopeHash) throw new QueryScopeChangedError();
-      const requestFingerprint = sha256({ sessionId: input.sessionId, question: input.question, startChapter: input.startChapter, endChapter: input.endChapter, scopeHash: input.scopeHash });
       const inserted = await transaction.insertInto("jobs").values({ type: "query", status: "queued", requested_by: input.actor.id, request_id: input.requestId, scope: { bookId: input.bookId, startChapter: selection.effectiveRange.startChapter, endChapter: selection.effectiveRange.endChapter, indexGroupKeys: [selection.group.key] }, config_snapshot: { requestFingerprint, scopeHash: selection.scopeHash, sessionId: input.sessionId, groupId: selection.group.id, questionHmac: selection.questionHmac, recentQuestionHmacs: selection.recentQuestionHmacs, coverageSignatures: selection.coverageSignatures, summaryWorkflow: selection.summaryWorkflow, recallPolicyVersion: this.options.recallPolicyVersion }, concurrency_key: `query:${input.sessionId}:${input.requestId}`, progress: { total: 1, completed: 0, failed: 0, skipped: 0, current: "" } }).returning(PUBLIC_JOB_COLUMNS).executeTakeFirstOrThrow();
       const job = jobRowToPublic(inserted);
       const turn = await createQueryRepository(transaction, this.cipher).createTurn({ sessionId: input.sessionId, actor: input.actor, question: input.question, questionHmac: selection.questionHmac, startChapter: selection.effectiveRange.startChapter, endChapter: selection.effectiveRange.endChapter, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: { recallPolicyVersion: this.options.recallPolicyVersion, summaryWorkflowVersion: selection.summaryWorkflow.contractVersion }, executionSignature: selection.scopeHash, jobId: job.id });

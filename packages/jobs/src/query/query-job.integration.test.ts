@@ -70,6 +70,28 @@ describe("Query job service", () => {
     expect(await postgres.db.selectFrom("jobs").select("id").execute()).toHaveLength(1);
   });
 
+  it("treats a cross-book replay as an idempotency conflict without leaking the original resource", async () => {
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
+    const input = { bookId, sessionId, actor: { id: ownerId, role: "member" as const }, question: "cross-book", startChapter: 1, endChapter: 3 };
+    const preview = await service.preview(input);
+    await service.createTurn({ ...input, requestId: "cross-book-key", scopeHash: preview.scopeHash });
+    const otherBookId = (await createLibraryRepository(postgres.db, cipher).createBook({ title: "Other", createdBy: ownerId })).id;
+    await expect(service.createTurn({ ...input, bookId: otherBookId, requestId: "cross-book-key", scopeHash: preview.scopeHash })).rejects.toBeInstanceOf(QueryIdempotencyConflictError);
+    expect(await postgres.db.selectFrom("query_turns").select("id").execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("jobs").select("id").execute()).toHaveLength(1);
+  });
+
+  it("does not persist plaintext or the former unkeyed plaintext fingerprint", async () => {
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
+    const input = { bookId, sessionId, actor: { id: ownerId, role: "member" as const }, question: "SENTINEL_DERIVED_QUESTION", startChapter: 1, endChapter: 3 };
+    const preview = await service.preview(input);
+    await service.createTurn({ ...input, requestId: "derived", scopeHash: preview.scopeHash });
+    const formerFingerprint = createHash("sha256").update(JSON.stringify({ sessionId, question: input.question, startChapter: 1, endChapter: 3, scopeHash: preview.scopeHash })).digest("hex");
+    const ordinary = JSON.stringify({ jobs: await postgres.db.selectFrom("jobs").selectAll().execute(), events: await postgres.db.selectFrom("job_events").selectAll().execute(), outbox: await postgres.db.selectFrom("job_outbox").selectAll().execute(), steps: await postgres.db.selectFrom("job_steps").selectAll().execute() });
+    expect(ordinary).not.toContain(input.question);
+    expect(ordinary).not.toContain(formerFingerprint);
+  });
+
   it("rejects question, context, range, coverage and workflow drift before writing", async () => {
     const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
     const base = { bookId, sessionId, actor: { id: ownerId, role: "member" as const }, question: "base", startChapter: 1, endChapter: 3 };
