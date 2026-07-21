@@ -11,6 +11,11 @@ import { createQueryRepository, type QueryActor } from "./query-repository.js";
 
 const QUESTION_HMAC = "a".repeat(64);
 const EXECUTION_SIGNATURE = "b".repeat(64);
+const deferred = () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  return { promise, resolve };
+};
 
 describe("continuous query repository", () => {
   let postgres: DisposablePostgres;
@@ -244,6 +249,81 @@ describe("continuous query repository", () => {
     expect(rejected).toMatchObject({ reason: { message: "Evidence snapshot already committed" } });
     expect(await postgres.db.selectFrom("turn_evidence").selectAll().where("turn_id", "=", turn.id).execute()).toHaveLength(1);
     expect((await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  test("hashes all authoritative evidence rows including pre-seal direct inserts", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "authoritative", defaultStartChapter: 1, defaultEndChapter: 3 });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question: "authoritative", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    await postgres.db.insertInto("turn_evidence").values({ turn_id: turn.id, fact_id: factId, rank: 3, recall_reason: "direct_candidate", disposition: "excluded", exclusion_reason: "candidate_budget" }).execute();
+    await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [] });
+    const rows = await postgres.db.selectFrom("turn_evidence").select(["fact_id", "rank", "recall_reason", "disposition", "exclusion_reason"]).where("turn_id", "=", turn.id).orderBy("rank").orderBy("fact_id").execute();
+    const expectedHash = createHash("sha256").update(JSON.stringify(rows.map((row) => ({ factId: row.fact_id, rank: row.rank, recallReason: row.recall_reason, disposition: row.disposition, exclusionReason: row.exclusion_reason })))).digest("hex");
+    expect((await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash).toBe(expectedHash);
+  });
+
+  test("does not read or complete after a visibility revocation wins the session lock", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "revoked-title", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: member, question: "revoked-question", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    await repository.commitEvidence({ turnId: turn.id, actor: member, evidence: [] });
+    const hash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
+    for (const operation of [
+      () => repository.getTurn({ turnId: turn.id, actor: member }),
+      () => repository.completeTurn({ turnId: turn.id, actor: member, answer: "must-not-write", status: "completed", evidenceSnapshotHash: hash, sourceSnapshot: {}, gapSnapshot: {}, degradation: null }),
+    ]) {
+      await repository.updateSession({ sessionId: session.id, actor: owner, visibility: "team" });
+      const locked = deferred(); const release = deferred();
+      const revoke = postgres.db.transaction().execute(async (transaction) => {
+        await sql`select id from query_sessions where id = ${session.id} for update`.execute(transaction);
+        locked.resolve(); await release.promise;
+        await transaction.updateTable("query_sessions").set({ visibility: "private" }).where("id", "=", session.id).execute();
+      });
+      await locked.promise;
+      const protectedOperation = operation();
+      release.resolve(); await revoke;
+      await expect(protectedOperation).rejects.toThrow("Query access denied");
+    }
+    expect((await postgres.db.selectFrom("query_turns").select(["answer_ciphertext", "completed_at"]).where("id", "=", turn.id).executeTakeFirstOrThrow())).toMatchObject({ answer_ciphertext: null, completed_at: null });
+  });
+
+  test("does not create a turn after archival wins the session lock", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "archive-race", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
+    const locked = deferred(); const release = deferred();
+    const archive = postgres.db.transaction().execute(async (transaction) => {
+      await sql`select id from query_sessions where id = ${session.id} for update`.execute(transaction);
+      locked.resolve(); await release.promise;
+      await transaction.updateTable("query_sessions").set({ archived_at: new Date() }).where("id", "=", session.id).execute();
+    });
+    await locked.promise;
+    const create = repository.createTurn({ sessionId: session.id, actor: member, question: "too-late", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    release.resolve(); await archive;
+    await expect(create).rejects.toThrow("Query access denied");
+    expect(await postgres.db.selectFrom("query_turns").select("id").where("session_id", "=", session.id).execute()).toEqual([]);
+  });
+
+  test("allows only one terminal completion and rejects stale replay", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const jobs = await postgres.db.insertInto("jobs").values([
+      { type: "query", status: "running", requested_by: owner.id, request_id: `terminal-a-${crypto.randomUUID()}`, scope: {}, config_snapshot: {}, progress: {} },
+      { type: "query", status: "running", requested_by: owner.id, request_id: `terminal-b-${crypto.randomUUID()}`, scope: {}, config_snapshot: {}, progress: {} },
+    ]).returning("id").execute();
+    const steps = await postgres.db.insertInto("job_steps").values(jobs.map((job, index) => ({ job_id: job.id, position: 0, kind: "query", status: "running" as const, input_signature: `${index}`, idempotency_key: `terminal-${crypto.randomUUID()}` }))).returning("id").execute();
+    const attempts = await postgres.db.insertInto("job_attempts").values(steps.map((step, index) => ({ step_id: step.id, attempt_no: 1, worker_id: `worker-${index}`, status: "running" as const, started_at: new Date() }))).returning("id").execute();
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "terminal", defaultStartChapter: 1, defaultEndChapter: 3 });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question: "terminal", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE, jobId: jobs[0]!.id, attemptId: attempts[0]!.id });
+    await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [] });
+    const hash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
+    const complete = (answer: string, index = 0) => repository.completeTurn({ turnId: turn.id, actor: owner, answer, status: "completed" as const, evidenceSnapshotHash: hash, sourceSnapshot: {}, gapSnapshot: {}, degradation: null, jobId: jobs[index]!.id, attemptId: attempts[index]!.id });
+    await expect(complete("wrong-attempt", 1)).rejects.toThrow("Query attempt mismatch");
+    const results = await Promise.allSettled([complete("terminal-answer-one"), complete("terminal-answer-two", 1)]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(["Query attempt mismatch", "Query turn already terminal"]).toContain((results.find((result) => result.status === "rejected") as PromiseRejectedResult).reason.message);
+    await expect(complete("stale-replay-answer")).rejects.toThrow("Query turn already terminal");
+    const raw = await postgres.db.selectFrom("query_turns").selectAll().where("id", "=", turn.id).executeTakeFirstOrThrow();
+    expect(raw.completed_at).toBeInstanceOf(Date);
+    expect(cipher.decrypt({ ciphertext: raw.answer_ciphertext!, nonce: raw.answer_nonce!, tag: raw.answer_tag!, keyVersion: raw.answer_key_version! })).toBe((results.find((result) => result.status === "fulfilled") as PromiseFulfilledResult<{ answer: string | null }>).value.answer);
   });
 
   test("rejects new turns after archival", async () => {

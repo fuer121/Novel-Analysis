@@ -24,7 +24,7 @@ export interface CompleteTurnInput { turnId: string; actor: QueryActor; answer: 
 const encrypted = (row: { ciphertext: Buffer; nonce: Buffer; tag: Buffer; key_version: string }): EncryptedContent => ({ ciphertext: row.ciphertext, nonce: row.nonce, tag: row.tag, keyVersion: row.key_version });
 
 function stableError(error: unknown, message: string): never {
-  if (error instanceof Error && ["Query access denied", "Evidence snapshot already committed"].includes(error.message)) throw error;
+  if (error instanceof Error && ["Query access denied", "Evidence snapshot already committed", "Query turn already terminal", "Query attempt mismatch"].includes(error.message)) throw error;
   throw new Error(message);
 }
 
@@ -68,8 +68,22 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
   const mapSession = (row: { id: string; book_id: string; group_id: string; created_by: string; visibility: QueryVisibility; default_start_chapter: number; default_end_chapter: number; title_ciphertext: Buffer; title_nonce: Buffer; title_tag: Buffer; title_key_version: string; archived_at: Date | null; created_at: Date; updated_at: Date }): QuerySession => ({ id: row.id, bookId: row.book_id, groupId: row.group_id, createdBy: row.created_by, visibility: row.visibility, defaultStartChapter: row.default_start_chapter, defaultEndChapter: row.default_end_chapter, title: cipher.decrypt(encrypted({ ciphertext: row.title_ciphertext, nonce: row.title_nonce, tag: row.title_tag, key_version: row.title_key_version })), archivedAt: row.archived_at, createdAt: row.created_at, updatedAt: row.updated_at });
   const mapTurn = (row: { id: string; session_id: string; created_by: string; question_ciphertext: Buffer; question_nonce: Buffer; question_tag: Buffer; question_key_version: string; answer_ciphertext: Buffer | null; answer_nonce: Buffer | null; answer_tag: Buffer | null; answer_key_version: string | null; question_hmac: string; start_chapter: number; end_chapter: number; intent_snapshot: JsonObject; source_snapshot: JsonObject; gap_snapshot: JsonObject; config_snapshot: JsonObject; execution_signature: string; evidence_snapshot_hash: string | null; status: QueryTurnStatus; job_id: string | null; attempt_id: string | null; degradation: string | null; created_at: Date; updated_at: Date; completed_at: Date | null }): QueryTurn => ({ id: row.id, sessionId: row.session_id, createdBy: row.created_by, question: cipher.decrypt(encrypted({ ciphertext: row.question_ciphertext, nonce: row.question_nonce, tag: row.question_tag, key_version: row.question_key_version })), answer: row.answer_ciphertext && row.answer_nonce && row.answer_tag && row.answer_key_version ? cipher.decrypt(encrypted({ ciphertext: row.answer_ciphertext, nonce: row.answer_nonce, tag: row.answer_tag, key_version: row.answer_key_version })) : null, questionHmac: row.question_hmac, startChapter: row.start_chapter, endChapter: row.end_chapter, intentSnapshot: row.intent_snapshot, sourceSnapshot: row.source_snapshot, gapSnapshot: row.gap_snapshot, configSnapshot: row.config_snapshot, executionSignature: row.execution_signature, evidenceSnapshotHash: row.evidence_snapshot_hash, status: row.status, jobId: row.job_id, attemptId: row.attempt_id, degradation: row.degradation, createdAt: row.created_at, updatedAt: row.updated_at, completedAt: row.completed_at });
 
-  async function authorizedTurn(turnId: string, actor: QueryActor, manage = false, executor: DatabaseExecutor = db) {
-    const row = await executor.selectFrom("query_turns as t").innerJoin("query_sessions as s", "s.id", "t.session_id").select(["t.id", "t.created_by", "s.visibility", "s.created_by as session_created_by"]).where("t.id", "=", turnId).executeTakeFirst();
+  const inTransaction = <T>(operation: (executor: DatabaseExecutor) => Promise<T>): Promise<T> => db.isTransaction ? operation(db) : db.transaction().execute(operation);
+
+  async function lockSession(executor: DatabaseExecutor, sessionId: string, exclusive = false): Promise<void> {
+    const result = exclusive
+      ? await sql<{ id: string }>`select id from query_sessions where id = ${sessionId} for update`.execute(executor)
+      : await sql<{ id: string }>`select id from query_sessions where id = ${sessionId} for share`.execute(executor);
+    if (!result.rows[0]) throw new Error("Query access denied");
+  }
+
+  async function lockedTurnAuthorization(executor: DatabaseExecutor, turnId: string, actor: QueryActor, manage = false, exclusiveTurn = false) {
+    const reference = await executor.selectFrom("query_turns").select("session_id").where("id", "=", turnId).executeTakeFirst();
+    if (!reference) throw new Error("Query access denied");
+    await lockSession(executor, reference.session_id);
+    if (exclusiveTurn) await sql`select id from query_turns where id = ${turnId} for update`.execute(executor);
+    else await sql`select id from query_turns where id = ${turnId} for share`.execute(executor);
+    const row = await executor.selectFrom("query_turns as t").innerJoin("query_sessions as s", "s.id", "t.session_id").select(["t.id", "t.created_by", "t.session_id", "s.visibility", "s.created_by as session_created_by"]).where("t.id", "=", turnId).where("t.session_id", "=", reference.session_id).executeTakeFirst();
     const visible = row && (actor.role === "admin" || row.session_created_by === actor.id || row.visibility === "team");
     const manageable = row && (actor.role === "admin" || row.created_by === actor.id);
     if (!visible || (manage && !manageable)) throw new Error("Query access denied");
@@ -91,43 +105,51 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
       return (await query.execute()).map(mapSession);
     },
     async updateSession(input: ManageQuerySessionInput): Promise<QuerySession> {
-      const authorization = await db.selectFrom("query_sessions").select(["created_by"]).where("id", "=", input.sessionId).executeTakeFirst();
-      if (!authorization || (input.actor.role !== "admin" && authorization.created_by !== input.actor.id)) throw new Error("Query access denied");
-      try {
+      return inTransaction(async (executor) => {
+        await lockSession(executor, input.sessionId, true);
+        const authorization = await executor.selectFrom("query_sessions").select(["created_by"]).where("id", "=", input.sessionId).executeTakeFirstOrThrow();
+        if (input.actor.role !== "admin" && authorization.created_by !== input.actor.id) throw new Error("Query access denied");
+        try {
         const values: Record<string, unknown> = { updated_at: new Date() };
         if (input.title !== undefined) {
           if (!input.title.trim()) throw new Error();
           const title = cipher.encrypt(input.title); Object.assign(values, { title_ciphertext: title.ciphertext, title_nonce: title.nonce, title_tag: title.tag, title_key_version: title.keyVersion });
         }
         if (input.visibility !== undefined) values.visibility = input.visibility;
-        const row = await db.updateTable("query_sessions").set(values).where("id", "=", input.sessionId).returningAll().executeTakeFirstOrThrow();
+        const row = await executor.updateTable("query_sessions").set(values).where("id", "=", input.sessionId).returningAll().executeTakeFirstOrThrow();
         return mapSession(row);
-      } catch (error) { stableError(error, "Invalid query session"); }
+        } catch (error) { stableError(error, "Invalid query session"); }
+      });
     },
     async archiveSession(input: { sessionId: string; actor: QueryActor }): Promise<void> {
-      const row = await db.selectFrom("query_sessions").select("created_by").where("id", "=", input.sessionId).executeTakeFirst();
-      if (!row || (input.actor.role !== "admin" && row.created_by !== input.actor.id)) throw new Error("Query access denied");
-      await db.updateTable("query_sessions").set({ archived_at: new Date(), updated_at: new Date() }).where("id", "=", input.sessionId).execute();
+      return inTransaction(async (executor) => {
+        await lockSession(executor, input.sessionId, true);
+        const row = await executor.selectFrom("query_sessions").select("created_by").where("id", "=", input.sessionId).executeTakeFirstOrThrow();
+        if (input.actor.role !== "admin" && row.created_by !== input.actor.id) throw new Error("Query access denied");
+        await executor.updateTable("query_sessions").set({ archived_at: new Date(), updated_at: new Date() }).where("id", "=", input.sessionId).execute();
+      });
     },
     async createTurn(input: CreateQueryTurnInput): Promise<QueryTurn> {
-      const session = await db.selectFrom("query_sessions").select(["created_by", "visibility", "archived_at", "title_ciphertext", "title_nonce", "title_tag", "title_key_version"]).where("id", "=", input.sessionId).executeTakeFirst();
-      if (!session || session.archived_at || (input.actor.role !== "admin" && session.created_by !== input.actor.id && session.visibility !== "team")) throw new Error("Query access denied");
-      try {
+      return inTransaction(async (executor) => {
+        await lockSession(executor, input.sessionId);
+        const session = await executor.selectFrom("query_sessions").select(["created_by", "visibility", "archived_at", "title_ciphertext", "title_nonce", "title_tag", "title_key_version"]).where("id", "=", input.sessionId).executeTakeFirstOrThrow();
+        if (session.archived_at || (input.actor.role !== "admin" && session.created_by !== input.actor.id && session.visibility !== "team")) throw new Error("Query access denied");
+        try {
         if (!input.question.trim()) throw new Error();
         if (!OPAQUE_HASH_PATTERN.test(input.questionHmac) || !OPAQUE_HASH_PATTERN.test(input.executionSignature)) throw new Error();
         const title = cipher.decrypt({ ciphertext: session.title_ciphertext, nonce: session.title_nonce, tag: session.title_tag, keyVersion: session.title_key_version });
         assertCreateSnapshots(input, [title, input.question]);
         const question = cipher.encrypt(input.question);
-        const row = await db.insertInto("query_turns").values({ session_id: input.sessionId, created_by: input.actor.id, question_ciphertext: question.ciphertext, question_nonce: question.nonce, question_tag: question.tag, question_key_version: question.keyVersion, question_hmac: input.questionHmac, start_chapter: input.startChapter, end_chapter: input.endChapter, intent_snapshot: input.intentSnapshot, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, config_snapshot: input.configSnapshot, execution_signature: input.executionSignature, job_id: input.jobId ?? null, attempt_id: input.attemptId ?? null }).returningAll().executeTakeFirstOrThrow();
+        const row = await executor.insertInto("query_turns").values({ session_id: input.sessionId, created_by: input.actor.id, question_ciphertext: question.ciphertext, question_nonce: question.nonce, question_tag: question.tag, question_key_version: question.keyVersion, question_hmac: input.questionHmac, start_chapter: input.startChapter, end_chapter: input.endChapter, intent_snapshot: input.intentSnapshot, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, config_snapshot: input.configSnapshot, execution_signature: input.executionSignature, job_id: input.jobId ?? null, attempt_id: input.attemptId ?? null }).returningAll().executeTakeFirstOrThrow();
         return mapTurn(row);
-      } catch (error) { stableError(error, "Invalid query turn"); }
+        } catch (error) { stableError(error, "Invalid query turn"); }
+      });
     },
     async commitEvidence(input: CommitTurnEvidenceInput): Promise<void> {
       const commit = async (executor: DatabaseExecutor) => {
-        await authorizedTurn(input.turnId, input.actor, true, executor);
-        const locked = await sql<{ evidence_snapshot_hash: string | null }>`select evidence_snapshot_hash from query_turns where id = ${input.turnId} for update`.execute(executor);
-        if (locked.rows[0]?.evidence_snapshot_hash) throw new Error("Evidence snapshot already committed");
-        const snapshotHash = createHash("sha256").update(JSON.stringify(input.evidence)).digest("hex");
+        await lockedTurnAuthorization(executor, input.turnId, input.actor, true, true);
+        const locked = await executor.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", input.turnId).executeTakeFirstOrThrow();
+        if (locked.evidence_snapshot_hash) throw new Error("Evidence snapshot already committed");
         try {
           const context = await executor.selectFrom("query_turns as t").innerJoin("query_sessions as s", "s.id", "t.session_id").select(["t.question_ciphertext", "t.question_nonce", "t.question_tag", "t.question_key_version", "s.title_ciphertext", "s.title_nonce", "s.title_tag", "s.title_key_version"]).where("t.id", "=", input.turnId).executeTakeFirstOrThrow();
           const factIds = [...new Set(input.evidence.map((item) => item.factId))];
@@ -143,19 +165,24 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
             assertNoSensitiveValues({ recallReason: evidence.recallReason, exclusionReason: evidence.exclusionReason }, sensitiveValues);
           }
           for (const evidence of input.evidence) await executor.insertInto("turn_evidence").values({ turn_id: input.turnId, fact_id: evidence.factId, rank: evidence.rank, recall_reason: evidence.recallReason, disposition: evidence.disposition, exclusion_reason: evidence.exclusionReason ?? null }).execute();
+          const authoritative = await executor.selectFrom("turn_evidence").select(["fact_id", "rank", "recall_reason", "disposition", "exclusion_reason"]).where("turn_id", "=", input.turnId).orderBy("rank").orderBy("fact_id").execute();
+          const canonical = authoritative.map((row) => ({ factId: row.fact_id, rank: row.rank, recallReason: row.recall_reason, disposition: row.disposition, exclusionReason: row.exclusion_reason }));
+          const snapshotHash = createHash("sha256").update(JSON.stringify(canonical)).digest("hex");
           await executor.updateTable("query_turns").set({ evidence_snapshot_hash: snapshotHash, updated_at: new Date() }).where("id", "=", input.turnId).execute();
         } catch (error) { stableError(error, "Invalid turn evidence"); }
       };
-      if (db.isTransaction) return commit(db);
-      return db.transaction().execute(commit);
+      return inTransaction(commit);
     },
     async completeTurn(input: CompleteTurnInput): Promise<QueryTurn> {
-      await authorizedTurn(input.turnId, input.actor, true);
-      try {
+      return inTransaction(async (executor) => {
+        await lockedTurnAuthorization(executor, input.turnId, input.actor, true, true);
+        try {
         assertSourceSnapshot(input.sourceSnapshot);
-        const snapshot = await db.selectFrom("query_turns as t").innerJoin("query_sessions as s", "s.id", "t.session_id").select(["t.evidence_snapshot_hash", "t.question_ciphertext", "t.question_nonce", "t.question_tag", "t.question_key_version", "s.title_ciphertext", "s.title_nonce", "s.title_tag", "s.title_key_version"]).where("t.id", "=", input.turnId).executeTakeFirstOrThrow();
+        const snapshot = await executor.selectFrom("query_turns as t").innerJoin("query_sessions as s", "s.id", "t.session_id").select(["t.evidence_snapshot_hash", "t.question_ciphertext", "t.question_nonce", "t.question_tag", "t.question_key_version", "t.completed_at", "t.status", "t.attempt_id", "s.title_ciphertext", "s.title_nonce", "s.title_tag", "s.title_key_version"]).where("t.id", "=", input.turnId).executeTakeFirstOrThrow();
+        if (snapshot.completed_at || ["completed", "degraded", "failed", "cancelled"].includes(snapshot.status)) throw new Error("Query turn already terminal");
+        if (snapshot.attempt_id !== null && snapshot.attempt_id !== (input.attemptId ?? null)) throw new Error("Query attempt mismatch");
         if (!snapshot.evidence_snapshot_hash || snapshot.evidence_snapshot_hash !== input.evidenceSnapshotHash) throw new Error();
-        const evidenceRows = await db.selectFrom("turn_evidence as e").innerJoin("l2_facts as f", "f.id", "e.fact_id").select(["f.fact_ciphertext", "f.fact_nonce", "f.fact_tag", "f.fact_key_version"]).where("e.turn_id", "=", input.turnId).execute();
+        const evidenceRows = await executor.selectFrom("turn_evidence as e").innerJoin("l2_facts as f", "f.id", "e.fact_id").select(["f.fact_ciphertext", "f.fact_nonce", "f.fact_tag", "f.fact_key_version"]).where("e.turn_id", "=", input.turnId).execute();
         const sensitiveValues = [
           cipher.decrypt({ ciphertext: snapshot.title_ciphertext, nonce: snapshot.title_nonce, tag: snapshot.title_tag, keyVersion: snapshot.title_key_version }),
           cipher.decrypt({ ciphertext: snapshot.question_ciphertext, nonce: snapshot.question_nonce, tag: snapshot.question_tag, keyVersion: snapshot.question_key_version }),
@@ -168,15 +195,18 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
           assertNoSensitiveValues({ degradation: input.degradation }, sensitiveValues);
         }
         const answer = input.answer === null ? null : cipher.encrypt(input.answer);
-        const row = await db.updateTable("query_turns").set({ answer_ciphertext: answer?.ciphertext ?? null, answer_nonce: answer?.nonce ?? null, answer_tag: answer?.tag ?? null, answer_key_version: answer?.keyVersion ?? null, status: input.status, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, degradation: input.degradation, job_id: input.jobId, attempt_id: input.attemptId, updated_at: new Date(), completed_at: new Date() }).where("id", "=", input.turnId).returningAll().executeTakeFirstOrThrow();
+        const row = await executor.updateTable("query_turns").set({ answer_ciphertext: answer?.ciphertext ?? null, answer_nonce: answer?.nonce ?? null, answer_tag: answer?.tag ?? null, answer_key_version: answer?.keyVersion ?? null, status: input.status, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, degradation: input.degradation, job_id: input.jobId, attempt_id: input.attemptId, updated_at: new Date(), completed_at: new Date() }).where("id", "=", input.turnId).returningAll().executeTakeFirstOrThrow();
         return mapTurn(row);
-      } catch (error) { stableError(error, "Invalid query turn"); }
+        } catch (error) { stableError(error, "Invalid query turn"); }
+      });
     },
     async getTurn(input: { turnId: string; actor: QueryActor }): Promise<QueryTurnDetail> {
-      await authorizedTurn(input.turnId, input.actor);
-      const row = await db.selectFrom("query_turns").selectAll().where("id", "=", input.turnId).executeTakeFirstOrThrow();
-      const evidenceRows = await db.selectFrom("turn_evidence as e").innerJoin("l2_facts as f", "f.id", "e.fact_id").innerJoin("chapters as c", "c.id", "f.chapter_id").select(["e.fact_id", "e.rank", "e.recall_reason", "e.disposition", "e.exclusion_reason", "f.chapter_id", "c.chapter_index", "f.subject_key", "f.fact_type", "f.fact_ciphertext", "f.fact_nonce", "f.fact_tag", "f.fact_key_version"]).where("e.turn_id", "=", input.turnId).orderBy("e.rank").execute();
-      return { ...mapTurn(row), evidence: evidenceRows.map((evidence) => ({ factId: evidence.fact_id, chapterId: evidence.chapter_id, chapterIndex: evidence.chapter_index, rank: evidence.rank, recallReason: evidence.recall_reason, disposition: evidence.disposition, exclusionReason: evidence.exclusion_reason, subjectKey: evidence.subject_key, factType: evidence.fact_type, body: cipher.decrypt({ ciphertext: evidence.fact_ciphertext, nonce: evidence.fact_nonce, tag: evidence.fact_tag, keyVersion: evidence.fact_key_version }) })) };
+      return inTransaction(async (executor) => {
+        await lockedTurnAuthorization(executor, input.turnId, input.actor);
+        const row = await executor.selectFrom("query_turns").selectAll().where("id", "=", input.turnId).executeTakeFirstOrThrow();
+        const evidenceRows = await executor.selectFrom("turn_evidence as e").innerJoin("l2_facts as f", "f.id", "e.fact_id").innerJoin("chapters as c", "c.id", "f.chapter_id").select(["e.fact_id", "e.rank", "e.recall_reason", "e.disposition", "e.exclusion_reason", "f.chapter_id", "c.chapter_index", "f.subject_key", "f.fact_type", "f.fact_ciphertext", "f.fact_nonce", "f.fact_tag", "f.fact_key_version"]).where("e.turn_id", "=", input.turnId).orderBy("e.rank").execute();
+        return { ...mapTurn(row), evidence: evidenceRows.map((evidence) => ({ factId: evidence.fact_id, chapterId: evidence.chapter_id, chapterIndex: evidence.chapter_index, rank: evidence.rank, recallReason: evidence.recall_reason, disposition: evidence.disposition, exclusionReason: evidence.exclusion_reason, subjectKey: evidence.subject_key, factType: evidence.fact_type, body: cipher.decrypt({ ciphertext: evidence.fact_ciphertext, nonce: evidence.fact_nonce, tag: evidence.fact_tag, keyVersion: evidence.fact_key_version }) })) };
+      });
     },
   };
 }
