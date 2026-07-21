@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 4b4cc227e9540f5a0764ae476c54a2090aa54a24
 baseline_status: current
-updated_at: 2026-07-21T00:38:19+08:00
+updated_at: 2026-07-21T08:16:52+08:00
 updated_by: controller-agent
-current_phase: phase-3-planning
-last_checkpoint: CP-20260721-PHASE3-DESIGN-ACCEPTED
-next_gate: GATE-PHASE3-PLAN-APPROVED
+current_phase: phase-3-implementation
+last_checkpoint: CP-20260721-PHASE3-PLAN-APPROVED
+next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -34,18 +34,19 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | planning_ready | 仅解锁独立规划，实施仍需 Phase 3 Plan Gate |
+| Phase 3 | implementing | Plan Gate 已通过，Task 1 ready |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-PLAN | phase-3 | L2 continuous-question design and implementation plan | controller-agent | main | d8c7c3ab4b56c13bf564b234f9f35d406be4f9ad | 640e30be862316aba50284b260d28ed42509582e | review | CP-20260721-PHASE3-DESIGN-ACCEPTED | CP-20260721-PHASE3-PLAN-SUBMITTED | request explicit Phase 3 Plan Gate confirmation |
+| PHASE3-TASK1 | phase-3 | Query and analysis-summary contracts | controller-agent | main | 54dead6296d22275547cb77181e9f97cd644593e | none | ready | CP-20260721-PHASE3-PLAN-APPROVED | none | create Task 1 started contract from the Gate merge SHA |
 
 ## Phase Ledgers
 
 - [Phase 1 ledger](ledgers/phase-1-ledger.md)
 - [Phase 2 ledger](ledgers/phase-2-ledger.md)
+- [Phase 3 ledger](ledgers/phase-3-ledger.md)
 
 ## Effective Decisions
 
@@ -75,19 +76,20 @@ next_gate: GATE-PHASE3-PLAN-APPROVED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- Phase 3 query session、turn evidence、召回与降级契约尚未形成独立批准计划
-- 当前无阻塞 Phase 3 规划的证据冲突
+- Phase 3 `analysis-summary` DSL 已存在，但新 TypeScript adapter 当前只支持 chapter/L1/L2，Task 1 必须先验证无 YAML 修改的接入契约
+- 当前无阻塞 Phase 3 Task 1 的证据冲突
 
 ## Pending Feedback
 
-等待用户明确判定 `GATE-PHASE3-PLAN-APPROVED`，Phase 3 不得开始实施
+无，PHASE3-TASK1 可在 Gate 治理记录合并后启动
 
 ## Next Gate
 
-下一阶段门禁为 `GATE-PHASE3-PLAN-APPROVED`，Phase 3 设计与实施计划获明确批准前不得开始编码
+下一阶段门禁为 `GATE-PHASE3-IMPLEMENTATION-ACCEPTED`，Task 1 至 Task 7 完成前不得通过
 
 ## Evidence Index
 
+- [Phase 3 plan approved](checkpoints/CP-20260721-PHASE3-PLAN-APPROVED.md)
 - [Phase 3 plan submitted](checkpoints/CP-20260721-PHASE3-PLAN-SUBMITTED.md)
 - [Phase 3 design accepted](checkpoints/CP-20260721-PHASE3-DESIGN-ACCEPTED.md)
 - [Phase 3 design submitted](checkpoints/CP-20260721-PHASE3-DESIGN-SUBMITTED.md)
