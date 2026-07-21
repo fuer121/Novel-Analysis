@@ -3,9 +3,9 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 638df045745be567ca1cedbb9cd44676269a01fe
 baseline_status: current
-updated_at: 2026-07-21T20:23:08+08:00
+updated_at: 2026-07-21T21:31:57+08:00
 updated_by: controller-agent
-current_phase: phase-4-planning
+current_phase: phase-4-design-review
 last_checkpoint: CP-20260721-PHASE3-IMPLEMENTATION-ACCEPTED
 next_gate: GATE-PHASE4-PLAN-APPROVED
 ---
@@ -35,13 +35,13 @@ next_gate: GATE-PHASE4-PLAN-APPROVED
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 4 | planning-ready | 可进入独立设计与规划，实施尚未授权 |
+| Phase 4 | design-submitted | 书面设计待用户最终复核，实施尚未授权 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE4-PLAN | phase-4 | Advanced analysis and legacy history design and planning | unassigned | none | a7105c4bb18983d7e15c10264be5fca9d87e9e18 | none | planned | CP-20260721-PHASE3-IMPLEMENTATION-ACCEPTED | none | prepare independent design and implementation plan for review |
+| PHASE4-PLAN | phase-4 | Advanced analysis and legacy history design and planning | controller-agent | codex/phase4-design | b7f6a048416971d1f4fc38edb2b21105325bb508 | none | review | CP-20260721-PHASE3-IMPLEMENTATION-ACCEPTED | CP-20260721-PHASE4-DESIGN-SUBMITTED | wait for written design review before implementation planning |
 
 ## Phase Ledgers
 
@@ -85,7 +85,7 @@ next_gate: GATE-PHASE4-PLAN-APPROVED
 
 ## Pending Feedback
 
-无待处理反馈，Phase 4 可进入独立设计与规划
+需要用户复核 Phase 4 书面设计，确认后才能编写实施计划
 
 ## Next Gate
 
@@ -93,6 +93,8 @@ next_gate: GATE-PHASE4-PLAN-APPROVED
 
 ## Evidence Index
 
+- [Phase 4 design submitted](checkpoints/CP-20260721-PHASE4-DESIGN-SUBMITTED.md)
+- [Phase 4 design](../superpowers/specs/2026-07-21-phase-4-advanced-analysis-design.md)
 - [Phase 3 implementation accepted](checkpoints/CP-20260721-PHASE3-IMPLEMENTATION-ACCEPTED.md)
 - [Phase 3 Task 7 merged](checkpoints/CP-20260721-PHASE3-TASK7-MERGED.md)
 - [Phase 3 Task 7 accepted](checkpoints/CP-20260721-PHASE3-TASK7-ACCEPTED.md)
