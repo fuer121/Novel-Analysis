@@ -10,8 +10,10 @@ import {
   type StepExecutor,
 } from "@novel-analysis/jobs";
 import { failImportClaim, type LibraryImportExecutor } from "./library-executor.js";
+import type { QueryExecutor } from "./query-executor.js";
 
-const WAKE_QUEUE = "jobs.wake";
+export const BACKGROUND_WAKE_QUEUE = "jobs.wake";
+export const INTERACTIVE_WAKE_QUEUE = "jobs.query.wake";
 const DEFAULT_POLL_INTERVAL_MS = 1_000;
 
 type WakePayload = { jobId: string };
@@ -20,12 +22,24 @@ export interface WorkerBoss extends BossSender {
   start(): Promise<unknown>;
   stop(options?: { graceful?: boolean; timeout?: number }): Promise<void>;
   createQueue(name: string, options: { policy: "exclusive" }): Promise<void>;
-  work<T>(name: string, handler: (jobs: Array<{ data: T }>) => Promise<unknown>): Promise<string>;
+  work<T>(name: string, options: { localConcurrency: number }, handler: (jobs: Array<{ data: T }>) => Promise<unknown>): Promise<string>;
   offWork(name: string, options?: { wait?: boolean }): Promise<void>;
 }
 
 export async function createWakeQueue(boss: Pick<WorkerBoss, "createQueue">): Promise<void> {
-  await boss.createQueue(WAKE_QUEUE, { policy: "exclusive" });
+  await boss.createQueue(BACKGROUND_WAKE_QUEUE, { policy: "exclusive" });
+}
+
+async function createInteractiveWakeQueue(boss: Pick<WorkerBoss, "createQueue">): Promise<void> {
+  await boss.createQueue(INTERACTIVE_WAKE_QUEUE, { policy: "exclusive" });
+}
+
+export function parseQueryRuntimeConfig(environment: Record<string, string | undefined>): { queryConcurrency: number; analysisSummaryKey: string | undefined } {
+  const value = environment.QUERY_CONCURRENCY;
+  const queryConcurrency = value === undefined ? 10 : Number(value);
+  if (!Number.isSafeInteger(queryConcurrency) || queryConcurrency < 1 || queryConcurrency > 20 || (value !== undefined && String(queryConcurrency) !== value)) throw new Error("Invalid QUERY_CONCURRENCY");
+  const key = environment.DIFY_ANALYSIS_SUMMARY_KEY?.trim();
+  return { queryConcurrency, analysisSummaryKey: key || undefined };
 }
 
 export function installBossErrorShutdown(options: {
@@ -105,13 +119,18 @@ export function parseLibraryRuntimeConfig(environment: Record<string, string | u
   return { baseUrl: url!.toString().replace(/\/$/, ""), chapterImportKey: environment.DIFY_CHAPTER_IMPORT_KEY!, l1WorkflowKey: environment.DIFY_L1_WORKFLOW_API_KEY!, l2WorkflowKey: environment.DIFY_L2_WORKFLOW_API_KEY!, contentKey: contentKey!, contentKeyVersion: environment.CONTENT_ENCRYPTION_KEY_VERSION!, hmacKey: hmacKey! };
 }
 
-export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor }): StepExecutor {
+export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor; queryExecutor?: Pick<QueryExecutor, "execute"> }): StepExecutor {
   const example = new ExampleExecutor();
   return {
     execute(claim) {
       if (claim.kind === "chapter-import" || claim.kind === "l1-index" || claim.kind === "l2-index") {
         return options.libraryExecutor
           ? options.libraryExecutor.execute(claim)
+          : failImportClaim(options.database, claim, "configuration_error");
+      }
+      if (["l2-query", "query-summary-retry", "query-local-summary"].includes(claim.kind)) {
+        return options.queryExecutor
+          ? options.queryExecutor.execute(claim)
           : failImportClaim(options.database, claim, "configuration_error");
       }
       return example.execute(claim);
@@ -136,7 +155,7 @@ export class JobWorker {
   private stopPromise: Promise<void> | undefined;
   private shutdownRequested = false;
   private bossStarted = false;
-  private consumerRegistered = false;
+  private readonly registeredConsumers = new Set<string>();
 
   constructor(private readonly options: {
     database: DatabaseConnection;
@@ -147,6 +166,7 @@ export class JobWorker {
     leaseDurationMs?: number;
     pollIntervalMs?: number;
     onBackgroundError?: (error: unknown) => void;
+    queryConcurrency?: number;
   }) {
     this.leases = new PostgresStepLeaseService({
       database: options.database,
@@ -172,10 +192,14 @@ export class JobWorker {
     try {
       await boss.start();
       await createWakeQueue(boss);
-      await boss.work<WakePayload>(WAKE_QUEUE, async (jobs) => {
+      await createInteractiveWakeQueue(boss);
+      const handleWake = async (jobs: Array<{ data: WakePayload }>) => {
         await Promise.all(jobs.map((job) => this.track(this.processJob(job.data.jobId))));
-      });
-      this.consumerRegistered = true;
+      };
+      await boss.work<WakePayload>(BACKGROUND_WAKE_QUEUE, { localConcurrency: 1 }, handleWake);
+      this.registeredConsumers.add(BACKGROUND_WAKE_QUEUE);
+      await boss.work<WakePayload>(INTERACTIVE_WAKE_QUEUE, { localConcurrency: this.options.queryConcurrency ?? 10 }, handleWake);
+      this.registeredConsumers.add(INTERACTIVE_WAKE_QUEUE);
     } catch (startupError) {
       this.stopAtBoundary();
       const errors = [startupError];
@@ -235,12 +259,14 @@ export class JobWorker {
     if (this.startPromise) {
       await this.startPromise.catch(() => undefined);
     }
-    if (this.options.boss && this.consumerRegistered) {
-      try {
-        await this.options.boss.offWork(WAKE_QUEUE, { wait: true });
-        this.consumerRegistered = false;
-      } catch (error) {
-        errors.push(error);
+    if (this.options.boss) {
+      for (const queue of [...this.registeredConsumers]) {
+        try {
+          await this.options.boss.offWork(queue, { wait: true });
+          this.registeredConsumers.delete(queue);
+        } catch (error) {
+          errors.push(error);
+        }
       }
     }
     const activeResults = await Promise.allSettled([...this.active]);

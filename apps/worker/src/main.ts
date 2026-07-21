@@ -6,10 +6,12 @@ import {
   JobWorker,
   createWorkerStepExecutor,
   parseLibraryRuntimeConfig,
+  parseQueryRuntimeConfig,
   createCoordinatedShutdown,
   installBossErrorShutdown,
 } from "./worker.js";
 import { LibraryImportExecutor } from "./library-executor.js";
+import { QueryExecutor } from "./query-executor.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
@@ -17,15 +19,35 @@ if (!databaseUrl) throw new Error("DATABASE_URL is required");
 const database = createDatabase(databaseUrl);
 const boss = createBoss(databaseUrl);
 const libraryConfig = parseLibraryRuntimeConfig(process.env);
+const queryConfig = parseQueryRuntimeConfig(process.env);
+const cipher = libraryConfig
+  ? createContentCipher({ activeKeyVersion: libraryConfig.contentKeyVersion, keys: { [libraryConfig.contentKeyVersion]: libraryConfig.contentKey } })
+  : undefined;
+const adapter = libraryConfig
+  ? new HttpDifyAdapter({
+      fetch: globalThis.fetch,
+      baseUrl: libraryConfig.baseUrl,
+      credentials: {
+        "chapter-import": libraryConfig.chapterImportKey,
+        "l1-index": libraryConfig.l1WorkflowKey,
+        "l2-index": libraryConfig.l2WorkflowKey,
+        ...(queryConfig.analysisSummaryKey ? { "analysis-summary": queryConfig.analysisSummaryKey } : {}),
+      },
+      timeoutMs: 60_000,
+    })
+  : undefined;
 const libraryExecutor = libraryConfig
   ? new LibraryImportExecutor({
       database,
-      adapter: new HttpDifyAdapter({ fetch: globalThis.fetch, baseUrl: libraryConfig.baseUrl, credentials: { "chapter-import": libraryConfig.chapterImportKey, "l1-index": libraryConfig.l1WorkflowKey, "l2-index": libraryConfig.l2WorkflowKey }, timeoutMs: 60_000 }),
-      cipher: createContentCipher({ activeKeyVersion: libraryConfig.contentKeyVersion, keys: { [libraryConfig.contentKeyVersion]: libraryConfig.contentKey } }),
+      adapter: adapter!,
+      cipher: cipher!,
       hmacKey: libraryConfig.hmacKey,
     })
   : undefined;
-const executor = createWorkerStepExecutor({ database, libraryExecutor });
+const queryExecutor = cipher
+  ? new QueryExecutor({ database, cipher, dify: queryConfig.analysisSummaryKey ? adapter : undefined })
+  : undefined;
+const executor = createWorkerStepExecutor({ database, libraryExecutor, queryExecutor });
 const productionBarrier: ExecutionBarrier = {
   async afterAttemptStarted() {},
 };
@@ -35,6 +57,7 @@ const worker = new JobWorker({
   workerId: `worker-${process.pid}`,
   barrier: productionBarrier,
   executor,
+  queryConcurrency: queryConfig.queryConcurrency,
 });
 
 const shutdown = createCoordinatedShutdown({

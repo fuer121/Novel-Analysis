@@ -181,7 +181,7 @@ describe("worker runtime", () => {
     let release!: () => void;
     const boundary = new Promise<void>((resolve) => { release = resolve; });
     const boss = fakeBoss({
-      async work(_name, registered) {
+      async work(_name, _options, registered) {
         handler = registered as typeof handler;
         return "work-id";
       },
@@ -218,14 +218,17 @@ describe("worker runtime", () => {
       await new Promise<void>((resolve) => setImmediate(resolve));
 
       expect(stopSettled).toBe(false);
-      expect(calls).toEqual(["offWork"]);
+      expect(calls).toEqual(["offWork", "offWork"]);
 
       release();
       await active;
-      await expect(stopped).rejects.toBe(offWorkFailure);
+      await expect(stopped).rejects.toEqual(expect.objectContaining({
+        name: "AggregateError",
+        errors: [offWorkFailure, offWorkFailure],
+      }));
       await observedStop;
       await new Promise<void>((resolve) => setImmediate(resolve));
-      expect(calls).toEqual(["offWork", "boss.stop"]);
+      expect(calls).toEqual(["offWork", "offWork", "boss.stop"]);
       expect(unhandled).toEqual([]);
     } finally {
       release();
@@ -361,13 +364,13 @@ describe("worker runtime", () => {
     await new Promise<void>((resolve) => setImmediate(resolve));
 
     expect(stopSettled).toBe(false);
-    expect(calls).toEqual(["start", "createQueue", "work"]);
+    expect(calls).toEqual(["start", "createQueue", "createQueue", "work"]);
 
     releaseWork();
     await starting;
     await stopping;
 
-    expect(calls).toEqual(["start", "createQueue", "work", "offWork", "boss.stop"]);
+    expect(calls).toEqual(["start", "createQueue", "createQueue", "work", "work", "offWork", "offWork", "boss.stop"]);
     const timers = worker as unknown as {
       dispatcherTimer?: NodeJS.Timeout;
       recoveryTimer?: NodeJS.Timeout;
@@ -413,12 +416,12 @@ describe("worker runtime", () => {
     const concurrent = worker.start();
     await new Promise<void>((resolve) => setImmediate(resolve));
 
-    expect(calls).toEqual(["start", "createQueue", "work"]);
+    expect(calls).toEqual(["start", "createQueue", "createQueue", "work"]);
 
     releaseWork();
     await Promise.all([first, concurrent]);
     await worker.start();
-    expect(calls).toEqual(["start", "createQueue", "work"]);
+    expect(calls).toEqual(["start", "createQueue", "createQueue", "work", "work"]);
     await worker.stop();
   });
 

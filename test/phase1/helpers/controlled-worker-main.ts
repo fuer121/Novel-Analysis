@@ -16,8 +16,9 @@ const workerBoss = new Proxy(boss, {
     if (property === "work") {
       return async (
         name: string,
+        options: { localConcurrency: number },
         handler: (jobs: Array<{ data: { outboxId: string } }>) => Promise<unknown>,
-      ) => target.work(name, async (jobs) => {
+      ) => target.work(name, options, async (jobs) => {
         await handler(jobs as Array<{ data: { outboxId: string } }>);
         for (const job of jobs) {
           const data = job.data as { outboxId?: unknown };
