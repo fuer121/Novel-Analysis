@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f4d47958a5c410c24d6d280aa298374318b18a11
 baseline_status: current
-updated_at: 2026-07-21T14:37:09+08:00
+updated_at: 2026-07-21T16:58:24+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
 last_checkpoint: CP-20260721-PHASE3-TASK5-MERGED
@@ -34,13 +34,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementing | Task 1-5 merged，Task 6 Started Contract accepted |
+| Phase 3 | implementing | Task 1-5 merged，Task 6 paused for approved API correction |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK6 | phase-3 | Continuous-query responsive workspace | implementation-agent | codex/phase3-task6-workspace | e7063b9320e741b1cec3ff0143618e776ee5a16a | none | in_progress | CP-20260721-PHASE3-TASK5-MERGED | CP-20260721-PHASE3-TASK6-STARTED | merge Started Contract, then implement with TDD from its merge SHA |
+| PHASE3-TASK6-API-CORRECTION | phase-3 | Authorized turn history and safe Trace projection | implementation-agent | codex/phase3-task6-api-correction | bc965c3fff67ed64a44386b97a0c1095d36f1e0b | none | in_progress | CP-20260721-PHASE3-TASK6-STARTED | CP-20260721-PHASE3-TASK6-API-CORRECTION-STARTED | merge correction contract, implement with TDD, then resume Task 6 |
 
 ## Phase Ledgers
 
@@ -64,6 +64,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - [DEC-0012 Task 7 Session Cache Boundary](decisions/DEC-0012-task7-session-cache-boundary.md)
 - [DEC-0013 Phase 3 Query Session Sharing](decisions/DEC-0013-phase3-query-session-sharing.md)
 - [DEC-0014 Query HMAC Key Policy](decisions/DEC-0014-query-hmac-key-policy.md)
+- [DEC-0015 Query Turn History And Trace Projection](decisions/DEC-0015-query-turn-history-and-trace-projection.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -77,13 +78,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- Task 6 必须保持 Query API、evidence semantics、fallback actions 与 server-owned job state 不变，只实现已批准的响应式工作区
+- Task 6 依赖已批准的 turns 分页读取与安全 Trace 投影 correction，correction 不得改变 evidence、fallback、权限、加密或 Worker 语义
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
-- 当前无证据冲突或 blocker，Task 6 可在 Started Contract 合并后实施
+- Task 6 preflight 已确认现有 API 无法恢复 turn history 或展示 Trace，用户已批准方案 A correction，Web 实施保持暂停
 
 ## Pending Feedback
 
-无，PHASE3-TASK6 Started Contract 已接受，可在其合并后按批准范围实施
+无，用户已批准 DEC-0015，先合并并实施 PHASE3-TASK6-API-CORRECTION，再恢复 Task 6
 
 ## Next Gate
 
@@ -91,6 +92,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 6 API correction started](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-STARTED.md)
 - [Phase 3 Task 6 started](checkpoints/CP-20260721-PHASE3-TASK6-STARTED.md)
 - [Phase 3 Task 5 merged](checkpoints/CP-20260721-PHASE3-TASK5-MERGED.md)
 - [Phase 3 Task 5 accepted](checkpoints/CP-20260721-PHASE3-TASK5-ACCEPTED.md)
