@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: ca71ea5b6f43d956c456b15b06485f67eabc3af9
+baseline_commit: f4d47958a5c410c24d6d280aa298374318b18a11
 baseline_status: current
-updated_at: 2026-07-21T14:11:08+08:00
+updated_at: 2026-07-21T14:20:08+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-TASK4-MERGED
+last_checkpoint: CP-20260721-PHASE3-TASK5-MERGED
 next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `ca71ea5b6f43d956c456b15b06485f67eabc3af9` |
-| Latest merged implementation | PR #89 `https://github.com/fuer121/Novel-Analysis/pull/89` |
+| Accepted implementation baseline | `f4d47958a5c410c24d6d280aa298374318b18a11` |
+| Latest merged implementation | PR #92 `https://github.com/fuer121/Novel-Analysis/pull/92` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -34,13 +34,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementing | Task 1-4 merged，Task 5 implementation 已接受并待 PR/CI |
+| Phase 3 | implementing | Task 1-5 merged，Task 6 ready |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK5 | phase-3 | Query executor, fallback and interactive queue recovery | implementation-agent | codex/phase3-task5-query-executor | 0405f534a7250740608d07b6a060e55ef0640f13 | dcc3b679d12a07d11aa534fa4f81396f18f8aaa9 | accepted | CP-20260721-PHASE3-TASK4-MERGED | CP-20260721-PHASE3-TASK5-ACCEPTED | push implementation branch, create PR and verify CI under DEC-0002 |
+| PHASE3-TASK6 | phase-3 | Continuous-query responsive workspace | controller-agent | none | f4d47958a5c410c24d6d280aa298374318b18a11 | none | ready | CP-20260721-PHASE3-TASK5-MERGED | none | create and merge a bounded Started Contract before implementation |
 
 ## Phase Ledgers
 
@@ -77,13 +77,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - PostgreSQL BIGINT event ID 当前映射为 JavaScript `number`，后续 contract 演进需要单独授权
 - Task 2 UUID cursor 在 cursor row 被删除时会提前结束分页，当前阶段没有 fact 删除路径
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
-- Task 5 已验证 background/query queue 隔离、lease recovery、outbox replay、evidence version 与 late-result single-commit 边界，合并前仍须通过 CI
+- Task 6 必须保持 Query API、evidence semantics、fallback actions 与 server-owned job state 不变，只实现已批准的响应式工作区
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
 - 当前无证据冲突或 blocker，Task 5 可在 Started Contract 合并后实施
 
 ## Pending Feedback
 
-无，PHASE3-TASK5 implementation 已接受，可按 DEC-0002 创建 PR 并核验 CI
+无，PHASE3-TASK6 已解锁，可先创建模块边界 Started Contract
 
 ## Next Gate
 
@@ -91,6 +91,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 5 merged](checkpoints/CP-20260721-PHASE3-TASK5-MERGED.md)
 - [Phase 3 Task 5 accepted](checkpoints/CP-20260721-PHASE3-TASK5-ACCEPTED.md)
 - [Phase 3 Task 5 started](checkpoints/CP-20260721-PHASE3-TASK5-STARTED.md)
 - [Phase 3 Task 4 merged](checkpoints/CP-20260721-PHASE3-TASK4-MERGED.md)
