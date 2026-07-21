@@ -5,7 +5,7 @@ import { sql } from "kysely";
 import { createContentCipher, createIndexRepository, createLibraryRepository, createQueryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../database/src/testing/postgres.js";
 
-import { QueryIdempotencyConflictError, QueryJobService, QueryScopeChangedError } from "./query-job.js";
+import { QueryIdempotencyConflictError, QueryInvalidStateError, QueryJobService, QueryScopeChangedError } from "./query-job.js";
 
 const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 11) } });
 const hmacKey = Buffer.from("query-hmac-test-key");
@@ -34,6 +34,18 @@ describe("Query job service", () => {
   });
 
   afterEach(async () => postgres.destroy());
+
+  async function holdAdvisoryLock(domain: string) {
+    let acquired!: () => void; let release!: () => void;
+    const locked = new Promise<void>((resolve) => { acquired = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const holder = postgres.db.transaction().execute(async (transaction) => {
+      await sql`select pg_advisory_xact_lock(hashtext(${domain}))`.execute(transaction);
+      acquired(); await gate;
+    });
+    await locked;
+    return { release, holder };
+  }
 
   it("previews approved scope without persisting plaintext", async () => {
     const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
@@ -112,6 +124,39 @@ describe("Query job service", () => {
     expect(await postgres.db.selectFrom("jobs").select("id").execute()).toEqual([]);
   });
 
+  it("serializes concurrent creates per session so only one shared context preview commits", async () => {
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
+    const actor = { id: ownerId, role: "member" as const };
+    const first = { bookId, sessionId, actor, question: "first concurrent", startChapter: 1, endChapter: 3 };
+    const second = { ...first, question: "second concurrent" };
+    const [firstPreview, secondPreview] = await Promise.all([service.preview(first), service.preview(second)]);
+    await sql`create function block_query_job_insert() returns trigger language plpgsql as $$ begin perform pg_advisory_xact_lock(hashtext('73001')); return new; end $$`.execute(postgres.db);
+    await sql`create trigger block_query_job_insert before insert on jobs for each row execute function block_query_job_insert()`.execute(postgres.db);
+    const blocker = await holdAdvisoryLock("73001");
+    const creating = Promise.allSettled([
+      service.createTurn({ ...first, requestId: "concurrent-first", scopeHash: firstPreview.scopeHash }),
+      service.createTurn({ ...second, requestId: "concurrent-second", scopeHash: secondPreview.scopeHash }),
+    ]);
+    const stateBeforeRelease = await Promise.race([creating.then(() => "settled"), new Promise<"blocked">((resolve) => setImmediate(() => resolve("blocked")))]);
+    expect(stateBeforeRelease).toBe("blocked");
+    blocker.release(); await blocker.holder;
+    const results = await creating;
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
+    expect(rejected?.reason).toBeInstanceOf(QueryScopeChangedError);
+    expect(await postgres.db.selectFrom("query_turns").select("id").execute()).toHaveLength(1);
+  });
+
+  it("does not serialize creates across different sessions", async () => {
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
+    const actor = { id: ownerId, role: "member" as const };
+    const otherSessionId = (await createQueryRepository(postgres.db, cipher).createSession({ bookId, groupId, createdBy: ownerId, title: "Independent", defaultStartChapter: 1, defaultEndChapter: 3 })).id;
+    const inputs = [sessionId, otherSessionId].map((id, index) => ({ bookId, sessionId: id, actor, question: `independent-${index}`, startChapter: 1, endChapter: 3 }));
+    const previews = await Promise.all(inputs.map((input) => service.preview(input)));
+    const results = await Promise.all(inputs.map((input, index) => service.createTurn({ ...input, requestId: `independent-${index}`, scopeHash: previews[index]!.scopeHash })));
+    expect(new Set(results.map((result) => result.turn.sessionId))).toEqual(new Set([sessionId, otherSessionId]));
+  });
+
   it("rolls back turn, job and step when the outbox insert fails", async () => {
     await sql`create function reject_query_outbox() returns trigger language plpgsql as $$ begin if new.topic = 'jobs.query.wake' then raise exception 'reject'; end if; return new; end $$`.execute(postgres.db);
     await sql`create trigger reject_query_outbox_insert before insert on job_outbox for each row execute function reject_query_outbox()`.execute(postgres.db);
@@ -124,7 +169,7 @@ describe("Query job service", () => {
     expect(await postgres.db.selectFrom("job_steps").select("id").execute()).toEqual([]);
   });
 
-  it("creates only the approved fallback step and references the immutable evidence snapshot", async () => {
+  it("creates one active fallback, rejects competitors, and replays after turn state changes", async () => {
     const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
     const input = { bookId, sessionId, actor: { id: ownerId, role: "member" as const }, question: "fallback", startChapter: 1, endChapter: 3 };
     const preview = await service.preview(input);
@@ -133,12 +178,48 @@ describe("Query job service", () => {
     await postgres.db.updateTable("query_turns").set({ evidence_snapshot_hash: snapshotHash, status: "awaiting_fallback" }).where("id", "=", created.turn.id).execute();
 
     const retry = await service.retrySummary({ bookId, sessionId, turnId: created.turn.id, actor: input.actor, requestId: "retry" });
-    const local = await service.requestLocalSummary({ bookId, sessionId, turnId: created.turn.id, actor: input.actor, requestId: "local" });
-    const steps = await postgres.db.selectFrom("job_steps").select(["job_id", "kind", "output_ref"]).where("job_id", "in", [retry.id, local.id]).orderBy("kind").execute();
-    expect(steps).toEqual([
-      { job_id: local.id, kind: "query-local-summary", output_ref: { turnId: created.turn.id, evidenceSnapshotHash: snapshotHash } },
-      { job_id: retry.id, kind: "query-summary-retry", output_ref: { turnId: created.turn.id, evidenceSnapshotHash: snapshotHash } },
-    ]);
+    await expect(service.requestLocalSummary({ bookId, sessionId, turnId: created.turn.id, actor: input.actor, requestId: "local" })).rejects.toBeInstanceOf(QueryInvalidStateError);
+    await postgres.db.updateTable("query_turns").set({ status: "completed", completed_at: new Date() }).where("id", "=", created.turn.id).execute();
+    expect((await service.retrySummary({ bookId, sessionId, turnId: created.turn.id, actor: input.actor, requestId: "retry" })).id).toBe(retry.id);
+    const steps = await postgres.db.selectFrom("job_steps").select(["job_id", "kind", "output_ref"]).where("job_id", "=", retry.id).execute();
+    expect(steps).toEqual([{ job_id: retry.id, kind: "query-summary-retry", output_ref: { turnId: created.turn.id, evidenceSnapshotHash: snapshotHash } }]);
     expect(await postgres.db.selectFrom("turn_evidence").select("id").where("turn_id", "=", created.turn.id).execute()).toEqual([]);
+  });
+
+  it("allows only one concurrent fallback for a turn and maps a cross-operation request collision", async () => {
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
+    const actor = { id: ownerId, role: "member" as const };
+    const original = { bookId, sessionId, actor, question: "fallback race", startChapter: 1, endChapter: 3 };
+    const preview = await service.preview(original);
+    const created = await service.createTurn({ ...original, requestId: "race-original", scopeHash: preview.scopeHash });
+    await postgres.db.updateTable("query_turns").set({ evidence_snapshot_hash: "d".repeat(64), status: "awaiting_fallback" }).where("id", "=", created.turn.id).execute();
+    const fallbacks = await Promise.allSettled([
+      service.retrySummary({ bookId, sessionId, turnId: created.turn.id, actor, requestId: "race-retry" }),
+      service.requestLocalSummary({ bookId, sessionId, turnId: created.turn.id, actor, requestId: "race-local" }),
+    ]);
+    expect(fallbacks.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(fallbacks.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason).toBeInstanceOf(QueryInvalidStateError);
+    await postgres.db.updateTable("jobs").set({ status: "completed" }).where(sql<boolean>`config_snapshot ->> 'operation' = 'fallback'`).execute();
+
+    const otherSessionId = (await createQueryRepository(postgres.db, cipher).createSession({ bookId, groupId, createdBy: ownerId, title: "Other session", defaultStartChapter: 1, defaultEndChapter: 3 })).id;
+    const createInput = { bookId, sessionId: otherSessionId, actor, question: "cross operation", startChapter: 1, endChapter: 3 };
+    const createPreview = await service.preview(createInput);
+    const cross = await Promise.allSettled([
+      service.createTurn({ ...createInput, requestId: "cross-operation", scopeHash: createPreview.scopeHash }),
+      service.retrySummary({ bookId, sessionId, turnId: created.turn.id, actor, requestId: "cross-operation" }),
+    ]);
+    expect(cross.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(cross.find((result): result is PromiseRejectedResult => result.status === "rejected")?.reason).toBeInstanceOf(QueryIdempotencyConflictError);
+  });
+
+  it("does not remap unrelated unique violations as idempotency conflicts", async () => {
+    await sql`create function reject_query_step_unique() returns trigger language plpgsql as $$ begin raise unique_violation using constraint = 'other_unique_constraint'; end $$`.execute(postgres.db);
+    await sql`create trigger reject_query_step_unique before insert on job_steps for each row execute function reject_query_step_unique()`.execute(postgres.db);
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
+    const input = { bookId, sessionId, actor: { id: ownerId, role: "member" as const }, question: "other unique", startChapter: 1, endChapter: 3 };
+    const preview = await service.preview(input);
+    const error = await service.createTurn({ ...input, requestId: "other-unique", scopeHash: preview.scopeHash }).catch((caught: unknown) => caught);
+    expect(error).not.toBeInstanceOf(QueryIdempotencyConflictError);
+    expect(error).toMatchObject({ code: "23505", constraint: "other_unique_constraint" });
   });
 });

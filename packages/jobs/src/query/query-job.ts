@@ -54,6 +54,11 @@ function actorCanManageTurn(turn: QueryTurn, actor: QueryActor): boolean {
   return actor.role === "admin" || turn.createdBy === actor.id;
 }
 
+const requestLock = (actorId: string, requestId: string) => `${actorId}:query-request:${requestId}`;
+const sessionCreateLock = (sessionId: string) => `query-session-create:${sessionId}`;
+const turnFallbackLock = (turnId: string) => `query-turn-fallback:${turnId}`;
+const isJobRequestUniqueViolation = (error: unknown) => (error as { code?: string; constraint?: string }).code === "23505" && (error as { constraint?: string }).constraint === "jobs_requested_by_request_id_unique";
+
 function mapRepositoryError(error: unknown): never {
   if (error instanceof Error && error.message === "Query access denied") throw new QueryAccessDeniedError();
   if (error instanceof Error && error.message.startsWith("Invalid query")) throw new QueryInvalidRequestError();
@@ -113,22 +118,23 @@ export class QueryJobService {
 
   async createTurn(input: QueryCreateInput): Promise<{ turn: QueryTurn; job: PublicJob }> {
     return this.database.transaction().execute(async (transaction) => {
-      await sql`select pg_advisory_xact_lock(hashtext(${`${input.actor.id}:query-turn:${input.requestId}`}))`.execute(transaction);
+      await sql`select pg_advisory_xact_lock(hashtext(${requestLock(input.actor.id, input.requestId)}))`.execute(transaction);
       const requestQuestionHmac = createHmac("sha256", this.options.hmacKey).update(input.question).digest("hex");
-      const requestFingerprint = sha256({ bookId: input.bookId, sessionId: input.sessionId, questionHmac: requestQuestionHmac, startChapter: input.startChapter, endChapter: input.endChapter, scopeHash: input.scopeHash });
+      const requestFingerprint = sha256({ operation: "create-turn", bookId: input.bookId, sessionId: input.sessionId, questionHmac: requestQuestionHmac, startChapter: input.startChapter, endChapter: input.endChapter, scopeHash: input.scopeHash });
       const existing = await transaction.selectFrom("jobs").select(PUBLIC_JOB_COLUMNS).where("requested_by", "=", input.actor.id).where("request_id", "=", input.requestId).executeTakeFirst();
       if (existing) {
         const config = await transaction.selectFrom("jobs").select("config_snapshot").where("id", "=", existing.id).executeTakeFirstOrThrow();
-        if (config.config_snapshot.requestFingerprint !== requestFingerprint) throw new QueryIdempotencyConflictError();
+        if (config.config_snapshot.operation !== "create-turn" || config.config_snapshot.requestFingerprint !== requestFingerprint) throw new QueryIdempotencyConflictError();
         const turnId = (await transaction.selectFrom("query_turns").select("id").where("job_id", "=", existing.id).executeTakeFirstOrThrow()).id;
         const turn = await createQueryRepository(transaction, this.cipher).getTurn({ turnId, actor: input.actor });
         return { turn, job: jobRowToPublic(existing) };
       }
+      await sql`select pg_advisory_xact_lock(hashtext(${sessionCreateLock(input.sessionId)}))`.execute(transaction);
       let selection: Selection;
       try { selection = await this.select(input, transaction); }
       catch (error) { if (error instanceof QueryInvalidRequestError) throw new QueryScopeChangedError(); throw error; }
       if (selection.scopeHash !== input.scopeHash) throw new QueryScopeChangedError();
-      const inserted = await transaction.insertInto("jobs").values({ type: "query", status: "queued", requested_by: input.actor.id, request_id: input.requestId, scope: { bookId: input.bookId, startChapter: selection.effectiveRange.startChapter, endChapter: selection.effectiveRange.endChapter, indexGroupKeys: [selection.group.key] }, config_snapshot: { requestFingerprint, scopeHash: selection.scopeHash, sessionId: input.sessionId, groupId: selection.group.id, questionHmac: selection.questionHmac, recentQuestionHmacs: selection.recentQuestionHmacs, coverageSignatures: selection.coverageSignatures, summaryWorkflow: selection.summaryWorkflow, recallPolicyVersion: this.options.recallPolicyVersion }, concurrency_key: `query:${input.sessionId}:${input.requestId}`, progress: { total: 1, completed: 0, failed: 0, skipped: 0, current: "" } }).returning(PUBLIC_JOB_COLUMNS).executeTakeFirstOrThrow();
+      const inserted = await transaction.insertInto("jobs").values({ type: "query", status: "queued", requested_by: input.actor.id, request_id: input.requestId, scope: { bookId: input.bookId, startChapter: selection.effectiveRange.startChapter, endChapter: selection.effectiveRange.endChapter, indexGroupKeys: [selection.group.key] }, config_snapshot: { operation: "create-turn", requestFingerprint, scopeHash: selection.scopeHash, sessionId: input.sessionId, groupId: selection.group.id, questionHmac: selection.questionHmac, recentQuestionHmacs: selection.recentQuestionHmacs, coverageSignatures: selection.coverageSignatures, summaryWorkflow: selection.summaryWorkflow, recallPolicyVersion: this.options.recallPolicyVersion }, concurrency_key: `query:${input.sessionId}:${input.requestId}`, progress: { total: 1, completed: 0, failed: 0, skipped: 0, current: "" } }).returning(PUBLIC_JOB_COLUMNS).executeTakeFirstOrThrow();
       const job = jobRowToPublic(inserted);
       const turn = await createQueryRepository(transaction, this.cipher).createTurn({ sessionId: input.sessionId, actor: input.actor, question: input.question, questionHmac: selection.questionHmac, startChapter: selection.effectiveRange.startChapter, endChapter: selection.effectiveRange.endChapter, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: { recallPolicyVersion: this.options.recallPolicyVersion, summaryWorkflowVersion: selection.summaryWorkflow.contractVersion }, executionSignature: selection.scopeHash, jobId: job.id });
       await transaction.insertInto("job_steps").values({ job_id: job.id, position: 1, kind: "l2-query", status: "queued", input_signature: selection.scopeHash, idempotency_key: `${job.id}:l2-query`, output_ref: { turnId: turn.id }, lease_owner: null, lease_expires_at: null }).execute();
@@ -136,14 +142,22 @@ export class QueryJobService {
       await transaction.insertInto("job_outbox").values({ job_id: job.id, topic: "jobs.query.wake", payload: { jobId: job.id }, claimed_by: null, claim_expires_at: null, delivered_at: null }).execute();
       return { turn, job };
     }).catch((error: unknown) => {
-      if ((error as { code?: string }).code === "23505") throw new QueryIdempotencyConflictError();
+      if (isJobRequestUniqueViolation(error)) throw new QueryIdempotencyConflictError();
       throw error;
     });
   }
 
   private async createFallback(input: QueryFallbackInput, kind: "query-summary-retry" | "query-local-summary"): Promise<PublicJob> {
     return this.database.transaction().execute(async (transaction) => {
-      await sql`select pg_advisory_xact_lock(hashtext(${`${input.actor.id}:query-fallback:${input.requestId}`}))`.execute(transaction);
+      await sql`select pg_advisory_xact_lock(hashtext(${requestLock(input.actor.id, input.requestId)}))`.execute(transaction);
+      const fingerprint = sha256({ operation: "fallback", bookId: input.bookId, sessionId: input.sessionId, turnId: input.turnId, kind });
+      const existing = await transaction.selectFrom("jobs").select(PUBLIC_JOB_COLUMNS).where("requested_by", "=", input.actor.id).where("request_id", "=", input.requestId).executeTakeFirst();
+      if (existing) {
+        const config = await transaction.selectFrom("jobs").select("config_snapshot").where("id", "=", existing.id).executeTakeFirstOrThrow();
+        if (config.config_snapshot.operation !== "fallback" || config.config_snapshot.requestFingerprint !== fingerprint) throw new QueryIdempotencyConflictError();
+        return jobRowToPublic(existing);
+      }
+      await sql`select pg_advisory_xact_lock(hashtext(${turnFallbackLock(input.turnId)}))`.execute(transaction);
       let turn: QueryTurnDetail;
       try { turn = await createQueryRepository(transaction, this.cipher).getTurn({ turnId: input.turnId, actor: input.actor }); }
       catch (error) { mapRepositoryError(error); }
@@ -151,20 +165,15 @@ export class QueryJobService {
       const session = await transaction.selectFrom("query_sessions").select(["book_id", "group_id"]).where("id", "=", input.sessionId).executeTakeFirst();
       if (!session || session.book_id !== input.bookId) throw new QueryNotFoundError();
       if (!turn.evidenceSnapshotHash || turn.status !== "awaiting_fallback") throw new QueryInvalidStateError();
-      const fingerprint = sha256({ turnId: turn.id, evidenceSnapshotHash: turn.evidenceSnapshotHash, kind });
-      const existing = await transaction.selectFrom("jobs").select(PUBLIC_JOB_COLUMNS).where("requested_by", "=", input.actor.id).where("request_id", "=", input.requestId).executeTakeFirst();
-      if (existing) {
-        const config = await transaction.selectFrom("jobs").select("config_snapshot").where("id", "=", existing.id).executeTakeFirstOrThrow();
-        if (config.config_snapshot.requestFingerprint !== fingerprint) throw new QueryIdempotencyConflictError();
-        return jobRowToPublic(existing);
-      }
-      const inserted = await transaction.insertInto("jobs").values({ type: "query", status: "queued", requested_by: input.actor.id, request_id: input.requestId, scope: { bookId: input.bookId, startChapter: turn.startChapter, endChapter: turn.endChapter }, config_snapshot: { requestFingerprint: fingerprint, originalTurnId: turn.id, evidenceSnapshotHash: turn.evidenceSnapshotHash }, concurrency_key: `query:${turn.sessionId}:${input.requestId}`, progress: { total: 1, completed: 0, failed: 0, skipped: 0, current: "" } }).returning(PUBLIC_JOB_COLUMNS).executeTakeFirstOrThrow();
+      const active = await transaction.selectFrom("jobs").select("id").where("type", "=", "query").where("status", "in", ["queued", "running", "retrying", "paused"]).where(sql<boolean>`config_snapshot ->> 'operation' = 'fallback'`).where(sql<boolean>`config_snapshot ->> 'originalTurnId' = ${turn.id}`).executeTakeFirst();
+      if (active) throw new QueryInvalidStateError();
+      const inserted = await transaction.insertInto("jobs").values({ type: "query", status: "queued", requested_by: input.actor.id, request_id: input.requestId, scope: { bookId: input.bookId, startChapter: turn.startChapter, endChapter: turn.endChapter }, config_snapshot: { operation: "fallback", requestFingerprint: fingerprint, originalTurnId: turn.id, evidenceSnapshotHash: turn.evidenceSnapshotHash, kind }, concurrency_key: `query:${turn.sessionId}:${input.requestId}`, progress: { total: 1, completed: 0, failed: 0, skipped: 0, current: "" } }).returning(PUBLIC_JOB_COLUMNS).executeTakeFirstOrThrow();
       const job = jobRowToPublic(inserted);
       await transaction.insertInto("job_steps").values({ job_id: job.id, position: 1, kind, status: "queued", input_signature: fingerprint, idempotency_key: `${job.id}:${kind}`, output_ref: { turnId: turn.id, evidenceSnapshotHash: turn.evidenceSnapshotHash }, lease_owner: null, lease_expires_at: null }).execute();
       await transaction.insertInto("job_events").values({ job_id: job.id, type: "created", dedupe_key: "created", payload: { status: "queued" } }).execute();
       await transaction.insertInto("job_outbox").values({ job_id: job.id, topic: "jobs.query.wake", payload: { jobId: job.id }, claimed_by: null, claim_expires_at: null, delivered_at: null }).execute();
       return job;
-    });
+    }).catch((error: unknown) => { if (isJobRequestUniqueViolation(error)) throw new QueryIdempotencyConflictError(); throw error; });
   }
 
   retrySummary(input: QueryFallbackInput): Promise<PublicJob> { return this.createFallback(input, "query-summary-retry"); }
