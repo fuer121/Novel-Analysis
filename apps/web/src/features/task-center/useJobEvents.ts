@@ -21,6 +21,7 @@ export function useJobEvents(enabled = true): void {
           void queryClient.invalidateQueries({ queryKey: ["job", event.jobId] });
         }
         void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "book" });
+        void queryClient.invalidateQueries({ predicate: (query) => query.queryKey[0] === "query" });
       } catch {
         // A malformed event cannot replace API-backed task state
       }
