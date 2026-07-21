@@ -190,6 +190,31 @@ describe("continuous query workspace", () => {
     expect(requested.some((url) => url.endsWith(`/turns/${missingTurn}`))).toBe(true);
   });
 
+  it("clears both stale route parameters when the settled session list is empty", async () => {
+    const missingSession = "00000000-0000-4000-8000-000000000099";
+    const missingTurn = "00000000-0000-4000-8000-000000000098";
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input); requested.push(url);
+      if (url === `/api/books/${ids.book}`) return json({ book });
+      if (url === `/api/books/${ids.book}/index-groups`) return json({ indexGroups: [group] });
+      if (url === `/api/books/${ids.book}/query-sessions`) return json({ sessions: [] });
+      if (url.includes(missingSession)) return json({ error: "not_found" }, 404);
+      if (url === `/api/books/${ids.book}/query-sessions/${ids.session}`) return json({ session });
+      if (url.endsWith(`/query-sessions/${ids.session}/turns?limit=50`)) return json({ turns: [turn], nextCursor: null });
+      if (url.endsWith(`/query-sessions/${ids.session}/turns/${ids.turn}`)) return json({ turn: detail });
+      if (url.endsWith(`/query-sessions/${ids.session}/turns/${missingTurn}`)) return json({ error: "not_found" }, 404);
+      throw new Error(`unexpected ${url}`);
+    }));
+    const { client } = renderPath(`/books/${ids.book}/query?session=${missingSession}&turn=${missingTurn}`);
+    expect(await screen.findByText("选择或新建研究会话")).toBeTruthy();
+    await waitFor(() => expect(requested.some((url) => url.endsWith(`/turns/${missingTurn}`))).toBe(true));
+    requested.length = 0;
+    client.setQueryData(["query", ids.book, "sessions"], { sessions: [session] });
+    expect(await screen.findByText("陈平安选择留下守城")).toBeTruthy();
+    expect(requested.some((url) => url.endsWith(`/turns/${missingTurn}`))).toBe(false);
+  });
+
   it("reuses a create key after an uncertain failure and rotates it when the payload changes", async () => {
     const keys: string[] = [];
     let createCalls = 0;
@@ -259,11 +284,16 @@ describe("continuous query workspace", () => {
     await userEvent.click(retry);
     await userEvent.click(local);
     expect(urls).toHaveLength(1);
+    await userEvent.type(screen.getByLabelText("问题"), "编辑中的问题");
     resolveFirst(json({ error: "internal_error" }, 500));
     expect(await screen.findByText("降级操作结果未确认，请重试")).toBeTruthy();
+    expect((retry as HTMLButtonElement).disabled).toBe(false);
+    expect((local as HTMLButtonElement).disabled).toBe(false);
     await userEvent.click(retry);
     await waitFor(() => expect(urls).toHaveLength(2));
     expect(keys[1]).toBe(keys[0]);
+    expect((retry as HTMLButtonElement).disabled).toBe(true);
+    expect((local as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("does not let a deferred submit from the previous session mutate the new composer", async () => {
@@ -326,7 +356,7 @@ describe("continuous query workspace", () => {
     expect(screen.getByText("2", { selector: "dd" })).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "重试 Dify 汇总" }));
     await userEvent.click(screen.getByRole("button", { name: "生成本地事实摘要" }));
-    expect(fallbacks).toHaveLength(2);
+    expect(fallbacks).toHaveLength(1);
     const before = { historyCalls, detailCalls };
     FakeEventSource.instance.emit({ jobId: "job", type: "progress" });
     await waitFor(() => expect(historyCalls).toBeGreaterThan(before.historyCalls));

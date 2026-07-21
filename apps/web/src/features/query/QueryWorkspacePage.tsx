@@ -31,7 +31,8 @@ export function QueryWorkspacePage() {
   useEffect(() => {
     if (!sessions.isSuccess || requestedSessionId === selectedId) return;
     const next = new URLSearchParams(params);
-    if (selectedId) next.set("session", selectedId); else next.delete("session");
+    if (selectedId) next.set("session", selectedId);
+    else { next.delete("session"); next.delete("turn"); }
     setParams(next, { replace: true });
   }, [params, requestedSessionId, selectedId, sessions.isSuccess, setParams]);
   useEffect(() => {

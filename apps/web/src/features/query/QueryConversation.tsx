@@ -30,10 +30,13 @@ export function QueryConversation({ session, turns, selectedTurnId, detail, onSe
   const [fallbackBusy, setFallbackBusy] = useState(false);
   const [fallbackMessage, setFallbackMessage] = useState("");
   const generation = useRef(0);
+  const fallbackGeneration = useRef(0);
   const fallbackLock = useRef(false);
   const fallbackKeys = useRef<Record<string, string>>({});
-  useEffect(() => { generation.current += 1; fallbackLock.current = false; setQuestion(""); setStartChapter(session.defaultStartChapter); setEndChapter(session.defaultEndChapter); setPreview(null); setKey(null); setMessage(""); setBusy(false); setFallbackBusy(false); setFallbackMessage(""); }, [session]);
-  useEffect(() => () => { generation.current += 1; }, []);
+  const fallbackReleaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => { generation.current += 1; fallbackGeneration.current += 1; fallbackLock.current = false; if (fallbackReleaseTimer.current) clearTimeout(fallbackReleaseTimer.current); setQuestion(""); setStartChapter(session.defaultStartChapter); setEndChapter(session.defaultEndChapter); setPreview(null); setKey(null); setMessage(""); setBusy(false); setFallbackBusy(false); setFallbackMessage(""); }, [session]);
+  useEffect(() => () => { generation.current += 1; fallbackGeneration.current += 1; if (fallbackReleaseTimer.current) clearTimeout(fallbackReleaseTimer.current); }, []);
+  useEffect(() => { if (detail?.status !== "awaiting_fallback") { fallbackLock.current = false; if (fallbackReleaseTimer.current) clearTimeout(fallbackReleaseTimer.current); setFallbackBusy(false); } }, [detail?.status]);
   const invalidatePreview = () => { generation.current += 1; setPreview(null); setMessage(""); setBusy(false); };
   const previewQuestion = async () => {
     setBusy(true); setMessage("");
@@ -57,13 +60,14 @@ export function QueryConversation({ session, turns, selectedTurnId, detail, onSe
   const fallback = async (turnId: string, kind: "retry-summary" | "local-summary") => {
     if (fallbackLock.current) return;
     fallbackLock.current = true; setFallbackBusy(true); setFallbackMessage("");
-    const requestGeneration = generation.current;
+    const requestGeneration = fallbackGeneration.current;
     const action = `${turnId}:${kind}`;
     const fallbackKey = fallbackKeys.current[action] ?? crypto.randomUUID();
     fallbackKeys.current[action] = fallbackKey;
-    try { await onFallback(turnId, kind, fallbackKey); if (requestGeneration === generation.current) delete fallbackKeys.current[action]; }
-    catch { if (requestGeneration === generation.current) setFallbackMessage("降级操作结果未确认，请重试"); }
-    finally { if (requestGeneration === generation.current) { fallbackLock.current = false; setFallbackBusy(false); } }
+    let succeeded = false;
+    try { await onFallback(turnId, kind, fallbackKey); if (requestGeneration === fallbackGeneration.current) { delete fallbackKeys.current[action]; succeeded = true; fallbackReleaseTimer.current = setTimeout(() => { if (requestGeneration === fallbackGeneration.current) { fallbackLock.current = false; setFallbackBusy(false); } }, 30_000); } }
+    catch { if (requestGeneration === fallbackGeneration.current) setFallbackMessage("降级操作结果未确认，请重试"); }
+    finally { if (requestGeneration === fallbackGeneration.current && !succeeded) { fallbackLock.current = false; setFallbackBusy(false); } }
   };
   return <section className="query-conversation">
     <header><div><p className="eyebrow">连续提问</p><h2>{session.title}</h2></div><span>{session.defaultStartChapter}-{session.defaultEndChapter} 章</span></header>
