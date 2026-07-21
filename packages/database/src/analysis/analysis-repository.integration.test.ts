@@ -1,0 +1,122 @@
+import { randomBytes, randomUUID } from "node:crypto";
+
+import { sql } from "kysely";
+import { afterAll, beforeAll, describe, expect, test } from "vitest";
+import { z } from "zod";
+
+import { createContentCipher } from "../library/content-encryption.js";
+import { createDisposablePostgres, type DisposablePostgres } from "../testing/postgres.js";
+import { decryptJson, encryptJson } from "./content.js";
+import { createAnalysisRepository, type AnalysisActor } from "./analysis-repository.js";
+
+describe("private analysis repository", () => {
+  let postgres: DisposablePostgres;
+  const cipher = createContentCipher({ activeKeyVersion: "analysis-v1", keys: { "analysis-v1": randomBytes(32) } });
+  let owner: AnalysisActor;
+  let member: AnalysisActor;
+  let admin: AnalysisActor;
+  let bookId: string;
+
+  beforeAll(async () => {
+    postgres = await createDisposablePostgres();
+    const users = await postgres.db.insertInto("users").values([
+      { display_name: "Owner", role: "member", status: "active" },
+      { display_name: "Member", role: "member", status: "active" },
+      { display_name: "Admin", role: "admin", status: "active" },
+    ]).returning(["id", "role"]).execute();
+    owner = users[0]!;
+    member = users[1]!;
+    admin = users[2]!;
+    bookId = (await postgres.db.insertInto("books").values({ title: "Book", created_by: owner.id, status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+  });
+
+  afterAll(async () => postgres?.destroy());
+
+  test("encrypts template versions and filters all template content by owner", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const prompt = "analysis-prompt-plaintext-sentinel";
+    const outputSchema = { marker: "analysis-schema-plaintext-sentinel", type: "object" };
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Private", prompt, outputSchema, contentHash: "a".repeat(64), indexGroupId: null });
+
+    expect(await repository.listTemplates({ bookId, actor: owner })).toHaveLength(1);
+    expect(await repository.getTemplate({ templateId: template.id, actor: owner })).toMatchObject({ prompt, outputSchema });
+    await expect(repository.getTemplate({ templateId: template.id, actor: member })).rejects.toThrow("Analysis access denied");
+    await expect(repository.getTemplate({ templateId: template.id, actor: admin })).rejects.toThrow("Analysis access denied");
+    expect(await repository.listTemplates({ bookId, actor: member })).toEqual([]);
+    expect(await repository.listTemplates({ bookId, actor: admin })).toEqual([]);
+
+    const updatedPrompt = "updated-analysis-prompt-plaintext-sentinel";
+    const updated = await repository.updateTemplate({ templateId: template.id, actor: owner, name: "Private v2", prompt: updatedPrompt, outputSchema: { type: "array" }, contentHash: "b".repeat(64), indexGroupId: null });
+    expect(updated.currentVersionId).not.toBe(template.currentVersionId);
+    expect(await repository.getTemplate({ templateId: template.id, actor: owner })).toMatchObject({ prompt: updatedPrompt, outputSchema: { type: "array" } });
+    expect(await postgres.db.selectFrom("analysis_template_versions").select("version").where("template_id", "=", template.id).orderBy("version").execute()).toEqual([{ version: 1 }, { version: 2 }]);
+
+    const raw = await sql<Record<string, unknown>>`select * from analysis_templates t join analysis_template_versions v on v.template_id = t.id where t.id = ${template.id}`.execute(postgres.db);
+    expect(JSON.stringify(raw.rows)).not.toContain(prompt);
+    expect(JSON.stringify(raw.rows)).not.toContain("analysis-schema-plaintext-sentinel");
+    expect(JSON.stringify(raw.rows)).not.toContain(updatedPrompt);
+    await expect(sql`update analysis_template_versions set content_hash = ${"b".repeat(64)} where id = ${template.currentVersionId}`.execute(postgres.db)).rejects.toThrow();
+  });
+
+  test("binds valid runs and parts and reuses only exact completed inputs", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Run", prompt: "prompt", outputSchema: { type: "object" }, contentHash: "c".repeat(64), indexGroupId: null });
+    const job = await postgres.db.insertInto("jobs").values({ type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 3, status: "queued", executionSignature: "d".repeat(64), totalParts: 2 });
+    const part = await repository.createPart({ runId: run.id, position: 0, kind: "chapter", status: "running", inputSignature: "e".repeat(64) });
+    expect(await repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "e".repeat(64), actor: owner })).toBeNull();
+
+    const result = { marker: "analysis-part-result-plaintext-sentinel", values: [1, 2] };
+    await repository.completePart({ partId: part.id, actor: owner, result });
+    expect(await repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "e".repeat(64), actor: owner })).toMatchObject({ id: part.id, result });
+    for (const mismatch of [
+      { position: 1, kind: "chapter", inputSignature: "e".repeat(64) },
+      { position: 0, kind: "summary", inputSignature: "e".repeat(64) },
+      { position: 0, kind: "chapter", inputSignature: "f".repeat(64) },
+    ]) expect(await repository.findReusablePart({ runId: run.id, actor: owner, ...mismatch })).toBeNull();
+    await expect(repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "e".repeat(64), actor: admin })).rejects.toThrow("Analysis access denied");
+    const finalResult = { marker: "analysis-final-result-plaintext-sentinel" };
+    await repository.completeRun({ runId: run.id, actor: owner, result: finalResult });
+    expect(await repository.getRunResult({ runId: run.id, actor: owner })).toEqual(finalResult);
+    await expect(repository.getRunResult({ runId: run.id, actor: member })).rejects.toThrow("Analysis access denied");
+    await expect(repository.getRunResult({ runId: run.id, actor: admin })).rejects.toThrow("Analysis access denied");
+
+    const raw = await postgres.db.selectFrom("analysis_parts").selectAll().where("id", "=", part.id).executeTakeFirstOrThrow();
+    expect(raw.status).toBe("completed");
+    expect(JSON.stringify(raw)).not.toContain("analysis-part-result-plaintext-sentinel");
+    const jsonSurfaces = await sql<Record<string, unknown>>`
+      select scope, config_snapshot, progress from jobs where id = ${job.id}
+      union all select payload, '{}'::jsonb, '{}'::jsonb from job_events where job_id = ${job.id}
+      union all select payload, '{}'::jsonb, '{}'::jsonb from job_outbox where job_id = ${job.id}
+      union all select metadata, '{}'::jsonb, '{}'::jsonb from audit_logs where target_id = ${run.id}
+      union all select diagnostics, '{}'::jsonb, '{}'::jsonb from analysis_runs where id = ${run.id}
+      union all select output_ref, '{}'::jsonb, '{}'::jsonb from analysis_parts where run_id = ${run.id}
+    `.execute(postgres.db);
+    const ordinaryJson = JSON.stringify(jsonSurfaces.rows);
+    expect(ordinaryJson).not.toContain("analysis-prompt-plaintext-sentinel");
+    expect(ordinaryJson).not.toContain("analysis-schema-plaintext-sentinel");
+    expect(ordinaryJson).not.toContain("analysis-part-result-plaintext-sentinel");
+    expect(ordinaryJson).not.toContain("analysis-final-result-plaintext-sentinel");
+  });
+
+  test("enforces database constraints and atomic completion", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Constraints", prompt: "prompt", outputSchema: {}, contentHash: "1".repeat(64), indexGroupId: null });
+    const job = await postgres.db.insertInto("jobs").values({ type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "bad" as never, startChapter: 3, endChapter: 1, status: "queued", executionSignature: "2".repeat(64), totalParts: 1 })).rejects.toThrow();
+    const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "full_text", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "2".repeat(64), totalParts: 1 });
+    await expect(sql`insert into analysis_parts (run_id, position, kind, status, input_signature, result_ciphertext) values (${run.id}, 0, 'chapter', 'completed', ${"3".repeat(64)}, ${Buffer.from("partial")})`.execute(postgres.db)).rejects.toThrow();
+    const part = await repository.createPart({ runId: run.id, position: 0, kind: "chapter", status: "running", inputSignature: "3".repeat(64) });
+    await expect(postgres.db.transaction().execute(async (transaction) => {
+      await createAnalysisRepository(transaction, cipher).completePart({ partId: part.id, actor: owner, result: { rollback: true } });
+      throw new Error("rollback completion");
+    })).rejects.toThrow("rollback completion");
+    expect(await postgres.db.selectFrom("analysis_parts").select(["status", "result_ciphertext"]).where("id", "=", part.id).executeTakeFirstOrThrow()).toEqual({ status: "running", result_ciphertext: null });
+  });
+
+  test("validates decrypted typed JSON with Zod", () => {
+    const schema = z.strictObject({ count: z.number().int() });
+    expect(decryptJson(cipher, encryptJson(cipher, { count: 2 }), schema)).toEqual({ count: 2 });
+    expect(() => decryptJson(cipher, encryptJson(cipher, { count: "bad" }), schema)).toThrow(z.ZodError);
+  });
+});

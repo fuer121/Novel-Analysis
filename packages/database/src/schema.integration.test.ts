@@ -123,6 +123,9 @@ const REQUIRED_INDEXES = [
   "query_sessions_book_owner_updated_idx",
   "query_turns_session_created_idx",
   "turn_evidence_turn_disposition_rank_idx",
+  "analysis_templates_book_owner_updated_idx",
+  "analysis_runs_book_owner_updated_idx",
+  "analysis_parts_run_status_position_idx",
 ] as const;
 
 async function tableExists(database: DisposablePostgres["db"], table: string) {
@@ -251,6 +254,17 @@ describe("phase 1 PostgreSQL schema", () => {
   });
 
   test("migrates down in foreign-key reverse order and back up from empty", async () => {
+    expect(await tableExists(postgres.db, "analysis_templates")).toBe(true);
+    expect(await tableExists(postgres.db, "analysis_template_versions")).toBe(true);
+    expect(await tableExists(postgres.db, "analysis_runs")).toBe(true);
+    expect(await tableExists(postgres.db, "analysis_parts")).toBe(true);
+    expect(await tableExists(postgres.db, "legacy_analysis_runs")).toBe(false);
+    await migrateDown(postgres.db);
+    expect(await tableExists(postgres.db, "analysis_templates")).toBe(false);
+    expect(await tableExists(postgres.db, "analysis_template_versions")).toBe(false);
+    expect(await tableExists(postgres.db, "analysis_runs")).toBe(false);
+    expect(await tableExists(postgres.db, "analysis_parts")).toBe(false);
+
     expect(await tableExists(postgres.db, "query_sessions")).toBe(true);
     expect(await tableExists(postgres.db, "query_turns")).toBe(true);
     expect(await tableExists(postgres.db, "turn_evidence")).toBe(true);
@@ -290,6 +304,11 @@ describe("phase 1 PostgreSQL schema", () => {
     expect(await tableExists(postgres.db, "query_sessions")).toBe(true);
     expect(await tableExists(postgres.db, "query_turns")).toBe(true);
     expect(await tableExists(postgres.db, "turn_evidence")).toBe(true);
+    expect(await tableExists(postgres.db, "analysis_templates")).toBe(true);
+    expect(await tableExists(postgres.db, "analysis_template_versions")).toBe(true);
+    expect(await tableExists(postgres.db, "analysis_runs")).toBe(true);
+    expect(await tableExists(postgres.db, "analysis_parts")).toBe(true);
+    expect(await tableExists(postgres.db, "legacy_analysis_runs")).toBe(false);
   });
 
   test("extends workflow versions to the approved analysis summary target", async () => {
