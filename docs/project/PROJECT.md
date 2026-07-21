@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: f4d47958a5c410c24d6d280aa298374318b18a11
+baseline_commit: 3083c74725133d6275aea7c96d0b345f2ec4575a
 baseline_status: current
-updated_at: 2026-07-21T17:40:34+08:00
+updated_at: 2026-07-21T17:46:55+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-TASK5-MERGED
+last_checkpoint: CP-20260721-PHASE3-TASK6-API-CORRECTION-MERGED
 next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `f4d47958a5c410c24d6d280aa298374318b18a11` |
-| Latest merged implementation | PR #92 `https://github.com/fuer121/Novel-Analysis/pull/92` |
+| Accepted implementation baseline | `3083c74725133d6275aea7c96d0b345f2ec4575a` |
+| Latest merged implementation | PR #96 `https://github.com/fuer121/Novel-Analysis/pull/96` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -34,13 +34,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementing | Task 1-5 merged，Task 6 API correction accepted and pending PR/CI |
+| Phase 3 | implementing | Task 1-5 and Task 6 API correction merged，Task 6 resumed |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK6-API-CORRECTION | phase-3 | Authorized turn history and safe Trace projection | implementation-agent | codex/phase3-task6-api-correction | 05abfb31ecbc04aa351aabc613635ec634170842 | 9ebb7214a54de3be3de22c76ea80a3edac78eac5 | accepted | CP-20260721-PHASE3-TASK6-STARTED | CP-20260721-PHASE3-TASK6-API-CORRECTION-ACCEPTED | push branch, create PR and verify CI under DEC-0002 |
+| PHASE3-TASK6 | phase-3 | Continuous-query responsive workspace | implementation-agent | codex/phase3-task6-workspace | 3083c74725133d6275aea7c96d0b345f2ec4575a | none | in_progress | CP-20260721-PHASE3-TASK6-API-CORRECTION-MERGED | CP-20260721-PHASE3-TASK6-STARTED | fast-forward the clean implementation worktree, then resume TDD |
 
 ## Phase Ledgers
 
@@ -80,11 +80,11 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
 - Task 6 依赖已批准的 turns 分页读取与安全 Trace 投影 correction，correction 不得改变 evidence、fallback、权限、加密或 Worker 语义
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
-- Task 6 API correction 已通过实现、规格、质量、安全和总控验收，Web 实施保持暂停直至 correction 合并
+- Task 6 必须使用 merged turn history 与 safe Trace contract，不得重新引入 browser-local task truth 或扩大公开 Trace
 
 ## Pending Feedback
 
-无，PHASE3-TASK6-API-CORRECTION implementation 已接受，可按 DEC-0002 创建 PR 并核验 CI
+无，PHASE3-TASK6 API prerequisite 已合并，可从新 baseline 恢复 Web 实施
 
 ## Next Gate
 
@@ -92,6 +92,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 6 API correction merged](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-MERGED.md)
 - [Phase 3 Task 6 API correction accepted](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-ACCEPTED.md)
 - [Phase 3 Task 6 API correction started](checkpoints/CP-20260721-PHASE3-TASK6-API-CORRECTION-STARTED.md)
 - [Phase 3 Task 6 started](checkpoints/CP-20260721-PHASE3-TASK6-STARTED.md)
