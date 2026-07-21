@@ -45,27 +45,61 @@ export const advancedAnalysisMigration: Migration = {
     await sql`
       create function enforce_analysis_run_identity() returns trigger language plpgsql as $$
       begin
-        if not exists (
-          select 1 from analysis_template_versions v
+        perform 1 from analysis_template_versions v
           join analysis_templates t on t.id = v.template_id
           where v.id = new.template_version_id
             and t.book_id = new.book_id
             and t.created_by = new.created_by
-        ) then
+          for share of t;
+        if not found then
           raise exception 'analysis run template identity mismatch'
             using errcode = '23514', constraint = 'analysis_runs_template_identity_check';
         end if;
-        if not exists (
-          select 1 from jobs j
-          where j.id = new.job_id and j.requested_by = new.created_by
-        ) then
-          raise exception 'analysis run job requester mismatch'
-            using errcode = '23514', constraint = 'analysis_runs_job_requester_check';
+        perform 1 from jobs j
+          where j.id = new.job_id
+            and j.requested_by = new.created_by
+            and j.type = 'advanced-analysis'
+            and j.status = 'queued'
+          for share;
+        if not found then
+          raise exception 'analysis run job identity mismatch'
+            using errcode = '23514', constraint = 'analysis_runs_job_identity_check';
         end if;
         return new;
       end $$
     `.execute(db);
     await sql`create trigger analysis_runs_identity before insert or update of book_id, created_by, template_version_id, job_id on analysis_runs for each row execute function enforce_analysis_run_identity()`.execute(db);
+    await sql`
+      create function preserve_analysis_template_run_identity() returns trigger language plpgsql as $$
+      begin
+        if exists (
+          select 1 from analysis_runs r
+          join analysis_template_versions v on v.id = r.template_version_id
+          where v.template_id = old.id
+            and (r.book_id <> new.book_id or r.created_by <> new.created_by)
+        ) then
+          raise exception 'analysis template update would invalidate a run'
+            using errcode = '23514', constraint = 'analysis_templates_run_identity_check';
+        end if;
+        return new;
+      end $$
+    `.execute(db);
+    await sql`create trigger analysis_templates_preserve_run_identity before update of book_id, created_by on analysis_templates for each row execute function preserve_analysis_template_run_identity()`.execute(db);
+    await sql`
+      create function preserve_analysis_job_run_identity() returns trigger language plpgsql as $$
+      begin
+        if exists (
+          select 1 from analysis_runs r
+          where r.job_id = old.id
+            and (r.created_by <> new.requested_by or new.type <> 'advanced-analysis')
+        ) then
+          raise exception 'analysis job update would invalidate a run'
+            using errcode = '23514', constraint = 'analysis_jobs_run_identity_check';
+        end if;
+        return new;
+      end $$
+    `.execute(db);
+    await sql`create trigger analysis_jobs_preserve_run_identity before update of requested_by, type on jobs for each row execute function preserve_analysis_job_run_identity()`.execute(db);
     await db.schema.createIndex("analysis_runs_book_owner_updated_idx").on("analysis_runs").columns(["book_id", "created_by", "updated_at", "id"]).execute();
 
     await db.schema.createTable("analysis_parts")
@@ -81,10 +115,13 @@ export const advancedAnalysisMigration: Migration = {
   async down(db) {
     await db.schema.dropTable("analysis_parts").execute();
     await db.schema.dropTable("analysis_runs").execute();
+    await sql`drop trigger analysis_jobs_preserve_run_identity on jobs`.execute(db);
+    await sql`drop function preserve_analysis_job_run_identity()`.execute(db);
     await sql`drop function enforce_analysis_run_identity()`.execute(db);
     await sql`alter table analysis_templates drop constraint analysis_templates_current_version_id_fk`.execute(db);
     await db.schema.dropTable("analysis_template_versions").execute();
     await sql`drop function reject_analysis_template_version_mutation()`.execute(db);
     await db.schema.dropTable("analysis_templates").execute();
+    await sql`drop function preserve_analysis_template_run_identity()`.execute(db);
   },
 };

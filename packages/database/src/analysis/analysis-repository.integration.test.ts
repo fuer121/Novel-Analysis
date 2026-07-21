@@ -4,6 +4,7 @@ import { sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
 import { z } from "zod";
 
+import type { DatabaseExecutor } from "../db.js";
 import { createContentCipher } from "../library/content-encryption.js";
 import { createDisposablePostgres, type DisposablePostgres } from "../testing/postgres.js";
 import { decryptJson, encryptJson } from "./content.js";
@@ -62,7 +63,7 @@ describe("private analysis repository", () => {
   test("binds valid runs and parts and reuses only exact completed inputs", async () => {
     const repository = createAnalysisRepository(postgres.db, cipher);
     const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Run", prompt: "prompt", outputSchema: { type: "object" }, contentHash: "c".repeat(64), indexGroupId: null });
-    const job = await postgres.db.insertInto("jobs").values({ type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    const job = await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
     const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 3, status: "queued", executionSignature: "d".repeat(64), totalParts: 2 });
     const part = await repository.createPart({ runId: run.id, position: 0, kind: "chapter", status: "running", inputSignature: "e".repeat(64) });
     expect(await repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "e".repeat(64), actor: owner })).toBeNull();
@@ -77,6 +78,8 @@ describe("private analysis repository", () => {
     ]) expect(await repository.findReusablePart({ runId: run.id, actor: owner, ...mismatch })).toBeNull();
     await expect(repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "e".repeat(64), actor: admin })).rejects.toThrow("Analysis access denied");
     const finalResult = { marker: "analysis-final-result-plaintext-sentinel" };
+    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", job.id).execute();
+    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", run.id).execute();
     await repository.completeRun({ runId: run.id, actor: owner, result: finalResult });
     expect(await repository.getRunResult({ runId: run.id, actor: owner })).toEqual(finalResult);
     await expect(repository.getRunResult({ runId: run.id, actor: member })).rejects.toThrow("Analysis access denied");
@@ -103,7 +106,7 @@ describe("private analysis repository", () => {
   test("enforces database constraints and atomic completion", async () => {
     const repository = createAnalysisRepository(postgres.db, cipher);
     const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Constraints", prompt: "prompt", outputSchema: {}, contentHash: "1".repeat(64), indexGroupId: null });
-    const job = await postgres.db.insertInto("jobs").values({ type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    const job = await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
     await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "bad" as never, startChapter: 3, endChapter: 1, status: "queued", executionSignature: "2".repeat(64), totalParts: 1 })).rejects.toThrow();
     const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "full_text", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "2".repeat(64), totalParts: 1 });
     await expect(sql`insert into analysis_parts (run_id, position, kind, status, input_signature, result_ciphertext) values (${run.id}, 0, 'chapter', 'completed', ${"3".repeat(64)}, ${Buffer.from("partial")})`.execute(postgres.db)).rejects.toThrow();
@@ -120,10 +123,10 @@ describe("private analysis repository", () => {
     const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Identity", prompt: "prompt", outputSchema: {}, contentHash: "4".repeat(64), indexGroupId: null });
     const otherBookId = (await postgres.db.insertInto("books").values({ title: "Other", created_by: member.id, status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
     const jobs = await postgres.db.insertInto("jobs").values([
-      { type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
-      { type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
-      { type: "analysis", status: "queued", requested_by: member.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
-      { type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+      { type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+      { type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+      { type: "advanced-analysis", status: "queued", requested_by: member.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
+      { type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} },
     ]).returning("id").execute();
     const insertRun = (runBookId: string, createdBy: string, jobId: string) => sql`
       insert into analysis_runs (book_id, created_by, template_version_id, job_id, mode, start_chapter, end_chapter, status, execution_signature, total_parts, diagnostics)
@@ -136,10 +139,116 @@ describe("private analysis repository", () => {
     await expect(insertRun(bookId, owner.id, jobs[3]!.id)).resolves.toBeDefined();
   });
 
+  test("preserves run identity across parent updates and a concurrent parent-update race", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Parent identity", prompt: "prompt", outputSchema: {}, contentHash: "a".repeat(64), indexGroupId: null });
+    const otherBookId = (await postgres.db.insertInto("books").values({ title: "Parent other", created_by: member.id, status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+    const job = await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "b".repeat(64), totalParts: 1 });
+
+    const rejectedInRollback = async (operation: (transaction: DatabaseExecutor) => Promise<unknown>) => {
+      let rejected = false;
+      await expect(postgres.db.transaction().execute(async (transaction) => {
+        await operation(transaction).catch(() => { rejected = true; });
+        throw new Error("rollback parent mutation");
+      })).rejects.toThrow("rollback parent mutation");
+      expect(rejected).toBe(true);
+    };
+    await rejectedInRollback((transaction) => transaction.updateTable("analysis_templates").set({ created_by: member.id }).where("id", "=", template.id).execute());
+    await rejectedInRollback((transaction) => transaction.updateTable("analysis_templates").set({ book_id: otherBookId }).where("id", "=", template.id).execute());
+    await rejectedInRollback((transaction) => transaction.updateTable("jobs").set({ requested_by: member.id }).where("id", "=", job.id).execute());
+    await rejectedInRollback((transaction) => transaction.updateTable("jobs").set({ type: "query" }).where("id", "=", job.id).execute());
+
+    const unrelatedTemplate = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Unrelated", prompt: "prompt", outputSchema: {}, contentHash: "c".repeat(64), indexGroupId: null });
+    const unrelatedJob = await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    await expect(postgres.db.updateTable("analysis_templates").set({ created_by: member.id, book_id: otherBookId }).where("id", "=", unrelatedTemplate.id).execute()).resolves.toBeDefined();
+    await expect(postgres.db.updateTable("jobs").set({ requested_by: member.id }).where("id", "=", unrelatedJob.id).execute()).resolves.toBeDefined();
+
+    const racingTemplate = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Race", prompt: "prompt", outputSchema: {}, contentHash: "d".repeat(64), indexGroupId: null });
+    const racingJob = await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    let releaseParent!: () => void;
+    let parentLocked!: () => void;
+    const parentLock = new Promise<void>((resolve) => { parentLocked = resolve; });
+    const release = new Promise<void>((resolve) => { releaseParent = resolve; });
+    const parentUpdate = postgres.db.transaction().execute(async (transaction) => {
+      await transaction.updateTable("analysis_templates").set({ created_by: member.id }).where("id", "=", racingTemplate.id).execute();
+      parentLocked();
+      await release;
+    });
+    await parentLock;
+    const racingInsert = repository.createRun({ bookId, createdBy: owner.id, templateVersionId: racingTemplate.currentVersionId, jobId: racingJob.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "e".repeat(64), totalParts: 1 });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    releaseParent();
+    await parentUpdate;
+    await expect(racingInsert).rejects.toThrow();
+  });
+
+  test("binds only queued advanced-analysis Jobs and completes runs once from active Job state", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Lifecycle", prompt: "prompt", outputSchema: {}, contentHash: "f".repeat(64), indexGroupId: null });
+    const createJob = (type: string, status: "queued" | "running" | "retrying" | "paused" | "completed" | "failed" | "cancelled") => postgres.db.insertInto("jobs").values({ type, status, requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    const createRun = async () => {
+      const job = await createJob("advanced-analysis", "queued");
+      const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: randomUUID(), totalParts: 1 });
+      return { job, run };
+    };
+
+    const wrongType = await createJob("query", "queued");
+    await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: wrongType.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: randomUUID(), totalParts: 1 })).rejects.toThrow();
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      const terminalJob = await createJob("advanced-analysis", status);
+      await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: terminalJob.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: randomUUID(), totalParts: 1 })).rejects.toThrow();
+    }
+
+    const unclaimed = await createRun();
+    await expect(repository.completeRun({ runId: unclaimed.run.id, actor: owner, result: { queued: true } })).rejects.toThrow();
+    for (const status of ["retrying", "paused"] as const) {
+      const active = await createRun();
+      await postgres.db.updateTable("jobs").set({ status }).where("id", "=", active.job.id).execute();
+      await postgres.db.updateTable("analysis_runs").set({ status }).where("id", "=", active.run.id).execute();
+      await expect(repository.completeRun({ runId: active.run.id, actor: owner, result: { status } })).resolves.toMatchObject({ status: "completed" });
+    }
+
+    for (const status of ["cancelled", "failed"] as const) {
+      const { job, run } = await createRun();
+      await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", job.id).execute();
+      await postgres.db.updateTable("analysis_runs").set({ status }).where("id", "=", run.id).execute();
+      await expect(repository.completeRun({ runId: run.id, actor: owner, result: { status } })).rejects.toThrow();
+    }
+    for (const status of ["completed", "failed", "cancelled"] as const) {
+      const { job, run } = await createRun();
+      await postgres.db.updateTable("jobs").set({ status }).where("id", "=", job.id).execute();
+      await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", run.id).execute();
+      await expect(repository.completeRun({ runId: run.id, actor: owner, result: { status } })).rejects.toThrow();
+    }
+
+    const concurrent = await createRun();
+    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", concurrent.job.id).execute();
+    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", concurrent.run.id).execute();
+    const completions = await Promise.allSettled([
+      repository.completeRun({ runId: concurrent.run.id, actor: owner, result: { winner: 1 } }),
+      repository.completeRun({ runId: concurrent.run.id, actor: owner, result: { winner: 2 } }),
+    ]);
+    expect(completions.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(completions.filter((result) => result.status === "rejected")).toHaveLength(1);
+    const firstResult = await repository.getRunResult({ runId: concurrent.run.id, actor: owner });
+    await expect(repository.completeRun({ runId: concurrent.run.id, actor: owner, result: { overwrite: true } })).rejects.toThrow();
+    expect(await repository.getRunResult({ runId: concurrent.run.id, actor: owner })).toEqual(firstResult);
+
+    const rollback = await createRun();
+    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", rollback.job.id).execute();
+    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", rollback.run.id).execute();
+    await expect(postgres.db.transaction().execute(async (transaction) => {
+      await createAnalysisRepository(transaction, cipher).completeRun({ runId: rollback.run.id, actor: owner, result: { rollback: true } });
+      throw new Error("rollback run completion");
+    })).rejects.toThrow("rollback run completion");
+    expect(await postgres.db.selectFrom("analysis_runs").select(["status", "result_ciphertext"]).where("id", "=", rollback.run.id).executeTakeFirstOrThrow()).toEqual({ status: "running", result_ciphertext: null });
+  });
+
   test("rejects repository payloads outside the approved JSON schema", async () => {
     const repository = createAnalysisRepository(postgres.db, cipher);
     const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Malformed", prompt: "prompt", outputSchema: {}, contentHash: "6".repeat(64), indexGroupId: null });
-    const job = await postgres.db.insertInto("jobs").values({ type: "analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    const job = await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
     const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "7".repeat(64), totalParts: 1 });
     const part = await repository.createPart({ runId: run.id, position: 0, kind: "chapter", status: "running", inputSignature: "8".repeat(64) });
     await repository.completePart({ partId: part.id, actor: owner, result: { valid: true } });
@@ -148,6 +257,8 @@ describe("private analysis repository", () => {
 
     await expect(repository.findReusablePart({ runId: run.id, position: 0, kind: "chapter", inputSignature: "8".repeat(64), actor: owner })).rejects.toThrow(z.ZodError);
 
+    await postgres.db.updateTable("jobs").set({ status: "running" }).where("id", "=", job.id).execute();
+    await postgres.db.updateTable("analysis_runs").set({ status: "running" }).where("id", "=", run.id).execute();
     await repository.completeRun({ runId: run.id, actor: owner, result: { valid: true } });
     await postgres.db.updateTable("analysis_runs").set({ result_ciphertext: malformed.ciphertext, result_nonce: malformed.nonce, result_tag: malformed.tag, result_key_version: malformed.keyVersion }).where("id", "=", run.id).execute();
     await expect(repository.getRunResult({ runId: run.id, actor: owner })).rejects.toThrow(z.ZodError);
