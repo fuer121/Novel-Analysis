@@ -167,6 +167,138 @@ describe("continuous query workspace", () => {
     expect(requested.some((url) => url.endsWith("cursor=opaque-older"))).toBe(true);
   });
 
+  it("replaces an unauthorized session and an explicitly missing turn with authorized history", async () => {
+    const missingSession = "00000000-0000-4000-8000-000000000099";
+    const missingTurn = "00000000-0000-4000-8000-000000000098";
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input); requested.push(url);
+      if (url === `/api/books/${ids.book}`) return json({ book });
+      if (url === `/api/books/${ids.book}/index-groups`) return json({ indexGroups: [group] });
+      if (url === `/api/books/${ids.book}/query-sessions`) return json({ sessions: [session] });
+      if (url.includes(missingSession)) return json({ error: "not_found" }, 404);
+      if (url === `/api/books/${ids.book}/query-sessions/${ids.session}`) return json({ session });
+      if (url.endsWith(`/query-sessions/${ids.session}/turns?limit=50`)) return json({ turns: [turn], nextCursor: null });
+      if (url.endsWith(`/query-sessions/${ids.session}/turns/${missingTurn}`)) return json({ error: "not_found" }, 404);
+      if (url.endsWith(`/query-sessions/${ids.session}/turns/${ids.turn}`)) return json({ turn: detail });
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath(`/books/${ids.book}/query?session=${missingSession}&turn=${missingTurn}`);
+    expect(await screen.findByRole("heading", { name: session.title })).toBeTruthy();
+    expect(await screen.findByText("陈平安选择留下守城")).toBeTruthy();
+    expect(requested.some((url) => url.includes(missingSession))).toBe(true);
+    expect(requested.some((url) => url.endsWith(`/turns/${missingTurn}`))).toBe(true);
+  });
+
+  it("reuses a create key after an uncertain failure and rotates it when the payload changes", async () => {
+    const keys: string[] = [];
+    let createCalls = 0;
+    let createdOnServer = false;
+    let resolveFirstCreate!: (response: Response) => void;
+    const firstCreate = new Promise<Response>((resolve) => { resolveFirstCreate = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/books/${ids.book}/query-sessions` && init?.method === "POST") {
+        keys.push(new Headers(init.headers).get("Idempotency-Key")!);
+        createCalls += 1;
+        if (createCalls === 1) return firstCreate;
+        if (createCalls === 2) return json({ error: "internal_error" }, 500);
+        createdOnServer = true;
+        return json({ session: { ...session, id: ids.session2, title: "变更后的会话" } }, 201);
+      }
+      if (url === `/api/books/${ids.book}/query-sessions` && createdOnServer) return json({ sessions: [{ ...session, id: ids.session2, title: "变更后的会话" }, session] });
+      const response = baseRead(url);
+      if (response) return response;
+      if (url.includes(ids.session2) && url.endsWith("/turns?limit=50")) return json({ turns: [], nextCursor: null });
+      if (url.endsWith(`/query-sessions/${ids.session2}`)) return json({ session: { ...session, id: ids.session2, title: "变更后的会话" } });
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath();
+    await userEvent.click(await screen.findByRole("button", { name: "新建会话" }));
+    const title = screen.getByLabelText("会话标题");
+    await userEvent.type(title, "首次会话");
+    const createButton = screen.getByRole("button", { name: "创建会话" });
+    await userEvent.click(createButton);
+    expect((createButton as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(createButton);
+    expect(createCalls).toBe(1);
+    resolveFirstCreate(json({ error: "internal_error" }, 500));
+    expect(await screen.findByText("创建结果未确认，请重试")).toBeTruthy();
+    await userEvent.click(createButton);
+    await waitFor(() => expect(createCalls).toBe(2));
+    expect(keys[0]).toBe(keys[1]);
+    await userEvent.clear(title);
+    await userEvent.type(title, "变更后的会话");
+    await userEvent.click(createButton);
+    expect(await screen.findByRole("heading", { name: "变更后的会话" })).toBeTruthy();
+    expect(keys[2]).not.toBe(keys[1]);
+  });
+
+  it("serializes fallback actions and reuses the failed action key", async () => {
+    const keys: string[] = [];
+    const urls: string[] = [];
+    let resolveFirst!: (response: Response) => void;
+    const first = new Promise<Response>((resolve) => { resolveFirst = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (init?.method === "POST" && (url.endsWith("/retry-summary") || url.endsWith("/local-summary"))) {
+        urls.push(url); keys.push(new Headers(init.headers).get("Idempotency-Key")!);
+        if (urls.length === 1) return first;
+        return json({ job: { id: "job" } }, 201);
+      }
+      const response = baseRead(url);
+      if (response) return response;
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath();
+    const retry = await screen.findByRole("button", { name: "重试 Dify 汇总" });
+    const local = screen.getByRole("button", { name: "生成本地事实摘要" });
+    await userEvent.click(retry);
+    expect((retry as HTMLButtonElement).disabled).toBe(true);
+    expect((local as HTMLButtonElement).disabled).toBe(true);
+    await userEvent.click(retry);
+    await userEvent.click(local);
+    expect(urls).toHaveLength(1);
+    resolveFirst(json({ error: "internal_error" }, 500));
+    expect(await screen.findByText("降级操作结果未确认，请重试")).toBeTruthy();
+    await userEvent.click(retry);
+    await waitFor(() => expect(urls).toHaveLength(2));
+    expect(keys[1]).toBe(keys[0]);
+  });
+
+  it("does not let a deferred submit from the previous session mutate the new composer", async () => {
+    const secondSession = { ...session, id: ids.session2, title: "第二会话" };
+    let secondHistoryCalls = 0;
+    let resolveSubmit!: (response: Response) => void;
+    const pendingSubmit = new Promise<Response>((resolve) => { resolveSubmit = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === `/api/books/${ids.book}/query-sessions`) return json({ sessions: [session, secondSession] });
+      if (url.endsWith(`/query-sessions/${ids.session2}`)) return json({ session: secondSession });
+      if (url.endsWith(`/query-sessions/${ids.session2}/turns?limit=50`)) { secondHistoryCalls += 1; return json({ turns: [], nextCursor: null }); }
+      if (url.endsWith("/turn-preview")) return json({ book: { id: ids.book, title: book.title }, group: { id: ids.group, key: group.key, name: group.name }, defaultRange: { startChapter: 2, endChapter: 10 }, effectiveRange: { startChapter: 2, endChapter: 10 }, queryableChapterCount: 8, coverageGaps: [], executionVersions: { summaryWorkflowVersion: "summary-v1", recallPolicyVersion: "query-recall-v1" }, estimatedQueuePosition: 1, scopeHash: "a".repeat(64) });
+      if (url.endsWith(`/query-sessions/${ids.session}/turns`) && init?.method === "POST") return pendingSubmit;
+      const response = baseRead(url);
+      if (response) return response;
+      throw new Error(`unexpected ${url}`);
+    }));
+    const { client } = renderPath();
+    client.setQueryData(["query", ids.book, "session", ids.session2], { session: secondSession });
+    const question = await screen.findByLabelText("问题");
+    await userEvent.type(question, "旧会话问题");
+    await userEvent.click(screen.getByRole("button", { name: "预览问题范围" }));
+    await userEvent.click(await screen.findByRole("button", { name: "发送问题" }));
+    await userEvent.click(screen.getByText(secondSession.title, { selector: "strong" }).closest("button")!);
+    expect(await screen.findByRole("heading", { name: secondSession.title })).toBeTruthy();
+    const newQuestion = screen.getByLabelText("问题");
+    await userEvent.type(newQuestion, "新会话问题");
+    resolveSubmit(json({ turn: { ...turn, status: "queued" }, job: { id: "job" } }, 201));
+    await waitFor(() => expect(secondHistoryCalls).toBeGreaterThan(1));
+    expect((newQuestion as HTMLTextAreaElement).value).toBe("新会话问题");
+    expect((screen.getByRole("button", { name: "预览问题范围" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("提交结果未确认，请重试")).toBeNull();
+  });
+
   it("renders selected evidence and trace, exposes fallback actions and invalidates query keys on SSE", async () => {
     let historyCalls = 0;
     let detailCalls = 0;

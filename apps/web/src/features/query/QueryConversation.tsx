@@ -16,7 +16,7 @@ type Props = {
   onLoadOlderTurns: () => void;
   onPreview: (value: { question: string; startChapter: number; endChapter: number }) => Promise<QueryPreview>;
   onSubmit: (value: { question: string; startChapter: number; endChapter: number; scopeHash: string }, key: string) => Promise<void>;
-  onFallback: (turnId: string, kind: "retry-summary" | "local-summary") => Promise<void>;
+  onFallback: (turnId: string, kind: "retry-summary" | "local-summary", key: string) => Promise<void>;
 };
 
 export function QueryConversation({ session, turns, selectedTurnId, detail, onSelectTurn, hasOlderTurns, loadingOlderTurns, onLoadOlderTurns, onPreview, onSubmit, onFallback }: Props) {
@@ -27,25 +27,43 @@ export function QueryConversation({ session, turns, selectedTurnId, detail, onSe
   const [key, setKey] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const previewGeneration = useRef(0);
-  useEffect(() => { previewGeneration.current += 1; setQuestion(""); setStartChapter(session.defaultStartChapter); setEndChapter(session.defaultEndChapter); setPreview(null); setKey(null); setMessage(""); }, [session]);
-  const invalidatePreview = () => { previewGeneration.current += 1; setPreview(null); setMessage(""); };
+  const [fallbackBusy, setFallbackBusy] = useState(false);
+  const [fallbackMessage, setFallbackMessage] = useState("");
+  const generation = useRef(0);
+  const fallbackLock = useRef(false);
+  const fallbackKeys = useRef<Record<string, string>>({});
+  useEffect(() => { generation.current += 1; fallbackLock.current = false; setQuestion(""); setStartChapter(session.defaultStartChapter); setEndChapter(session.defaultEndChapter); setPreview(null); setKey(null); setMessage(""); setBusy(false); setFallbackBusy(false); setFallbackMessage(""); }, [session]);
+  useEffect(() => () => { generation.current += 1; }, []);
+  const invalidatePreview = () => { generation.current += 1; setPreview(null); setMessage(""); setBusy(false); };
   const previewQuestion = async () => {
     setBusy(true); setMessage("");
-    const generation = ++previewGeneration.current;
+    const requestGeneration = ++generation.current;
     const input = { question, startChapter, endChapter };
-    try { const value = await onPreview(input); if (generation === previewGeneration.current) { setPreview({ value, input }); setKey(crypto.randomUUID()); } }
-    catch { if (generation === previewGeneration.current) setMessage("预览失败，请重试"); }
-    finally { setBusy(false); }
+    try { const value = await onPreview(input); if (requestGeneration === generation.current) { setPreview({ value, input }); setKey(crypto.randomUUID()); } }
+    catch { if (requestGeneration === generation.current) setMessage("预览失败，请重试"); }
+    finally { if (requestGeneration === generation.current) setBusy(false); }
   };
   const submit = async () => {
     if (!preview || !key) return;
     setBusy(true); setMessage("");
-    try { await onSubmit({ ...preview.input, scopeHash: preview.value.scopeHash }, key); setPreview(null); setKey(null); setQuestion(""); }
+    const requestGeneration = generation.current;
+    try { await onSubmit({ ...preview.input, scopeHash: preview.value.scopeHash }, key); if (requestGeneration !== generation.current) return; setPreview(null); setKey(null); setQuestion(""); }
     catch (error) {
+      if (requestGeneration !== generation.current) return;
       if (error instanceof Error && error.message === "scope_changed") { setPreview(null); setKey(null); setMessage("范围已变化，请重新预览"); }
       else setMessage("提交结果未确认，请重试");
-    } finally { setBusy(false); }
+    } finally { if (requestGeneration === generation.current) setBusy(false); }
+  };
+  const fallback = async (turnId: string, kind: "retry-summary" | "local-summary") => {
+    if (fallbackLock.current) return;
+    fallbackLock.current = true; setFallbackBusy(true); setFallbackMessage("");
+    const requestGeneration = generation.current;
+    const action = `${turnId}:${kind}`;
+    const fallbackKey = fallbackKeys.current[action] ?? crypto.randomUUID();
+    fallbackKeys.current[action] = fallbackKey;
+    try { await onFallback(turnId, kind, fallbackKey); if (requestGeneration === generation.current) delete fallbackKeys.current[action]; }
+    catch { if (requestGeneration === generation.current) setFallbackMessage("降级操作结果未确认，请重试"); }
+    finally { if (requestGeneration === generation.current) { fallbackLock.current = false; setFallbackBusy(false); } }
   };
   return <section className="query-conversation">
     <header><div><p className="eyebrow">连续提问</p><h2>{session.title}</h2></div><span>{session.defaultStartChapter}-{session.defaultEndChapter} 章</span></header>
@@ -55,7 +73,7 @@ export function QueryConversation({ session, turns, selectedTurnId, detail, onSe
       </button>)}
       {turns.length === 0 ? <p className="query-empty">提出第一个问题，开始研究</p> : null}
       {hasOlderTurns ? <button className="text-button query-load-older" type="button" disabled={loadingOlderTurns} onClick={onLoadOlderTurns}>加载更早</button> : null}
-      {detail?.status === "awaiting_fallback" ? <div className="query-fallback"><p>远程汇总暂不可用，请选择后续处理</p><div className="button-row"><button className="secondary-button" onClick={() => void onFallback(detail.id, "retry-summary")}>重试 Dify 汇总</button><button className="secondary-button" onClick={() => void onFallback(detail.id, "local-summary")}>生成本地事实摘要</button></div></div> : null}
+      {detail?.status === "awaiting_fallback" ? <div className="query-fallback"><p>远程汇总暂不可用，请选择后续处理</p>{fallbackMessage ? <p className="warning-notice">{fallbackMessage}</p> : null}<div className="button-row"><button className="secondary-button" disabled={fallbackBusy} onClick={() => void fallback(detail.id, "retry-summary")}>重试 Dify 汇总</button><button className="secondary-button" disabled={fallbackBusy} onClick={() => void fallback(detail.id, "local-summary")}>生成本地事实摘要</button></div></div> : null}
     </div>
     <div className="query-composer" data-testid="query-composer">
       <label>问题<textarea value={question} onChange={(event) => { setQuestion(event.target.value); invalidatePreview(); }} rows={3} /></label>
