@@ -10,12 +10,14 @@ import { createJobEventsRouter } from "./routes/job-events.js";
 import { createJobsRouter } from "./routes/jobs.js";
 import { createBooksRouter } from "./routes/books.js";
 import { createIndexGroupsRouter } from "./routes/index-groups.js";
+import { createQuerySessionsRouter } from "./routes/query-sessions.js";
 
 export interface CreateAppOptions {
   database: DatabaseConnection;
   config: ApiConfig;
   feishu: FeishuOAuthAdapter;
   contentCipher?: ContentCipher;
+  queryHmacKey?: Buffer;
   logger?: AuthRouteLogger;
 }
 
@@ -32,6 +34,7 @@ export function createApp(options: CreateAppOptions): Express {
   app.use("/api/jobs", createJobsRouter(options.database, options.config));
   app.use("/api/books", createBooksRouter(options.database, options.config));
   app.use("/api/books", createIndexGroupsRouter(options.database, options.config, options.contentCipher));
+  if (options.contentCipher && options.queryHmacKey) app.use("/api/books", createQuerySessionsRouter(options.database, options.config, options.contentCipher, options.queryHmacKey));
   app.use((_request, response) => response.status(404).json({ error: "not_found" }));
 
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {

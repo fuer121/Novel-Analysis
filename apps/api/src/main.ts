@@ -9,11 +9,14 @@ const feishuAppId = process.env.FEISHU_APP_ID;
 const feishuAppSecret = process.env.FEISHU_APP_SECRET;
 const contentKey = process.env.CONTENT_ENCRYPTION_KEY;
 const contentKeyVersion = process.env.CONTENT_ENCRYPTION_KEY_VERSION;
+const contentHmacKey = process.env.CONTENT_HMAC_KEY;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 if (!feishuAppId || !feishuAppSecret) throw new Error("Feishu credentials are required");
 if (!contentKey || !contentKeyVersion) throw new Error("Content encryption configuration is required");
 const decodedContentKey = Buffer.from(contentKey, "base64");
+const decodedContentHmacKey = contentHmacKey ? Buffer.from(contentHmacKey, "base64") : decodedContentKey;
 if (decodedContentKey.length !== 32 || decodedContentKey.toString("base64") !== contentKey) throw new Error("CONTENT_ENCRYPTION_KEY is invalid");
+if (contentHmacKey && (decodedContentHmacKey.length === 0 || decodedContentHmacKey.toString("base64") !== contentHmacKey)) throw new Error("CONTENT_HMAC_KEY is invalid");
 
 const port = Number(process.env.PORT ?? "3001");
 if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("PORT is invalid");
@@ -24,6 +27,7 @@ const app = createApp({
   config: loadApiConfig(process.env),
   feishu: new FeishuHttpOAuthAdapter({ appId: feishuAppId, appSecret: feishuAppSecret }),
   contentCipher: createContentCipher({ activeKeyVersion: contentKeyVersion, keys: { [contentKeyVersion]: decodedContentKey } }),
+  queryHmacKey: decodedContentHmacKey,
 });
 const server = app.listen(port);
 
