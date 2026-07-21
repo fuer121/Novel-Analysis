@@ -65,6 +65,9 @@ export const continuousQueriesMigration: Migration = {
       .addForeignKeyConstraint("query_turns_attempt_id_fk", ["attempt_id"], "job_attempts", ["id"])
       .addCheckConstraint("query_turns_status_check", sql`status in ('queued','running','awaiting_fallback','completed','degraded','failed','cancelled')`)
       .addCheckConstraint("query_turns_range_check", sql`start_chapter > 0 and end_chapter >= start_chapter`)
+      .addCheckConstraint("query_turns_question_hmac_check", sql`question_hmac ~ '^[0-9a-f]{64}$'`)
+      .addCheckConstraint("query_turns_execution_signature_check", sql`execution_signature ~ '^[0-9a-f]{64}$'`)
+      .addCheckConstraint("query_turns_degradation_check", sql`degradation is null or (length(degradation) <= 32 and degradation ~ '^[a-z][a-z0-9]*([._:-][a-z0-9]+)*$')`)
       .addCheckConstraint("query_turns_answer_encryption_check", sql`(answer_ciphertext is null and answer_nonce is null and answer_tag is null and answer_key_version is null) or (answer_ciphertext is not null and answer_nonce is not null and answer_tag is not null and answer_key_version is not null)`)
       .execute();
     await db.schema.createIndex("query_turns_session_created_idx").on("query_turns").columns(["session_id", "created_at", "id"]).execute();
@@ -90,6 +93,8 @@ export const continuousQueriesMigration: Migration = {
       .addForeignKeyConstraint("turn_evidence_fact_id_fk", ["fact_id"], "l2_facts", ["id"])
       .addUniqueConstraint("turn_evidence_turn_fact_unique", ["turn_id", "fact_id"])
       .addCheckConstraint("turn_evidence_rank_check", sql`rank > 0`)
+      .addCheckConstraint("turn_evidence_recall_reason_check", sql`length(recall_reason) <= 32 and recall_reason ~ '^[a-z][a-z0-9]*([._:-][a-z0-9]+)*$'`)
+      .addCheckConstraint("turn_evidence_exclusion_reason_code_check", sql`exclusion_reason is null or (length(exclusion_reason) <= 32 and exclusion_reason ~ '^[a-z][a-z0-9]*([._:-][a-z0-9]+)*$')`)
       .addCheckConstraint("turn_evidence_disposition_check", sql`disposition in ('used','excluded')`)
       .addCheckConstraint("turn_evidence_exclusion_check", sql`(disposition = 'used' and exclusion_reason is null) or (disposition = 'excluded' and exclusion_reason is not null)`)
       .execute();

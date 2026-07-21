@@ -8,6 +8,8 @@ import type { ContentCipher, EncryptedContent } from "../library/content-encrypt
 type JsonObject = Record<string, unknown>;
 const INTENT_KEYS = new Set(["kind", "target", "aliases", "referents", "categories", "keywords"]);
 const CONFIG_KEYS = new Set(["recallPolicyVersion", "maxCandidates", "maxUsed", "summaryWorkflowVersion"]);
+const OPAQUE_HASH_PATTERN = /^[0-9a-f]{64}$/;
+const MACHINE_CODE_PATTERN = /^[a-z][a-z0-9]*(?:[._:-][a-z0-9]+)*$/;
 export interface QueryActor { id: string; role: "admin" | "member" }
 export interface QuerySession { id: string; bookId: string; groupId: string; createdBy: string; visibility: QueryVisibility; defaultStartChapter: number; defaultEndChapter: number; title: string; archivedAt: Date | null; createdAt: Date; updatedAt: Date }
 export interface QueryTurn { id: string; sessionId: string; createdBy: string; question: string; answer: string | null; questionHmac: string; startChapter: number; endChapter: number; intentSnapshot: JsonObject; sourceSnapshot: JsonObject; gapSnapshot: JsonObject; configSnapshot: JsonObject; executionSignature: string; evidenceSnapshotHash: string | null; status: QueryTurnStatus; jobId: string | null; attemptId: string | null; degradation: string | null; createdAt: Date; updatedAt: Date; completedAt: Date | null }
@@ -56,6 +58,10 @@ function assertSourceSnapshot(value: JsonObject): void {
   if (Object.keys(value).length === 0) return;
   if (Object.keys(value).sort().join(",") !== "candidates,excluded,gaps,used") throw new Error("Invalid query snapshot");
   if (!Object.values(value).every((item) => Number.isSafeInteger(item) && Number(item) >= 0)) throw new Error("Invalid query snapshot");
+}
+
+function assertMachineCode(value: string): void {
+  if (value.length > 32 || !MACHINE_CODE_PATTERN.test(value)) throw new Error("Invalid machine code");
 }
 
 export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCipher) {
@@ -108,6 +114,7 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
       if (!session || session.archived_at || (input.actor.role !== "admin" && session.created_by !== input.actor.id && session.visibility !== "team")) throw new Error("Query access denied");
       try {
         if (!input.question.trim()) throw new Error();
+        if (!OPAQUE_HASH_PATTERN.test(input.questionHmac) || !OPAQUE_HASH_PATTERN.test(input.executionSignature)) throw new Error();
         const title = cipher.decrypt({ ciphertext: session.title_ciphertext, nonce: session.title_nonce, tag: session.title_tag, keyVersion: session.title_key_version });
         assertCreateSnapshots(input, [title, input.question]);
         const question = cipher.encrypt(input.question);
@@ -122,6 +129,19 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
         if (locked.rows[0]?.evidence_snapshot_hash) throw new Error("Evidence snapshot already committed");
         const snapshotHash = createHash("sha256").update(JSON.stringify(input.evidence)).digest("hex");
         try {
+          const context = await executor.selectFrom("query_turns as t").innerJoin("query_sessions as s", "s.id", "t.session_id").select(["t.question_ciphertext", "t.question_nonce", "t.question_tag", "t.question_key_version", "s.title_ciphertext", "s.title_nonce", "s.title_tag", "s.title_key_version"]).where("t.id", "=", input.turnId).executeTakeFirstOrThrow();
+          const factIds = [...new Set(input.evidence.map((item) => item.factId))];
+          const factRows = factIds.length === 0 ? [] : await executor.selectFrom("l2_facts").select(["fact_ciphertext", "fact_nonce", "fact_tag", "fact_key_version"]).where("id", "in", factIds).execute();
+          const sensitiveValues = [
+            cipher.decrypt({ ciphertext: context.title_ciphertext, nonce: context.title_nonce, tag: context.title_tag, keyVersion: context.title_key_version }),
+            cipher.decrypt({ ciphertext: context.question_ciphertext, nonce: context.question_nonce, tag: context.question_tag, keyVersion: context.question_key_version }),
+            ...factRows.map((row) => cipher.decrypt({ ciphertext: row.fact_ciphertext, nonce: row.fact_nonce, tag: row.fact_tag, keyVersion: row.fact_key_version })),
+          ];
+          for (const evidence of input.evidence) {
+            assertMachineCode(evidence.recallReason);
+            if (evidence.exclusionReason !== undefined) assertMachineCode(evidence.exclusionReason);
+            assertNoSensitiveValues({ recallReason: evidence.recallReason, exclusionReason: evidence.exclusionReason }, sensitiveValues);
+          }
           for (const evidence of input.evidence) await executor.insertInto("turn_evidence").values({ turn_id: input.turnId, fact_id: evidence.factId, rank: evidence.rank, recall_reason: evidence.recallReason, disposition: evidence.disposition, exclusion_reason: evidence.exclusionReason ?? null }).execute();
           await executor.updateTable("query_turns").set({ evidence_snapshot_hash: snapshotHash, updated_at: new Date() }).where("id", "=", input.turnId).execute();
         } catch (error) { stableError(error, "Invalid turn evidence"); }
@@ -143,6 +163,10 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
           ...(input.answer === null ? [] : [input.answer]),
         ];
         [input.sourceSnapshot, input.gapSnapshot].forEach((value) => assertNoSensitiveValues(value, sensitiveValues));
+        if (input.degradation !== null) {
+          assertMachineCode(input.degradation);
+          assertNoSensitiveValues({ degradation: input.degradation }, sensitiveValues);
+        }
         const answer = input.answer === null ? null : cipher.encrypt(input.answer);
         const row = await db.updateTable("query_turns").set({ answer_ciphertext: answer?.ciphertext ?? null, answer_nonce: answer?.nonce ?? null, answer_tag: answer?.tag ?? null, answer_key_version: answer?.keyVersion ?? null, status: input.status, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, degradation: input.degradation, job_id: input.jobId, attempt_id: input.attemptId, updated_at: new Date(), completed_at: new Date() }).where("id", "=", input.turnId).returningAll().executeTakeFirstOrThrow();
         return mapTurn(row);

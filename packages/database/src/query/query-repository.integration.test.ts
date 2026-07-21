@@ -9,6 +9,9 @@ import { createLibraryRepository } from "../library/library-repository.js";
 import { createDisposablePostgres, type DisposablePostgres } from "../testing/postgres.js";
 import { createQueryRepository, type QueryActor } from "./query-repository.js";
 
+const QUESTION_HMAC = "a".repeat(64);
+const EXECUTION_SIGNATURE = "b".repeat(64);
+
 describe("continuous query repository", () => {
   let postgres: DisposablePostgres;
   const cipher = createContentCipher({ activeKeyVersion: "query-v1", keys: { "query-v1": randomBytes(32) } });
@@ -65,7 +68,7 @@ describe("continuous query repository", () => {
     const answer = "query-answer-plaintext-sentinel";
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title, defaultStartChapter: 1, defaultEndChapter: 3 });
     expect(session).toMatchObject({ title, visibility: "private", createdBy: owner.id });
-    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: createHash("sha256").update(question).digest("hex"), startChapter: 1, endChapter: 2, intentSnapshot: { kind: "single-target", target: "hero", aliases: [], referents: [], categories: [], keywords: [] }, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: createHash("sha256").update(question).digest("hex"), startChapter: 1, endChapter: 2, intentSnapshot: { kind: "single-target", target: "hero", aliases: [], referents: [], categories: [], keywords: [] }, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
     await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "subject", disposition: "used" }] });
     const snapshotHash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
     const completed = await repository.completeTurn({ turnId: turn.id, actor: owner, answer, status: "completed", evidenceSnapshotHash: snapshotHash, sourceSnapshot: { candidates: 1, used: 1, excluded: 0, gaps: 0 }, gapSnapshot: {}, degradation: null });
@@ -87,9 +90,9 @@ describe("continuous query repository", () => {
     await expect(repository.createSession({ bookId, groupId: otherGroupId, createdBy: owner.id, title: "bad", defaultStartChapter: 1, defaultEndChapter: 2 })).rejects.toThrow("Invalid query session");
     await expect(repository.createSession({ bookId, groupId, createdBy: owner.id, title: "bad", defaultStartChapter: 3, defaultEndChapter: 2 })).rejects.toThrow("Invalid query session");
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "range", defaultStartChapter: 1, defaultEndChapter: 2 });
-    await expect(repository.createTurn({ sessionId: session.id, actor: owner, question: "outside", questionHmac: "h", startChapter: 1, endChapter: 3, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" })).rejects.toThrow("Invalid query turn");
+    await expect(repository.createTurn({ sessionId: session.id, actor: owner, question: "outside", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 3, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE })).rejects.toThrow("Invalid query turn");
     const snapshotSentinel = "snapshot-plaintext-sentinel";
-    const rejected = await repository.createTurn({ sessionId: session.id, actor: owner, question: "valid", questionHmac: "h", startChapter: 1, endChapter: 1, intentSnapshot: { fact: snapshotSentinel }, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" }).catch((error: unknown) => error);
+    const rejected = await repository.createTurn({ sessionId: session.id, actor: owner, question: "valid", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: { fact: snapshotSentinel }, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE }).catch((error: unknown) => error);
     expect(rejected).toMatchObject({ message: "Invalid query turn" });
     expect(String(rejected)).not.toContain(snapshotSentinel);
     expect(JSON.stringify(await postgres.db.selectFrom("query_turns").select(["intent_snapshot", "source_snapshot", "gap_snapshot", "config_snapshot"]).where("session_id", "=", session.id).execute())).not.toContain(snapshotSentinel);
@@ -112,14 +115,14 @@ describe("continuous query repository", () => {
       { configSnapshot: { recallPolicyVersion: title } },
       { configSnapshot: { summaryWorkflowVersion: question } },
     ]) {
-      const rejected = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: "hidden-hmac", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig", ...snapshot }).catch((error: unknown) => error);
+      const rejected = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE, ...snapshot }).catch((error: unknown) => error);
       expect(rejected).toMatchObject({ message: "Invalid query turn" });
       expect(String(rejected)).not.toContain(title);
       expect(String(rejected)).not.toContain(question);
       expect(String(rejected)).not.toContain(answer);
       expect(String(rejected)).not.toContain(factBody);
     }
-    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: "hidden-hmac", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
     await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "match", disposition: "used" }] });
     const snapshotHash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
     for (const gapSnapshot of [{ note: answer }, { payload: question }, { label: title }, { marker: factBody }]) {
@@ -134,10 +137,48 @@ describe("continuous query repository", () => {
     expect(JSON.stringify(rows)).not.toContain(factBody);
   });
 
+  test("rejects plaintext sentinels in ordinary query control columns", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const title = "ordinary-title-plaintext-sentinel";
+    const question = "ordinary-question-plaintext-sentinel";
+    const answer = "ordinary-answer-plaintext-sentinel";
+    const factBody = "fact-secret";
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title, defaultStartChapter: 1, defaultEndChapter: 3 });
+    for (const unsafe of [title, question, answer, factBody]) {
+      for (const fields of [{ questionHmac: unsafe }, { executionSignature: unsafe }]) {
+        const rejected = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE, ...fields }).catch((error: unknown) => error);
+        expect(rejected).toMatchObject({ message: "Invalid query turn" });
+        expect(String(rejected)).not.toContain(unsafe);
+      }
+    }
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    await expect(postgres.db.updateTable("query_turns").set({ question_hmac: title }).where("id", "=", turn.id).execute()).rejects.toMatchObject({ constraint: "query_turns_question_hmac_check" });
+    await expect(postgres.db.updateTable("query_turns").set({ execution_signature: question }).where("id", "=", turn.id).execute()).rejects.toMatchObject({ constraint: "query_turns_execution_signature_check" });
+    await expect(postgres.db.updateTable("query_turns").set({ degradation: answer }).where("id", "=", turn.id).execute()).rejects.toMatchObject({ constraint: "query_turns_degradation_check" });
+    await expect(postgres.db.insertInto("turn_evidence").values({ turn_id: turn.id, fact_id: factId, rank: 1, recall_reason: title, disposition: "used", exclusion_reason: null }).execute()).rejects.toMatchObject({ constraint: "turn_evidence_recall_reason_check" });
+    await expect(postgres.db.insertInto("turn_evidence").values({ turn_id: turn.id, fact_id: factId, rank: 1, recall_reason: "candidate_match", disposition: "excluded", exclusion_reason: answer }).execute()).rejects.toMatchObject({ constraint: "turn_evidence_exclusion_reason_code_check" });
+    for (const unsafe of [title, question, answer, factBody]) {
+      for (const fields of [{ recallReason: unsafe, exclusionReason: undefined }, { recallReason: "candidate_match", exclusionReason: unsafe }]) {
+        const rejected = await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, disposition: fields.exclusionReason ? "excluded" : "used", ...fields }] }).catch((error: unknown) => error);
+        expect(rejected).toMatchObject({ message: "Invalid turn evidence" });
+        expect(String(rejected)).not.toContain(unsafe);
+      }
+    }
+    await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "candidate_match", disposition: "used" }] });
+    const snapshotHash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
+    for (const degradation of [title, question, answer, factBody]) {
+      const rejected = await repository.completeTurn({ turnId: turn.id, actor: owner, answer, status: "degraded", evidenceSnapshotHash: snapshotHash, sourceSnapshot: { candidates: 1, used: 1, excluded: 0, gaps: 0 }, gapSnapshot: {}, degradation }).catch((error: unknown) => error);
+      expect(rejected).toMatchObject({ message: "Invalid query turn" });
+      expect(String(rejected)).not.toContain(degradation);
+    }
+    const raw = await sql<Record<string, unknown>>`select s.*, t.*, e.* from query_sessions s left join query_turns t on t.session_id = s.id left join turn_evidence e on e.turn_id = t.id where s.id = ${session.id}`.execute(postgres.db);
+    for (const sentinel of [title, question, answer, factBody]) expect(JSON.stringify(raw.rows)).not.toContain(sentinel);
+  });
+
   test("authorizes private and team sessions before returning decrypted content", async () => {
     const repository = createQueryRepository(postgres.db, cipher);
     const privateSession = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "private-secret", defaultStartChapter: 1, defaultEndChapter: 3 });
-    const privateTurn = await repository.createTurn({ sessionId: privateSession.id, actor: owner, question: "private-question", questionHmac: "h", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+    const privateTurn = await repository.createTurn({ sessionId: privateSession.id, actor: owner, question: "private-question", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
     await expect(repository.getTurn({ turnId: privateTurn.id, actor: member })).rejects.toThrow("Query access denied");
     expect(await repository.listVisibleSessions({ bookId, actor: member })).not.toContainEqual(expect.objectContaining({ id: privateSession.id }));
     expect(await repository.listVisibleSessions({ bookId, actor: admin })).toContainEqual(expect.objectContaining({ id: privateSession.id, title: "private-secret" }));
@@ -151,7 +192,7 @@ describe("continuous query repository", () => {
   test("lets a member create and manage only their own turn in a team session", async () => {
     const repository = createQueryRepository(postgres.db, cipher);
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "shared", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
-    const turn = await repository.createTurn({ sessionId: session.id, actor: member, question: "member-question", questionHmac: "h", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: member, question: "member-question", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
     expect(turn.createdBy).toBe(member.id);
     await repository.commitEvidence({ turnId: turn.id, actor: member, evidence: [] });
     const snapshotHash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
@@ -166,7 +207,7 @@ describe("continuous query repository", () => {
     let turnId = "";
     await expect(postgres.db.transaction().execute(async (transaction) => {
       const transactional = createQueryRepository(transaction, cipher);
-      const turn = await transactional.createTurn({ sessionId: session.id, actor: owner, question: "rollback-question", questionHmac: "h", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+      const turn = await transactional.createTurn({ sessionId: session.id, actor: owner, question: "rollback-question", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
       turnId = turn.id;
       await transactional.commitEvidence({ turnId, actor: owner, evidence: [{ factId, rank: 1, recallReason: "match", disposition: "used" }] });
       throw new Error("rollback");
@@ -178,7 +219,7 @@ describe("continuous query repository", () => {
   test("commits evidence once and rejects facts outside the session group", async () => {
     const repository = createQueryRepository(postgres.db, cipher);
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "evidence", defaultStartChapter: 1, defaultEndChapter: 3 });
-    const makeTurn = (question: string) => repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: "h", startChapter: 1, endChapter: 2, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+    const makeTurn = (question: string) => repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 2, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
     const turn = await makeTurn("once");
     await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "match", disposition: "used" }] });
     await expect(postgres.db.insertInto("turn_evidence").values({ turn_id: turn.id, fact_id: factId, rank: 2, recall_reason: "late", disposition: "excluded", exclusion_reason: "late" }).execute()).rejects.toThrow("turn evidence snapshot already committed");
@@ -193,7 +234,7 @@ describe("continuous query repository", () => {
   test("serializes concurrent evidence commits into one snapshot", async () => {
     const repository = createQueryRepository(postgres.db, cipher);
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "concurrent", defaultStartChapter: 1, defaultEndChapter: 3 });
-    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question: "race", questionHmac: "race-h", startChapter: 1, endChapter: 2, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "race" });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question: "race", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 2, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
     const results = await Promise.allSettled([
       repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "first", disposition: "used" }] }),
       repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 2, recallReason: "second", disposition: "excluded", exclusionReason: "race" }] }),
@@ -209,6 +250,6 @@ describe("continuous query repository", () => {
     const repository = createQueryRepository(postgres.db, cipher);
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "archive", defaultStartChapter: 1, defaultEndChapter: 3 });
     await repository.archiveSession({ sessionId: session.id, actor: owner });
-    await expect(repository.createTurn({ sessionId: session.id, actor: owner, question: "late", questionHmac: "h", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" })).rejects.toThrow("Query access denied");
+    await expect(repository.createTurn({ sessionId: session.id, actor: owner, question: "late", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE })).rejects.toThrow("Query access denied");
   });
 });
