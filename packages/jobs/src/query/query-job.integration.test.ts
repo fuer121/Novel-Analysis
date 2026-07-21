@@ -5,7 +5,7 @@ import { sql } from "kysely";
 import { createContentCipher, createIndexRepository, createLibraryRepository, createQueryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../database/src/testing/postgres.js";
 
-import { QueryIdempotencyConflictError, QueryInvalidStateError, QueryJobService, QueryScopeChangedError } from "./query-job.js";
+import { QueryAccessDeniedError, QueryIdempotencyConflictError, QueryInvalidStateError, QueryJobService, QueryScopeChangedError } from "./query-job.js";
 
 const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 11) } });
 const hmacKey = Buffer.from("query-hmac-test-key");
@@ -184,6 +184,24 @@ describe("Query job service", () => {
     const steps = await postgres.db.selectFrom("job_steps").select(["job_id", "kind", "output_ref"]).where("job_id", "=", retry.id).execute();
     expect(steps).toEqual([{ job_id: retry.id, kind: "query-summary-retry", output_ref: { turnId: created.turn.id, evidenceSnapshotHash: snapshotHash } }]);
     expect(await postgres.db.selectFrom("turn_evidence").select("id").where("turn_id", "=", created.turn.id).execute()).toEqual([]);
+  });
+
+  it("rechecks nested visibility and ownership before exact fallback replay", async () => {
+    const memberId = (await postgres.db.insertInto("users").values({ display_name: "Member", role: "member", status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+    const repository = createQueryRepository(postgres.db, cipher);
+    await repository.updateSession({ sessionId, actor: { id: ownerId, role: "member" }, visibility: "team" });
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey, recallPolicyVersion: "recall-v1" });
+    const actor = { id: memberId, role: "member" as const };
+    const input = { bookId, sessionId, actor, question: "member fallback", startChapter: 1, endChapter: 3 };
+    const preview = await service.preview(input);
+    const created = await service.createTurn({ ...input, requestId: "member-original", scopeHash: preview.scopeHash });
+    await postgres.db.updateTable("query_turns").set({ evidence_snapshot_hash: "e".repeat(64), status: "awaiting_fallback" }).where("id", "=", created.turn.id).execute();
+    const fallbackInput = { bookId, sessionId, turnId: created.turn.id, actor, requestId: "member-fallback" };
+    await service.retrySummary(fallbackInput);
+
+    await repository.updateSession({ sessionId, actor: { id: ownerId, role: "member" }, visibility: "private" });
+    await expect(service.retrySummary(fallbackInput)).rejects.toBeInstanceOf(QueryAccessDeniedError);
+    expect(await postgres.db.selectFrom("jobs").select("id").where("request_id", "=", "member-fallback").execute()).toHaveLength(1);
   });
 
   it("allows only one concurrent fallback for a turn and maps a cross-operation request collision", async () => {

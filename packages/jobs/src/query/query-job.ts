@@ -155,15 +155,15 @@ export class QueryJobService {
       if (existing) {
         const config = await transaction.selectFrom("jobs").select("config_snapshot").where("id", "=", existing.id).executeTakeFirstOrThrow();
         if (config.config_snapshot.operation !== "fallback" || config.config_snapshot.requestFingerprint !== fingerprint) throw new QueryIdempotencyConflictError();
-        return jobRowToPublic(existing);
       }
-      await sql`select pg_advisory_xact_lock(hashtext(${turnFallbackLock(input.turnId)}))`.execute(transaction);
       let turn: QueryTurnDetail;
       try { turn = await createQueryRepository(transaction, this.cipher).getTurn({ turnId: input.turnId, actor: input.actor }); }
       catch (error) { mapRepositoryError(error); }
       if (turn.sessionId !== input.sessionId || !actorCanManageTurn(turn, input.actor)) throw new QueryAccessDeniedError();
       const session = await transaction.selectFrom("query_sessions").select(["book_id", "group_id"]).where("id", "=", input.sessionId).executeTakeFirst();
       if (!session || session.book_id !== input.bookId) throw new QueryNotFoundError();
+      if (existing) return jobRowToPublic(existing);
+      await sql`select pg_advisory_xact_lock(hashtext(${turnFallbackLock(input.turnId)}))`.execute(transaction);
       if (!turn.evidenceSnapshotHash || turn.status !== "awaiting_fallback") throw new QueryInvalidStateError();
       const active = await transaction.selectFrom("jobs").select("id").where("type", "=", "query").where("status", "in", ["queued", "running", "retrying", "paused"]).where(sql<boolean>`config_snapshot ->> 'operation' = 'fallback'`).where(sql<boolean>`config_snapshot ->> 'originalTurnId' = ${turn.id}`).executeTakeFirst();
       if (active) throw new QueryInvalidStateError();
