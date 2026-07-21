@@ -40,7 +40,7 @@ describe("query session routes", () => {
 
   afterEach(async () => postgres.destroy());
 
-  const app = () => createApp({ database: postgres.db, config, feishu: new FakeFeishuOAuthAdapter(), contentCipher: cipher, queryHmacKey: Buffer.from("query-api-hmac") });
+  const app = () => createApp({ database: postgres.db, config, feishu: new FakeFeishuOAuthAdapter(), contentCipher: cipher, queryHmacKey: Buffer.alloc(32, 14) });
   const auth = (name: string) => ({ Cookie: identities[name]!.cookie });
   const write = (name: string, key: string = crypto.randomUUID()) => ({ ...auth(name), Origin: config.appOrigin, "X-CSRF-Token": identities[name]!.csrf, "Idempotency-Key": key });
 

@@ -71,7 +71,7 @@ export class QueryJobService {
     private readonly cipher: ContentCipher,
     private readonly options: { hmacKey: Buffer; recallPolicyVersion: string },
   ) {
-    if (options.hmacKey.length === 0 || !options.recallPolicyVersion) throw new QueryConfigurationError();
+    if (options.hmacKey.length !== 32 || !options.recallPolicyVersion) throw new QueryConfigurationError();
   }
 
   private async select(input: QueryPreviewInput, executor: DatabaseExecutor = this.database): Promise<Selection> {

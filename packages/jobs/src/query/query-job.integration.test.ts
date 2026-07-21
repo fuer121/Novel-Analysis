@@ -5,10 +5,10 @@ import { sql } from "kysely";
 import { createContentCipher, createIndexRepository, createLibraryRepository, createQueryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../database/src/testing/postgres.js";
 
-import { QueryAccessDeniedError, QueryIdempotencyConflictError, QueryInvalidStateError, QueryJobService, QueryScopeChangedError } from "./query-job.js";
+import { QueryAccessDeniedError, QueryConfigurationError, QueryIdempotencyConflictError, QueryInvalidStateError, QueryJobService, QueryScopeChangedError } from "./query-job.js";
 
 const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 11) } });
-const hmacKey = Buffer.from("query-hmac-test-key");
+const hmacKey = Buffer.alloc(32, 13);
 
 describe("Query job service", () => {
   let postgres: DisposablePostgres;
@@ -34,6 +34,18 @@ describe("Query job service", () => {
   });
 
   afterEach(async () => postgres.destroy());
+
+  it.each([1, 31, 33])("rejects a %i-byte HMAC key without leaking key material", (length) => {
+    const invalidKey = Buffer.alloc(length, 19);
+    const error = (() => {
+      try { return new QueryJobService(postgres.db, cipher, { hmacKey: invalidKey, recallPolicyVersion: "recall-v1" }); }
+      catch (caught) { return caught; }
+    })();
+    expect(error).toBeInstanceOf(Error);
+    expect(error).toBeInstanceOf(QueryConfigurationError);
+    expect((error as Error).message).not.toContain(invalidKey.toString("base64"));
+    expect((error as Error).message).not.toContain(invalidKey.toString("hex"));
+  });
 
   async function holdAdvisoryLock(domain: string) {
     let acquired!: () => void; let release!: () => void;

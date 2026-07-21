@@ -442,7 +442,7 @@ describe("job event stream", () => {
         FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
         CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
-        CONTENT_HMAC_KEY: Buffer.from("query-hmac-key").toString("base64"),
+        CONTENT_HMAC_KEY: Buffer.alloc(32, 8).toString("base64"),
         PORT: String(port),
       },
     });
@@ -490,7 +490,7 @@ describe("job event stream", () => {
         FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
         CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
         CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
-        CONTENT_HMAC_KEY: Buffer.from("query-hmac-key").toString("base64"),
+        CONTENT_HMAC_KEY: Buffer.alloc(32, 8).toString("base64"),
         PORT: String(port),
       },
     });
@@ -539,5 +539,43 @@ describe("job event stream", () => {
     let stderr = ""; child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
     await expect(expectExit(waitForExit(child))).resolves.toMatchObject({ code: 1 });
     expect(stderr).toContain("CONTENT_HMAC_KEY");
+  });
+
+  it.each([
+    ["1-byte", Buffer.alloc(1, 9)],
+    ["31-byte", Buffer.alloc(31, 9)],
+    ["33-byte", Buffer.alloc(33, 9)],
+    ["encryption-key-equal", Buffer.alloc(32, 7)],
+  ])("rejects a %s production HMAC key without leaking it", async (_name, hmacKey) => {
+    const port = await reservePort();
+    const child = spawn("npm", ["start", "-w", "apps/api"], {
+      cwd: process.cwd(), detached: true,
+      env: {
+        ...process.env,
+        APP_ORIGIN: "https://app.test",
+        DATABASE_URL: postgres.databaseUrl,
+        FEISHU_APP_ID: "test-app-id",
+        FEISHU_APP_SECRET: "test-app-secret",
+        FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
+        CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+        CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
+        CONTENT_HMAC_KEY: hmacKey.toString("base64"),
+        PORT: String(port),
+      },
+    });
+    const exited = waitForExit(child); let startupError: unknown; let apiPid: number | undefined;
+    try {
+      await waitForApiStart(child, `http://127.0.0.1:${port}`);
+      apiPid = await findApiProcess(child.pid!);
+    } catch (error) { startupError = error; }
+    finally {
+      killProcess(apiPid, "SIGKILL");
+      killProcess(child.pid === undefined ? undefined : -child.pid, "SIGKILL");
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+      await expectExit(exited).catch(() => undefined);
+    }
+    expect(startupError).toBeInstanceOf(Error);
+    expect((startupError as Error).message).toContain("CONTENT_HMAC_KEY");
+    expect((startupError as Error).message).not.toContain(hmacKey.toString("base64"));
   });
 });
