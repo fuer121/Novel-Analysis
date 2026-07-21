@@ -1,5 +1,5 @@
 import type { QuerySession } from "@novel-analysis/contracts";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 type Props = {
   sessions: QuerySession[];
@@ -11,11 +11,22 @@ type Props = {
 };
 
 export function QuerySessionList({ sessions, selectedId, onSelect, onCreate, drawerOpen, onClose }: Props) {
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!drawerOpen) return;
-    const close = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
+    closeRef.current?.focus();
+    const containFocus = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { onClose(); return; }
+      if (event.key !== "Tab") return;
+      const focusable = [...(drawerRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])') ?? [])];
+      const first = focusable[0]; const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", containFocus);
+    return () => document.removeEventListener("keydown", containFocus);
   }, [drawerOpen, onClose]);
 
   const contents = <>
@@ -30,8 +41,8 @@ export function QuerySessionList({ sessions, selectedId, onSelect, onCreate, dra
   return <>
     <aside className="query-session-rail" aria-label="研究会话">{contents}</aside>
     {drawerOpen ? <div className="query-drawer-backdrop" onMouseDown={onClose}>
-      <section className="query-session-drawer" role="dialog" aria-modal="true" aria-label="研究会话" onMouseDown={(event) => event.stopPropagation()}>
-        <button className="text-button drawer-close" type="button" onClick={onClose}>关闭会话列表</button>{contents}
+      <section ref={drawerRef} className="query-session-drawer" role="dialog" aria-modal="true" aria-label="研究会话" onMouseDown={(event) => event.stopPropagation()}>
+        <button ref={closeRef} className="text-button drawer-close" type="button" onClick={onClose}>关闭会话列表</button>{contents}
       </section>
     </div> : null}
   </>;

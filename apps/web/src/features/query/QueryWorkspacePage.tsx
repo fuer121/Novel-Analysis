@@ -1,6 +1,6 @@
 import type { QuerySession } from "@novel-analysis/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useOutletContext, useSearchParams } from "react-router-dom";
 
 import { apiRead } from "../../shared/api.js";
@@ -17,12 +17,14 @@ export function QueryWorkspacePage() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [evidenceOpen, setEvidenceOpen] = useState(() => !window.matchMedia?.("(max-width: 720px)").matches);
   const [creating, setCreating] = useState(false);
+  const drawerTrigger = useRef<HTMLButtonElement>(null);
   const sessions = useQuery({ queryKey: queryKeys.sessions(book.id), queryFn: () => listSessions(book.id) });
   const groups = useQuery({ queryKey: ["book", book.id, "index-groups"], queryFn: () => apiRead<{ indexGroups: IndexGroup[] }>(`/books/${book.id}/index-groups`) });
   const selectedId = params.get("session") ?? sessions.data?.sessions[0]?.id ?? null;
   const selectedSession = useQuery({ queryKey: queryKeys.session(book.id, selectedId ?? "none"), queryFn: () => readSession(book.id, selectedId!), enabled: Boolean(selectedId) });
-  const turns = useQuery({ queryKey: queryKeys.turns(book.id, selectedId ?? "none"), queryFn: () => listTurns(book.id, selectedId!), enabled: Boolean(selectedId) });
-  const selectedTurnId = params.get("turn") ?? turns.data?.turns[0]?.id ?? null;
+  const turns = useInfiniteQuery({ queryKey: queryKeys.turns(book.id, selectedId ?? "none"), queryFn: ({ pageParam }) => listTurns(book.id, selectedId!, pageParam), initialPageParam: undefined as string | undefined, getNextPageParam: (page) => page.nextCursor ?? undefined, enabled: Boolean(selectedId) });
+  const history = turns.data?.pages.flatMap((page) => page.turns) ?? [];
+  const selectedTurnId = params.get("turn") ?? history[0]?.id ?? null;
   const turn = useQuery({ queryKey: queryKeys.turn(book.id, selectedId ?? "none", selectedTurnId ?? "none"), queryFn: () => readTurn(book.id, selectedId!, selectedTurnId!), enabled: Boolean(selectedId && selectedTurnId) });
   useEffect(() => { if (!params.get("session") && selectedId) setParams({ session: selectedId }, { replace: true }); }, [params, selectedId, setParams]);
 
@@ -33,14 +35,16 @@ export function QueryWorkspacePage() {
   const preview = (value: { question: string; startChapter: number; endChapter: number }) => writeQuery<QueryPreview>(`/books/${book.id}/query-sessions/${selectedId}/turn-preview`, value);
   const submit = async (body: unknown, key: string) => { await writeQuery(`/books/${book.id}/query-sessions/${selectedId}/turns`, body, key); await invalidate(); };
   const fallback = async (turnId: string, kind: "retry-summary" | "local-summary") => { await writeQuery(`/books/${book.id}/query-sessions/${selectedId}/turns/${turnId}/${kind}`, {}); await invalidate(); };
+  const closeDrawer = useCallback(() => { drawerTrigger.current?.focus(); setDrawerOpen(false); }, []);
   const active = selectedSession.data?.session;
-  return <div className="query-workspace">
-    <div className="query-mobile-tools"><button className="secondary-button" onClick={() => setDrawerOpen(true)}>打开会话列表</button><button className="secondary-button" onClick={() => setEvidenceOpen((value) => !value)}>{evidenceOpen ? "收起证据面板" : "展开证据面板"}</button></div>
-    <QuerySessionList sessions={sessions.data?.sessions ?? []} selectedId={selectedId} onSelect={selectSession} onCreate={() => setCreating(true)} drawerOpen={drawerOpen} onClose={() => setDrawerOpen(false)} />
+  return <div className={`query-workspace ${evidenceOpen ? "evidence-open" : "evidence-closed"}`} data-testid="query-workspace">
+    <button className="text-button query-evidence-desktop-toggle" type="button" aria-label={evidenceOpen ? "收起桌面证据面板" : "展开桌面证据面板"} onClick={() => setEvidenceOpen((value) => !value)}>{evidenceOpen ? "收起证据面板" : "展开证据面板"}</button>
+    <div className="query-mobile-tools"><button ref={drawerTrigger} className="secondary-button" onClick={() => setDrawerOpen(true)}>打开会话列表</button><button className="secondary-button" onClick={() => setEvidenceOpen((value) => !value)}>{evidenceOpen ? "收起证据面板" : "展开证据面板"}</button></div>
+    <QuerySessionList sessions={sessions.data?.sessions ?? []} selectedId={selectedId} onSelect={selectSession} onCreate={() => setCreating(true)} drawerOpen={drawerOpen} onClose={closeDrawer} />
     {creating ? <form className="query-create" onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); create.mutate({ title: form.get("title"), groupId: form.get("groupId"), visibility: form.get("visibility"), defaultStartChapter: Number(form.get("start")), defaultEndChapter: Number(form.get("end")) }); }}>
       <h2>新建研究会话</h2><label>会话标题<input name="title" required /></label><label>索引组<select name="groupId" aria-label="索引组" required>{groups.data?.indexGroups.map((group) => <option key={group.id} value={group.id}>{group.name}</option>)}</select></label><label>可见范围<select name="visibility" defaultValue="private"><option value="private">仅自己</option><option value="team">团队</option></select></label><label>默认开始章节<input name="start" type="number" min="1" max={book.chapterCount || 1} defaultValue="1" required /></label><label>默认结束章节<input name="end" type="number" min="1" max={book.chapterCount || 1} defaultValue={book.chapterCount || 1} required /></label><div className="button-row"><button className="primary-button">创建会话</button><button className="text-button" type="button" onClick={() => setCreating(false)}>取消</button></div>
     </form> : null}
-    {active ? <QueryConversation session={active} turns={turns.data?.turns ?? []} selectedTurnId={selectedTurnId} detail={turn.data?.turn ?? null} onSelectTurn={selectTurn} onPreview={preview} onSubmit={submit} onFallback={fallback} /> : <p className="query-empty query-main-empty">选择或新建研究会话</p>}
-    <aside className={`query-evidence ${evidenceOpen ? "open" : ""}`} aria-label="本轮证据">{evidenceOpen ? <div role="region" aria-label="本轮证据"><QueryEvidencePanel turn={turn.data?.turn ?? null} /></div> : null}</aside>
+    {active ? <QueryConversation session={active} turns={history} selectedTurnId={selectedTurnId} detail={turn.data?.turn ?? null} onSelectTurn={selectTurn} hasOlderTurns={turns.hasNextPage} loadingOlderTurns={turns.isFetchingNextPage} onLoadOlderTurns={() => void turns.fetchNextPage()} onPreview={preview} onSubmit={submit} onFallback={fallback} /> : <p className="query-empty query-main-empty">选择或新建研究会话</p>}
+    <aside className={`query-evidence query-evidence-sheet ${evidenceOpen ? "open" : ""}`} data-testid="query-evidence-sheet" aria-label="本轮证据">{evidenceOpen ? <div role="region" aria-label="本轮证据"><QueryEvidencePanel turn={turn.data?.turn ?? null} /></div> : null}</aside>
   </div>;
 }

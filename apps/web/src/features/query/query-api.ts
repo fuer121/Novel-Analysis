@@ -23,6 +23,6 @@ export type QueryPreview = {
 
 export function listSessions(bookId: string) { return apiRead<{ sessions: QuerySession[] }>(`/books/${bookId}/query-sessions`); }
 export function readSession(bookId: string, sessionId: string) { return apiRead<{ session: QuerySession }>(`/books/${bookId}/query-sessions/${sessionId}`); }
-export function listTurns(bookId: string, sessionId: string) { return apiRead<QueryTurnHistoryPage>(`/books/${bookId}/query-sessions/${sessionId}/turns?limit=50`); }
+export function listTurns(bookId: string, sessionId: string, cursor?: string) { return apiRead<QueryTurnHistoryPage>(`/books/${bookId}/query-sessions/${sessionId}/turns?limit=50${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`); }
 export function readTurn(bookId: string, sessionId: string, turnId: string) { return apiRead<{ turn: QueryTurnDetail }>(`/books/${bookId}/query-sessions/${sessionId}/turns/${turnId}`); }
 export function writeQuery<T>(path: string, body: unknown, key?: string) { return apiWrite<T>(path, { method: "POST", body: JSON.stringify(body) }, key); }

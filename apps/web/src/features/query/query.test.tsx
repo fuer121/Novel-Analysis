@@ -15,6 +15,7 @@ const ids = {
   session: "00000000-0000-4000-8000-000000000030",
   session2: "00000000-0000-4000-8000-000000000031",
   turn: "00000000-0000-4000-8000-000000000040",
+  olderTurn: "00000000-0000-4000-8000-000000000041",
   factUsed: "00000000-0000-4000-8000-000000000050",
   factExcluded: "00000000-0000-4000-8000-000000000051",
 };
@@ -22,7 +23,7 @@ const user = { id: ids.user, displayName: "测试成员", role: "member" };
 const book = { id: ids.book, title: "山海长卷", status: "active", chapterCount: 12, createdAt: "2026-07-20T00:00:00.000Z" };
 const group = { id: ids.group, key: "people", name: "人物事实", categoryScope: "character", status: "active" };
 const session = { id: ids.session, bookId: ids.book, groupId: ids.group, createdBy: ids.user, title: "陈平安研究", visibility: "private", defaultStartChapter: 2, defaultEndChapter: 10, canManage: true, archivedAt: null };
-const trace = { kind: "single-target", target: "陈平安", aliases: [], referents: ["他"], categories: ["character"], keywords: ["选择"], sourceCounts: { candidates: 2, used: 1, excluded: 1 }, gapCount: 0, recallPolicyVersion: "query-recall-v1", summaryWorkflowVersion: "summary-v1" };
+const trace = { kind: "single-target", target: "陈平安", aliases: ["陈十一"], referents: ["他"], categories: ["人物"], keywords: ["选择"], sourceCounts: { candidates: 2, used: 1, excluded: 1 }, gapCount: 2, recallPolicyVersion: "query-recall-v1", summaryWorkflowVersion: "summary-v1" };
 const turn = { id: ids.turn, sessionId: ids.session, createdBy: ids.user, question: "他为何做出这个选择？", startChapter: 3, endChapter: 8, status: "awaiting_fallback", answer: null, degradation: "summary_unavailable", sourceStats: { candidates: 2, used: 1, excluded: 1, gaps: 0 }, trace };
 const detail = { ...turn, evidence: [
   { turnId: ids.turn, factId: ids.factUsed, chapterIndex: 5, body: "陈平安选择留下守城", rank: 1, recallReason: "目标与关键词匹配", disposition: "used", exclusionReason: null },
@@ -121,6 +122,51 @@ describe("continuous query workspace", () => {
     expect(keys[0]).not.toBe(keys[1]);
   });
 
+  it("does not expose submit when an old preview resolves after the question changes", async () => {
+    let resolvePreview!: (response: Response) => void;
+    const pendingPreview = new Promise<Response>((resolve) => { resolvePreview = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const response = baseRead(url);
+      if (response) return response;
+      if (url.endsWith("/turn-preview")) return pendingPreview;
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath();
+    const question = await screen.findByLabelText("问题");
+    await userEvent.type(question, "旧问题");
+    await userEvent.click(screen.getByRole("button", { name: "预览问题范围" }));
+    await userEvent.clear(question);
+    await userEvent.type(question, "新问题");
+    resolvePreview(json({ book: { id: ids.book, title: book.title }, group: { id: ids.group, key: group.key, name: group.name }, defaultRange: { startChapter: 2, endChapter: 10 }, effectiveRange: { startChapter: 2, endChapter: 10 }, queryableChapterCount: 8, coverageGaps: [], executionVersions: { summaryWorkflowVersion: "summary-v1", recallPolicyVersion: "query-recall-v1" }, estimatedQueuePosition: 1, scopeHash: "a".repeat(64) }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "预览问题范围" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("button", { name: "发送问题" })).toBeNull();
+    expect(screen.queryByText("“旧问题”")).toBeNull();
+  });
+
+  it("loads an older history page and restores a selected older turn", async () => {
+    const older = { ...turn, id: ids.olderTurn, question: "更早的问题", status: "completed", answer: "更早的回答" };
+    const requested: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input); requested.push(url);
+      if (url === `/api/books/${ids.book}`) return json({ book });
+      if (url === `/api/books/${ids.book}/index-groups`) return json({ indexGroups: [group] });
+      if (url === `/api/books/${ids.book}/query-sessions`) return json({ sessions: [session] });
+      if (url === `/api/books/${ids.book}/query-sessions/${ids.session}`) return json({ session });
+      if (url.endsWith("/turns?limit=50")) return json({ turns: [turn], nextCursor: "opaque-older" });
+      if (url.endsWith("/turns?limit=50&cursor=opaque-older")) return json({ turns: [older], nextCursor: null });
+      if (url.endsWith(`/turns/${ids.turn}`)) return json({ turn: detail });
+      if (url.endsWith(`/turns/${ids.olderTurn}`)) return json({ turn: { ...older, evidence: [] } });
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath(`/books/${ids.book}/query?session=${ids.session}&turn=${ids.olderTurn}`);
+    await userEvent.click(await screen.findByRole("button", { name: "加载更早" }));
+    expect(await screen.findByText("更早的问题")).toBeTruthy();
+    await userEvent.click(screen.getByText("更早的问题").closest("button")!);
+    expect(await screen.findByText("更早的回答")).toBeTruthy();
+    expect(requested.some((url) => url.endsWith("cursor=opaque-older"))).toBe(true);
+  });
+
   it("renders selected evidence and trace, exposes fallback actions and invalidates query keys on SSE", async () => {
     let historyCalls = 0;
     let detailCalls = 0;
@@ -142,6 +188,10 @@ describe("continuous query workspace", () => {
     expect(screen.getByText(/目标不匹配/)).toBeTruthy();
     await userEvent.click(screen.getByRole("tab", { name: "执行 Trace" }));
     expect(screen.getByText("query-recall-v1")).toBeTruthy();
+    expect(screen.getByText("陈十一")).toBeTruthy();
+    expect(screen.getByText("他")).toBeTruthy();
+    expect(screen.getByText("人物")).toBeTruthy();
+    expect(screen.getByText("2", { selector: "dd" })).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "重试 Dify 汇总" }));
     await userEvent.click(screen.getByRole("button", { name: "生成本地事实摘要" }));
     expect(fallbacks).toHaveLength(2);
@@ -152,6 +202,7 @@ describe("continuous query workspace", () => {
   });
 
   it("uses an accessible session drawer and bottom evidence panel on the compact workspace", async () => {
+    vi.stubGlobal("matchMedia", vi.fn(() => ({ matches: true })));
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
       const response = baseRead(String(input));
       if (response) return response;
@@ -162,15 +213,49 @@ describe("continuous query workspace", () => {
     const drawerButton = screen.getByRole("button", { name: "打开会话列表" });
     await userEvent.click(drawerButton);
     const drawer = screen.getByRole("dialog", { name: "研究会话" });
-    expect(within(drawer).getByRole("button", { name: "关闭会话列表" })).toBeTruthy();
+    const closeDrawer = within(drawer).getByRole("button", { name: "关闭会话列表" });
+    expect(document.activeElement).toBe(closeDrawer);
+    await userEvent.tab({ shift: true });
+    expect(document.activeElement).toBe(within(drawer).getAllByRole("button").at(-1));
+    await userEvent.tab();
+    expect(document.activeElement).toBe(closeDrawer);
     await userEvent.keyboard("{Escape}");
     expect(screen.queryByRole("dialog", { name: "研究会话" })).toBeNull();
-    await userEvent.click(screen.getByRole("button", { name: "收起证据面板" }));
+    expect(document.activeElement).toBe(drawerButton);
+    const workspace = screen.getByTestId("query-workspace");
+    expect(workspace.className).toContain("evidence-closed");
+    expect(screen.getByTestId("query-composer")).toBeTruthy();
     const evidenceButton = screen.getByRole("button", { name: "展开证据面板" });
     await userEvent.click(evidenceButton);
+    expect(workspace.className).toContain("evidence-open");
     expect(screen.getByRole("region", { name: "本轮证据" })).toBeTruthy();
+    expect(screen.getByTestId("query-evidence-sheet").className).toContain("query-evidence-sheet");
     expect(screen.getByLabelText("问题")).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: "收起证据面板" }));
     expect(screen.queryByRole("region", { name: "本轮证据" })).toBeNull();
+  });
+
+  it("collapses desktop evidence and provides linked keyboard-operable tabs", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const response = baseRead(String(input));
+      if (response) return response;
+      throw new Error(`unexpected ${String(input)}`);
+    }));
+    renderPath();
+    await screen.findByText("陈平安选择留下守城");
+    const used = screen.getByRole("tab", { name: "采用证据" });
+    const candidates = screen.getByRole("tab", { name: "候选召回" });
+    expect(used.tabIndex).toBe(0);
+    expect(candidates.tabIndex).toBe(-1);
+    expect(used.getAttribute("aria-controls")).toBe(screen.getByRole("tabpanel").id);
+    used.focus();
+    await userEvent.keyboard("{ArrowRight}");
+    expect(document.activeElement).toBe(candidates);
+    expect(candidates.getAttribute("aria-selected")).toBe("true");
+    await userEvent.keyboard("{ArrowLeft}");
+    expect(document.activeElement).toBe(used);
+    await userEvent.click(screen.getByRole("button", { name: "收起桌面证据面板" }));
+    expect(screen.queryByRole("region", { name: "本轮证据" })).toBeNull();
+    expect(screen.getByRole("button", { name: "展开桌面证据面板" })).toBeTruthy();
   });
 });
