@@ -11,6 +11,8 @@ import { createJobsRouter } from "./routes/jobs.js";
 import { createBooksRouter } from "./routes/books.js";
 import { createIndexGroupsRouter } from "./routes/index-groups.js";
 import { createQuerySessionsRouter } from "./routes/query-sessions.js";
+import { createAdvancedAnalysisRouter } from "./routes/advanced-analysis.js";
+import { createAdminAnalysisJobsRouter } from "./routes/admin-analysis-jobs.js";
 
 export interface CreateAppOptions {
   database: DatabaseConnection;
@@ -30,11 +32,13 @@ export function createApp(options: CreateAppOptions): Express {
   app.use(express.json({ limit: "16kb", strict: true }));
   app.use("/api/auth", createAuthRouter({ ...options, logger }));
   app.use("/api/admin/members", createAdminMembersRouter(options.database, options.config));
+  app.use("/api/admin/advanced-analysis", createAdminAnalysisJobsRouter(options.database, options.config));
   app.use("/api/job-events", createJobEventsRouter(options.database, options.config));
   app.use("/api/jobs", createJobsRouter(options.database, options.config));
   app.use("/api/books", createBooksRouter(options.database, options.config));
   app.use("/api/books", createIndexGroupsRouter(options.database, options.config, options.contentCipher));
   if (options.contentCipher && options.queryHmacKey) app.use("/api/books", createQuerySessionsRouter(options.database, options.config, options.contentCipher, options.queryHmacKey));
+  if (options.contentCipher) app.use("/api/books", createAdvancedAnalysisRouter(options.database, options.config, options.contentCipher));
   app.use((_request, response) => response.status(404).json({ error: "not_found" }));
 
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
