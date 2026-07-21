@@ -266,6 +266,47 @@ describe("worker runtime", () => {
     },
   );
 
+  it("rolls back the background consumer when interactive registration fails", async () => {
+    const startupFailure = new Error("interactive work failed");
+    const calls: string[] = [];
+    let workCalls = 0;
+    let bossStopped = false;
+    const boss = fakeBoss({
+      async start() { calls.push("start"); },
+      async createQueue(name) { calls.push(`createQueue:${name}`); },
+      async work(name) {
+        workCalls += 1;
+        calls.push(`work:${name}`);
+        if (workCalls === 2) throw startupFailure;
+        return "work-id";
+      },
+      async offWork(name) {
+        calls.push(`offWork:${name}`);
+        if (bossStopped) throw new Error("offWork called after boss stopped");
+      },
+      async stop() {
+        calls.push("boss.stop");
+        bossStopped = true;
+      },
+    });
+    const worker = new JobWorker({ database: postgres.db, workerId: "partial-registration-worker", boss });
+
+    await expect(worker.start()).rejects.toBe(startupFailure);
+    expect(calls).toEqual([
+      "start",
+      "createQueue:jobs.wake",
+      "createQueue:jobs.query.wake",
+      "work:jobs.wake",
+      "work:jobs.query.wake",
+      "offWork:jobs.wake",
+      "boss.stop",
+    ]);
+
+    await worker.stop();
+    await worker.stop();
+    expect(calls).toHaveLength(7);
+  });
+
   it("stops a partially initialized boss when start rejects", async () => {
     const startupFailure = new Error("boss start failed after partial initialization");
     const calls: string[] = [];

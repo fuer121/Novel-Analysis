@@ -203,6 +203,15 @@ export class JobWorker {
     } catch (startupError) {
       this.stopAtBoundary();
       const errors = [startupError];
+      for (const queue of [...this.registeredConsumers]) {
+        try {
+          await boss.offWork(queue, { wait: true });
+        } catch (cleanupError) {
+          errors.push(cleanupError);
+        } finally {
+          this.registeredConsumers.delete(queue);
+        }
+      }
       try {
         await boss.stop({ graceful: true, timeout: 30_000 });
       } catch (cleanupError) {
