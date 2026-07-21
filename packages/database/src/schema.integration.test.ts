@@ -120,6 +120,9 @@ const REQUIRED_INDEXES = [
   "job_steps_claim_idx",
   "job_outbox_pending_idx",
   "jobs_active_concurrency_unique",
+  "query_sessions_book_owner_updated_idx",
+  "query_turns_session_created_idx",
+  "turn_evidence_turn_disposition_rank_idx",
 ] as const;
 
 async function tableExists(database: DisposablePostgres["db"], table: string) {
@@ -248,6 +251,14 @@ describe("phase 1 PostgreSQL schema", () => {
   });
 
   test("migrates down in foreign-key reverse order and back up from empty", async () => {
+    expect(await tableExists(postgres.db, "query_sessions")).toBe(true);
+    expect(await tableExists(postgres.db, "query_turns")).toBe(true);
+    expect(await tableExists(postgres.db, "turn_evidence")).toBe(true);
+    await migrateDown(postgres.db);
+    expect(await tableExists(postgres.db, "query_sessions")).toBe(false);
+    expect(await tableExists(postgres.db, "query_turns")).toBe(false);
+    expect(await tableExists(postgres.db, "turn_evidence")).toBe(false);
+
     await migrateDown(postgres.db);
     expect(await tableExists(postgres.db, "books")).toBe(true);
     expect(await columnExists(postgres.db, "index_groups", "category_scope")).toBe(false);
@@ -276,6 +287,14 @@ describe("phase 1 PostgreSQL schema", () => {
     expect(await tableExists(postgres.db, "books")).toBe(true);
     expect(await columnExists(postgres.db, "prompt_versions", "content")).toBe(true);
     expect(await columnExists(postgres.db, "index_groups", "category_scope")).toBe(true);
+    expect(await tableExists(postgres.db, "query_sessions")).toBe(true);
+    expect(await tableExists(postgres.db, "query_turns")).toBe(true);
+    expect(await tableExists(postgres.db, "turn_evidence")).toBe(true);
+  });
+
+  test("extends workflow versions to the approved analysis summary target", async () => {
+    await expect(postgres.db.insertInto("workflow_versions").values({ target: "analysis-summary" as never, contract_version: "v1", dsl_hash: "query-hash" }).execute()).resolves.toBeDefined();
+    await expect(sql`insert into workflow_versions (target, contract_version, dsl_hash) values ('unapproved', 'v1', 'bad')`.execute(postgres.db)).rejects.toMatchObject({ constraint: "workflow_versions_target_check" });
   });
 
   test("enforces named role, user status, and shared job status checks", async () => {

@@ -143,12 +143,17 @@ interface BooksTable { id: Generated<string>; title: string; status: "active" | 
 interface BookSourcesTable { id: Generated<string>; book_id: string; provider: string; source_id: string; start_chapter: number; end_chapter: number; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
 interface ChaptersTable { id: Generated<string>; book_id: string; chapter_index: number; title: string; content_hmac: string; content_ciphertext: Buffer; content_nonce: Buffer; content_tag: Buffer; content_key_version: string; source_version: string; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
 interface PromptVersionsTable { id: Generated<string>; target: "l1-index" | "l2-index"; version: string; content: Generated<string>; content_hash: string; created_at: GeneratedTimestamp }
-interface WorkflowVersionsTable { id: Generated<string>; target: "chapter-import" | "l1-index" | "l2-index"; contract_version: string; dsl_hash: string; enabled: Generated<boolean>; created_at: GeneratedTimestamp }
+interface WorkflowVersionsTable { id: Generated<string>; target: "chapter-import" | "l1-index" | "l2-index" | "analysis-summary"; contract_version: string; dsl_hash: string; enabled: Generated<boolean>; created_at: GeneratedTimestamp }
 interface IndexGroupsTable { id: Generated<string>; book_id: string; key: string; name: string; category_scope: Generated<IndexGroupCategoryScope>; prompt_version_id: string; config_hash: string; status: Generated<"active" | "archived">; created_at: GeneratedTimestamp }
 interface L1IndexesTable { id: Generated<string>; chapter_id: string; prompt_version_id: string; workflow_version_id: string; input_signature: string; status: "fresh" | "failed" | "stale"; is_current: Generated<boolean>; route: Json; created_at: GeneratedTimestamp }
 interface L2ChapterStatusesTable { id: Generated<string>; group_id: string; chapter_id: string; book_id: string; input_signature: string; status: "fresh" | "failed" | "stale"; failure_code: string | null; updated_at: GeneratedTimestamp }
 interface L2FactsTable { id: Generated<string>; group_id: string; chapter_id: string; book_id: string; subject_key: string; fact_type: string; fact_ciphertext: Buffer; fact_nonce: Buffer; fact_tag: Buffer; fact_key_version: string; metadata: FactMetadataJson; created_at: GeneratedTimestamp }
 interface L2SubjectsTable { id: Generated<string>; group_id: string; subject_key: string; display_name: string; aliases: Json; created_at: GeneratedTimestamp }
+export type QueryVisibility = "private" | "team";
+export type QueryTurnStatus = "queued" | "running" | "awaiting_fallback" | "completed" | "degraded" | "failed" | "cancelled";
+interface QuerySessionsTable { id: Generated<string>; book_id: string; group_id: string; created_by: string; visibility: Generated<QueryVisibility>; default_start_chapter: number; default_end_chapter: number; title_ciphertext: Buffer; title_nonce: Buffer; title_tag: Buffer; title_key_version: string; archived_at: Timestamp | null; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp }
+interface QueryTurnsTable { id: Generated<string>; session_id: string; created_by: string; question_ciphertext: Buffer; question_nonce: Buffer; question_tag: Buffer; question_key_version: string; question_hmac: string; answer_ciphertext: Buffer | null; answer_nonce: Buffer | null; answer_tag: Buffer | null; answer_key_version: string | null; start_chapter: number; end_chapter: number; intent_snapshot: Json; source_snapshot: Json; gap_snapshot: Json; config_snapshot: Json; execution_signature: string; evidence_snapshot_hash: string | null; status: Generated<QueryTurnStatus>; job_id: string | null; attempt_id: string | null; degradation: string | null; created_at: GeneratedTimestamp; updated_at: GeneratedTimestamp; completed_at: Timestamp | null }
+interface TurnEvidenceTable { id: Generated<string>; turn_id: string; fact_id: string; rank: number; recall_reason: string; disposition: "used" | "excluded"; exclusion_reason: string | null; created_at: GeneratedTimestamp }
 
 export interface Database {
   users: UsersTable;
@@ -171,6 +176,9 @@ export interface Database {
   l2_chapter_statuses: L2ChapterStatusesTable;
   l2_facts: L2FactsTable;
   l2_subjects: L2SubjectsTable;
+  query_sessions: QuerySessionsTable;
+  query_turns: QueryTurnsTable;
+  turn_evidence: TurnEvidenceTable;
 }
 
 export type DatabaseConnection = Kysely<Database>;
