@@ -76,8 +76,9 @@ export class QueryExecutor {
 
     let frozen = detail;
     if (claim.kind === "l2-query" && !detail.evidenceSnapshotHash) {
-      frozen = await this.recallAndFreeze(claim, detail, actor, context.config);
-      if (frozen.status === "completed") return { disposition: "completed" };
+      const recalled = await this.recallAndFreeze(claim, detail, actor, context.config);
+      if ("disposition" in recalled) return recalled;
+      frozen = recalled.detail;
     } else {
       const expectedHash = context.evidenceSnapshotHash ?? detail.evidenceSnapshotHash;
       if (!expectedHash || detail.evidenceSnapshotHash !== expectedHash || (claim.kind !== "l2-query" && detail.status !== "awaiting_fallback")) return { disposition: "terminal-noop" };
@@ -126,7 +127,7 @@ export class QueryExecutor {
     return { id: row.created_by, role: "member" };
   }
 
-  private async recallAndFreeze(claim: ClaimedStep, detail: QueryTurnDetail, actor: QueryActor, config: Record<string, unknown>): Promise<QueryTurnDetail> {
+  private async recallAndFreeze(claim: ClaimedStep, detail: QueryTurnDetail, actor: QueryActor, config: Record<string, unknown>): Promise<{ detail: QueryTurnDetail } | { disposition: CompletionDisposition }> {
     const session = await this.options.database.selectFrom("query_sessions").select("group_id").where("id", "=", detail.sessionId).executeTakeFirstOrThrow();
     const repository = createIndexRepository(this.options.database, this.options.cipher);
     const knownSubjects = await repository.listVerifiedSubjects(session.group_id);
@@ -159,8 +160,8 @@ export class QueryExecutor {
       await createQueryRepository(transaction, this.options.cipher).commitEvidence({ turnId: detail.id, actor, evidence: recall.candidates.map((candidate) => ({ factId: candidate.id, rank: candidate.rank, recallReason: candidate.recallReason, disposition: candidate.disposition, ...(candidate.exclusionReason ? { exclusionReason: candidate.exclusionReason } : {}) })) });
       return null;
     });
-    if (disposition) return { ...detail, status: "completed" };
-    return createQueryRepository(this.options.database, this.options.cipher).getTurn({ turnId: detail.id, actor });
+    if (disposition) return { disposition };
+    return { detail: await createQueryRepository(this.options.database, this.options.cipher).getTurn({ turnId: detail.id, actor }) };
   }
 
   private async adoptAttempt(claim: ClaimedStep, detail: QueryTurnDetail, evidenceSnapshotHash: string): Promise<CompletionDisposition | null> {

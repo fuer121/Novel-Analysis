@@ -12,13 +12,23 @@ import {
   createDisposablePostgres,
   type DisposablePostgres,
 } from "../../../packages/database/src/testing/postgres.js";
-import { DifyAdapterError, FakeDifyAdapter } from "@novel-analysis/dify";
-import { PostgresStepLeaseService, QueryJobService } from "@novel-analysis/jobs";
+import { DifyAdapterError, FakeDifyAdapter, type DifyAdapter } from "@novel-analysis/dify";
+import { JobRepository, PostgresStepLeaseService, QueryJobService, type StepExecutor } from "@novel-analysis/jobs";
 
 import { QueryExecutor } from "./query-executor.js";
+import { JobWorker, type WorkerBoss } from "./worker.js";
 
 const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 21) } });
 const actor = { id: "", role: "member" as const };
+
+function successfulSummary(calls: string[]): DifyAdapter {
+  return {
+    async runAnalysisSummary(input) { calls.push(input.invocationKey); return { text: "QUEUE_ANSWER" }; },
+    async runChapterImport() { throw new Error("unexpected target"); },
+    async runL1Index() { throw new Error("unexpected target"); },
+    async runL2Index() { throw new Error("unexpected target"); },
+  };
+}
 
 describe("Query executor", () => {
   let postgres: DisposablePostgres;
@@ -60,6 +70,13 @@ describe("Query executor", () => {
     return { ...created, claim: claim! };
   }
 
+  async function createQueuedTurn(question: string, requestId: string) {
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey: Buffer.alloc(32, 22), recallPolicyVersion: "recall-v1" });
+    const input = { bookId, sessionId, actor, question, startChapter: 1, endChapter: 3 };
+    const preview = await service.preview(input);
+    return service.createTurn({ ...input, requestId, scopeHash: preview.scopeHash });
+  }
+
   it("commits all evidence and one encrypted answer once", async () => {
     const { turn, claim } = await createClaim("陈平安后来发生了什么");
     const dify = new FakeDifyAdapter([{ target: "analysis-summary", invocationKey: `${turn.id}:${claim.attemptId}`, output: { text: "SENTINEL_ANSWER" } }]);
@@ -74,6 +91,14 @@ describe("Query executor", () => {
     expect(detail.evidence.filter((item) => item.disposition === "used")).not.toHaveLength(0);
     expect(await postgres.db.selectFrom("query_turns").select("id").where("answer_ciphertext", "is not", null).execute()).toHaveLength(1);
     expect(dify.calls).toHaveLength(1);
+  });
+
+  it("propagates the real claim disposition when recall loses authority", async () => {
+    const { claim } = await createClaim("陈平安后来发生了什么");
+    await postgres.db.updateTable("jobs").set({ status: "completed" }).where("id", "=", claim.jobId).execute();
+    const executor = new QueryExecutor({ database: postgres.db, cipher, dify: new FakeDifyAdapter([]) });
+
+    await expect(executor.execute(claim)).resolves.toEqual({ disposition: "terminal-noop" });
   });
 
   it("completes with explicit no evidence without calling Dify", async () => {
@@ -141,6 +166,86 @@ describe("Query executor", () => {
     expect(completed.answer).toContain("SENTINEL_FACT_1");
     expect(completed.evidenceSnapshotHash).toBe(originalDetail.evidenceSnapshotHash);
     expect(await postgres.db.selectFrom("turn_evidence").select("id").where("turn_id", "=", original.turn.id).execute()).toHaveLength(2);
+  });
+
+  it("retries Dify with the exact original evidence snapshot version", async () => {
+    const original = await createClaim("陈平安后来发生了什么");
+    await new QueryExecutor({ database: postgres.db, cipher, dify: new FakeDifyAdapter([{ target: "analysis-summary", invocationKey: `${original.turn.id}:${original.claim.attemptId}`, error: new DifyAdapterError("provider_timeout") }]) }).execute(original.claim);
+    const originalDetail = await createQueryRepository(postgres.db, cipher).getTurn({ turnId: original.turn.id, actor });
+    const service = new QueryJobService(postgres.db, cipher, { hmacKey: Buffer.alloc(32, 22), recallPolicyVersion: "recall-v1" });
+    const fallback = await service.retrySummary({ bookId, sessionId, turnId: original.turn.id, actor, requestId: "provider-retry" });
+    const fallbackClaim = (await new PostgresStepLeaseService({ database: postgres.db }).claimNext(fallback.id, "worker-b", new Date()))!;
+    const dify = new FakeDifyAdapter([{ target: "analysis-summary", invocationKey: `${original.turn.id}:${fallbackClaim.attemptId}`, output: { text: "RETRIED_ANSWER" } }]);
+
+    await expect(new QueryExecutor({ database: postgres.db, cipher, dify }).execute(fallbackClaim)).resolves.toEqual({ disposition: "completed" });
+
+    const completed = await createQueryRepository(postgres.db, cipher).getTurn({ turnId: original.turn.id, actor });
+    expect(completed.answer).toBe("RETRIED_ANSWER");
+    expect(completed.evidenceSnapshotHash).toBe(originalDetail.evidenceSnapshotHash);
+    expect(fallbackClaim.kind).toBe("query-summary-retry");
+    expect(await postgres.db.selectFrom("turn_evidence").select("id").where("turn_id", "=", original.turn.id).execute()).toHaveLength(2);
+  });
+
+  it("completes an interactive Query while the background handler is occupied", async () => {
+    const backgroundJob = await new JobRepository(postgres.db).createExample({ requestedBy: ownerId, requestId: "blocked-background" });
+    const query = await createQueuedTurn("陈平安后来发生了什么", "interactive-while-blocked");
+    const handlers = new Map<string, (jobs: Array<{ data: { jobId: string; outboxId: string } }>) => Promise<unknown>>();
+    const boss: WorkerBoss = {
+      async start() {}, async stop() {}, async createQueue() {}, async offWork() {}, async send() { return "id"; },
+      async work(name, _options, handler) { handlers.set(name, handler as never); return "id"; },
+    };
+    let backgroundStarted!: () => void;
+    const started = new Promise<void>((resolve) => { backgroundStarted = resolve; });
+    let releaseBackground!: () => void;
+    const backgroundGate = new Promise<void>((resolve) => { releaseBackground = resolve; });
+    const queryExecutor = new QueryExecutor({ database: postgres.db, cipher, dify: successfulSummary([]) });
+    const executor: StepExecutor = {
+      async execute(claim) {
+        if (claim.jobId === backgroundJob.id) { backgroundStarted(); await backgroundGate; return { completed: true }; }
+        return queryExecutor.execute(claim);
+      },
+    };
+    const worker = new JobWorker({ database: postgres.db, workerId: "dual-queue-worker", boss, executor, pollIntervalMs: 60_000 });
+    try {
+      await worker.start();
+      const background = handlers.get("jobs.wake")!([{ data: { jobId: backgroundJob.id, outboxId: "background-outbox" } }]);
+      await started;
+      await handlers.get("jobs.query.wake")!([{ data: { jobId: query.job.id, outboxId: "query-outbox" } }]);
+      expect((await createQueryRepository(postgres.db, cipher).getTurn({ turnId: query.turn.id, actor })).status).toBe("completed");
+      expect((await postgres.db.selectFrom("jobs").select("status").where("id", "=", backgroundJob.id).executeTakeFirstOrThrow()).status).toBe("running");
+      releaseBackground();
+      await background;
+    } finally {
+      releaseBackground?.();
+      await worker.stop();
+    }
+  });
+
+  it("deduplicates a Query wake and an exact outbox replay", async () => {
+    const query = await createQueuedTurn("陈平安后来发生了什么", "exact-query-replay");
+    const outbox = await postgres.db.selectFrom("job_outbox").select("id").where("job_id", "=", query.job.id).executeTakeFirstOrThrow();
+    let interactive!: (jobs: Array<{ data: { jobId: string; outboxId: string } }>) => Promise<unknown>;
+    const boss: WorkerBoss = {
+      async start() {}, async stop() {}, async createQueue() {}, async offWork() {}, async send() { return "id"; },
+      async work(name, _options, handler) { if (name === "jobs.query.wake") interactive = handler as never; return "id"; },
+    };
+    const summaryCalls: string[] = [];
+    const worker = new JobWorker({ database: postgres.db, workerId: "replay-worker", boss, executor: new QueryExecutor({ database: postgres.db, cipher, dify: successfulSummary(summaryCalls) }), pollIntervalMs: 60_000 });
+    try {
+      await worker.start();
+      const exactPayload = { jobId: query.job.id, outboxId: outbox.id };
+      await interactive([{ data: exactPayload }]);
+      await interactive([{ data: exactPayload }]);
+      await interactive([{ data: { ...exactPayload, outboxId: "duplicate-wake" } }]);
+
+      expect(await postgres.db.selectFrom("turn_evidence").select("id").where("turn_id", "=", query.turn.id).execute()).toHaveLength(2);
+      expect(await postgres.db.selectFrom("query_turns").select("id").where("id", "=", query.turn.id).where("answer_ciphertext", "is not", null).execute()).toHaveLength(1);
+      expect(await postgres.db.selectFrom("job_attempts").select("id").where("step_id", "in", postgres.db.selectFrom("job_steps").select("id").where("job_id", "=", query.job.id)).execute()).toHaveLength(1);
+      expect(await postgres.db.selectFrom("job_events").select("id").where("job_id", "=", query.job.id).where("type", "=", "completed").execute()).toHaveLength(1);
+      expect(summaryCalls).toHaveLength(1);
+    } finally {
+      await worker.stop();
+    }
   });
 
   it("lets Worker B recover an expired Dify lease and rejects Worker A's late answer", async () => {
