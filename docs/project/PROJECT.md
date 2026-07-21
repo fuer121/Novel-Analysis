@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 4b4cc227e9540f5a0764ae476c54a2090aa54a24
 baseline_status: current
-updated_at: 2026-07-21T08:16:52+08:00
+updated_at: 2026-07-21T08:49:56+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-PLAN-APPROVED
+last_checkpoint: CP-20260721-PHASE3-TASK1-STARTED
 next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK1 | phase-3 | Query and analysis-summary contracts | controller-agent | main | 54dead6296d22275547cb77181e9f97cd644593e | none | ready | CP-20260721-PHASE3-PLAN-APPROVED | none | create Task 1 started contract from the Gate merge SHA |
+| PHASE3-TASK1 | phase-3 | Query and analysis-summary contracts | implementation-agent | codex/phase3-task1-query-contracts | 9e044ab5f4bc25212b159587440a1cd2fe2a664a | none | in_progress | CP-20260721-PHASE3-PLAN-APPROVED | CP-20260721-PHASE3-TASK1-STARTED | implement with TDD from the started-contract merge SHA |
 
 ## Phase Ledgers
 
@@ -81,7 +81,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，PHASE3-TASK1 可在 Gate 治理记录合并后启动
+无，PHASE3-TASK1 Started Contract 合并后可按已批准范围实施
 
 ## Next Gate
 
@@ -89,6 +89,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 1 started](checkpoints/CP-20260721-PHASE3-TASK1-STARTED.md)
 - [Phase 3 plan approved](checkpoints/CP-20260721-PHASE3-PLAN-APPROVED.md)
 - [Phase 3 plan submitted](checkpoints/CP-20260721-PHASE3-PLAN-SUBMITTED.md)
 - [Phase 3 design accepted](checkpoints/CP-20260721-PHASE3-DESIGN-ACCEPTED.md)
