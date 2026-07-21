@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 0c8790a08e93d2d9dc4c0b339aa81d48b40dc9f0
 baseline_status: current
-updated_at: 2026-07-21T10:48:44+08:00
+updated_at: 2026-07-21T10:57:27+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
 last_checkpoint: CP-20260721-PHASE3-TASK2-MERGED
@@ -34,13 +34,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementing | Task 1 merged，Task 2 Started Contract 已接受 |
+| Phase 3 | implementing | Task 1-2 merged，Task 3 Started Contract 已接受 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK3 | phase-3 | Query intent and deterministic recall policies | controller-agent | main | 0c8790a08e93d2d9dc4c0b339aa81d48b40dc9f0 | none | ready | CP-20260721-PHASE3-TASK2-MERGED | none | create Task 3 Started Contract from the Task 2 merged-checkpoint SHA |
+| PHASE3-TASK3 | phase-3 | Query intent and deterministic recall policies | implementation-agent | codex/phase3-task3-recall-policy | 08ff7c6e101cea4b1ce205f889b3703a5e665ee8 | none | in_progress | CP-20260721-PHASE3-TASK2-MERGED | CP-20260721-PHASE3-TASK3-STARTED | merge Started Contract, then implement with TDD from its merge SHA |
 
 ## Phase Ledgers
 
@@ -81,7 +81,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，PHASE3-TASK3 可按批准计划创建 Started Contract
+无，PHASE3-TASK3 Started Contract 已接受，可在其合并后按批准计划实施
 
 ## Next Gate
 
@@ -89,6 +89,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 3 started](checkpoints/CP-20260721-PHASE3-TASK3-STARTED.md)
 - [Phase 3 Task 2 merged](checkpoints/CP-20260721-PHASE3-TASK2-MERGED.md)
 - [Phase 3 Task 2 accepted](checkpoints/CP-20260721-PHASE3-TASK2-ACCEPTED.md)
 - [Phase 3 Task 2 started](checkpoints/CP-20260721-PHASE3-TASK2-STARTED.md)
