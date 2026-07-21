@@ -65,10 +65,10 @@ describe("continuous query repository", () => {
     const answer = "query-answer-plaintext-sentinel";
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title, defaultStartChapter: 1, defaultEndChapter: 3 });
     expect(session).toMatchObject({ title, visibility: "private", createdBy: owner.id });
-    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: createHash("sha256").update(question).digest("hex"), startChapter: 1, endChapter: 2, intentSnapshot: { queryType: "single" }, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: createHash("sha256").update(question).digest("hex"), startChapter: 1, endChapter: 2, intentSnapshot: { kind: "single-target", target: "hero", aliases: [], referents: [], categories: [], keywords: [] }, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
     await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "subject", disposition: "used" }] });
     const snapshotHash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
-    const completed = await repository.completeTurn({ turnId: turn.id, actor: owner, answer, status: "completed", evidenceSnapshotHash: snapshotHash, sourceSnapshot: { used: 1 }, gapSnapshot: {}, degradation: null });
+    const completed = await repository.completeTurn({ turnId: turn.id, actor: owner, answer, status: "completed", evidenceSnapshotHash: snapshotHash, sourceSnapshot: { candidates: 1, used: 1, excluded: 0, gaps: 0 }, gapSnapshot: {}, degradation: null });
     expect(completed.answer).toBe(answer);
     const detail = await repository.getTurn({ turnId: turn.id, actor: owner });
     expect(detail).toMatchObject({ question, answer, evidence: [{ factId, body: "fact-secret" }] });
@@ -93,6 +93,45 @@ describe("continuous query repository", () => {
     expect(rejected).toMatchObject({ message: "Invalid query turn" });
     expect(String(rejected)).not.toContain(snapshotSentinel);
     expect(JSON.stringify(await postgres.db.selectFrom("query_turns").select(["intent_snapshot", "source_snapshot", "gap_snapshot", "config_snapshot"]).where("session_id", "=", session.id).execute())).not.toContain(snapshotSentinel);
+  });
+
+  test("rejects sensitive content hidden under arbitrary snapshot keys", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const title = "hidden-title-plaintext-sentinel";
+    const question = "hidden-question-plaintext-sentinel";
+    const answer = "hidden-answer-plaintext-sentinel";
+    const factBody = "fact-secret";
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title, defaultStartChapter: 1, defaultEndChapter: 3 });
+    for (const snapshot of [
+      { configSnapshot: { note: title } },
+      { configSnapshot: { payload: question } },
+      { intentSnapshot: { label: answer } },
+      { configSnapshot: { marker: factBody } },
+      { intentSnapshot: { kind: "single-target", target: title, aliases: [], referents: [], categories: [], keywords: [] } },
+      { intentSnapshot: { kind: "single-target", target: question, aliases: [], referents: [], categories: [], keywords: [] } },
+      { configSnapshot: { recallPolicyVersion: title } },
+      { configSnapshot: { summaryWorkflowVersion: question } },
+    ]) {
+      const rejected = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: "hidden-hmac", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig", ...snapshot }).catch((error: unknown) => error);
+      expect(rejected).toMatchObject({ message: "Invalid query turn" });
+      expect(String(rejected)).not.toContain(title);
+      expect(String(rejected)).not.toContain(question);
+      expect(String(rejected)).not.toContain(answer);
+      expect(String(rejected)).not.toContain(factBody);
+    }
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: "hidden-hmac", startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
+    await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "match", disposition: "used" }] });
+    const snapshotHash = (await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash!;
+    for (const gapSnapshot of [{ note: answer }, { payload: question }, { label: title }, { marker: factBody }]) {
+      const rejected = await repository.completeTurn({ turnId: turn.id, actor: owner, answer, status: "completed", evidenceSnapshotHash: snapshotHash, sourceSnapshot: { candidates: 1, used: 1, excluded: 0, gaps: 0 }, gapSnapshot, degradation: null }).catch((error: unknown) => error);
+      expect(rejected).toMatchObject({ message: "Invalid query turn" });
+      expect(String(rejected)).not.toContain(answer);
+    }
+    const rows = await postgres.db.selectFrom("query_turns").select(["intent_snapshot", "source_snapshot", "gap_snapshot", "config_snapshot"]).where("session_id", "=", session.id).execute();
+    expect(JSON.stringify(rows)).not.toContain(title);
+    expect(JSON.stringify(rows)).not.toContain(question);
+    expect(JSON.stringify(rows)).not.toContain(answer);
+    expect(JSON.stringify(rows)).not.toContain(factBody);
   });
 
   test("authorizes private and team sessions before returning decrypted content", async () => {
@@ -142,12 +181,28 @@ describe("continuous query repository", () => {
     const makeTurn = (question: string) => repository.createTurn({ sessionId: session.id, actor: owner, question, questionHmac: "h", startChapter: 1, endChapter: 2, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "sig" });
     const turn = await makeTurn("once");
     await repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "match", disposition: "used" }] });
+    await expect(postgres.db.insertInto("turn_evidence").values({ turn_id: turn.id, fact_id: factId, rank: 2, recall_reason: "late", disposition: "excluded", exclusion_reason: "late" }).execute()).rejects.toThrow("turn evidence snapshot already committed");
     await expect(repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "again", disposition: "used" }] })).rejects.toThrow("Evidence snapshot already committed");
     await expect(postgres.db.updateTable("turn_evidence").set({ rank: 2 }).where("turn_id", "=", turn.id).execute()).rejects.toThrow("turn evidence is immutable");
     await expect(postgres.db.deleteFrom("turn_evidence").where("turn_id", "=", turn.id).execute()).rejects.toThrow("turn evidence is immutable");
     const mismatch = await makeTurn("mismatch");
     await expect(repository.commitEvidence({ turnId: mismatch.id, actor: owner, evidence: [{ factId: otherFactId, rank: 1, recallReason: "bad", disposition: "excluded", exclusionReason: "wrong" }] })).rejects.toThrow("Invalid turn evidence");
     expect(await postgres.db.selectFrom("turn_evidence").select("id").where("turn_id", "=", mismatch.id).execute()).toEqual([]);
+  });
+
+  test("serializes concurrent evidence commits into one snapshot", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "concurrent", defaultStartChapter: 1, defaultEndChapter: 3 });
+    const turn = await repository.createTurn({ sessionId: session.id, actor: owner, question: "race", questionHmac: "race-h", startChapter: 1, endChapter: 2, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: "race" });
+    const results = await Promise.allSettled([
+      repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 1, recallReason: "first", disposition: "used" }] }),
+      repository.commitEvidence({ turnId: turn.id, actor: owner, evidence: [{ factId, rank: 2, recallReason: "second", disposition: "excluded", exclusionReason: "race" }] }),
+    ]);
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    const rejected = results.find((result) => result.status === "rejected");
+    expect(rejected).toMatchObject({ reason: { message: "Evidence snapshot already committed" } });
+    expect(await postgres.db.selectFrom("turn_evidence").selectAll().where("turn_id", "=", turn.id).execute()).toHaveLength(1);
+    expect((await postgres.db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", turn.id).executeTakeFirstOrThrow()).evidence_snapshot_hash).toMatch(/^[0-9a-f]{64}$/);
   });
 
   test("rejects new turns after archival", async () => {

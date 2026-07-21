@@ -95,7 +95,10 @@ export const continuousQueriesMigration: Migration = {
       .execute();
     await db.schema.createIndex("turn_evidence_turn_disposition_rank_idx").on("turn_evidence").columns(["turn_id", "disposition", "rank"]).execute();
     await sql`create function enforce_turn_evidence_scope() returns trigger language plpgsql as $$
+      declare committed_hash text;
       begin
+        select evidence_snapshot_hash into committed_hash from query_turns where id = new.turn_id for update;
+        if committed_hash is not null then raise exception 'turn evidence snapshot already committed' using errcode = '55000'; end if;
         if not exists (select 1 from query_turns t join query_sessions s on s.id = t.session_id join l2_facts f on f.id = new.fact_id where t.id = new.turn_id and f.group_id = s.group_id and f.book_id = s.book_id) then raise exception 'invalid turn evidence' using errcode = '23514', constraint = 'turn_evidence_scope_check'; end if;
         return new;
       end $$`.execute(db);

@@ -6,7 +6,8 @@ import type { DatabaseExecutor, QueryTurnStatus, QueryVisibility } from "../db.j
 import type { ContentCipher, EncryptedContent } from "../library/content-encryption.js";
 
 type JsonObject = Record<string, unknown>;
-const CONTENT_FIELD_NAMES = new Set(["answer", "body", "fact", "question", "title"]);
+const INTENT_KEYS = new Set(["kind", "target", "aliases", "referents", "categories", "keywords"]);
+const CONFIG_KEYS = new Set(["recallPolicyVersion", "maxCandidates", "maxUsed", "summaryWorkflowVersion"]);
 export interface QueryActor { id: string; role: "admin" | "member" }
 export interface QuerySession { id: string; bookId: string; groupId: string; createdBy: string; visibility: QueryVisibility; defaultStartChapter: number; defaultEndChapter: number; title: string; archivedAt: Date | null; createdAt: Date; updatedAt: Date }
 export interface QueryTurn { id: string; sessionId: string; createdBy: string; question: string; answer: string | null; questionHmac: string; startChapter: number; endChapter: number; intentSnapshot: JsonObject; sourceSnapshot: JsonObject; gapSnapshot: JsonObject; configSnapshot: JsonObject; executionSignature: string; evidenceSnapshotHash: string | null; status: QueryTurnStatus; jobId: string | null; attemptId: string | null; degradation: string | null; createdAt: Date; updatedAt: Date; completedAt: Date | null }
@@ -25,16 +26,36 @@ function stableError(error: unknown, message: string): never {
   throw new Error(message);
 }
 
-function assertContentFreeSnapshot(value: JsonObject): void {
+function assertNoSensitiveValues(value: JsonObject, sensitiveValues: readonly string[]): void {
   const visit = (current: unknown): void => {
+    if (typeof current === "string" && sensitiveValues.some((sensitive) => sensitive.length > 0 && current.includes(sensitive))) throw new Error("Invalid query snapshot");
     if (Array.isArray(current)) { current.forEach(visit); return; }
     if (!current || typeof current !== "object") return;
-    for (const [key, child] of Object.entries(current)) {
-      if (CONTENT_FIELD_NAMES.has(key)) throw new Error("Invalid query snapshot");
-      visit(child);
-    }
+    Object.values(current).forEach(visit);
   };
   visit(value);
+}
+
+function assertCreateSnapshots(input: Pick<CreateQueryTurnInput, "intentSnapshot" | "sourceSnapshot" | "gapSnapshot" | "configSnapshot">, sensitiveValues: readonly string[]): void {
+  if (Object.keys(input.sourceSnapshot).length > 0 || Object.keys(input.gapSnapshot).length > 0) throw new Error("Invalid query snapshot");
+  const intent = input.intentSnapshot;
+  if (Object.keys(intent).length > 0) {
+    if (Object.keys(intent).some((key) => !INTENT_KEYS.has(key))
+      || !["single-target", "collection", "general"].includes(String(intent.kind))
+      || !(intent.target === null || typeof intent.target === "string")
+      || ![intent.aliases, intent.referents, intent.categories, intent.keywords].every((value) => Array.isArray(value) && value.every((item) => typeof item === "string"))) throw new Error("Invalid query snapshot");
+  }
+  const config = input.configSnapshot;
+  if (Object.keys(config).some((key) => !CONFIG_KEYS.has(key))) throw new Error("Invalid query snapshot");
+  for (const key of ["recallPolicyVersion", "summaryWorkflowVersion"] as const) if (config[key] !== undefined && (typeof config[key] !== "string" || !config[key])) throw new Error("Invalid query snapshot");
+  for (const key of ["maxCandidates", "maxUsed"] as const) if (config[key] !== undefined && (!Number.isSafeInteger(config[key]) || Number(config[key]) < 1)) throw new Error("Invalid query snapshot");
+  [intent, config].forEach((snapshot) => assertNoSensitiveValues(snapshot, sensitiveValues));
+}
+
+function assertSourceSnapshot(value: JsonObject): void {
+  if (Object.keys(value).length === 0) return;
+  if (Object.keys(value).sort().join(",") !== "candidates,excluded,gaps,used") throw new Error("Invalid query snapshot");
+  if (!Object.values(value).every((item) => Number.isSafeInteger(item) && Number(item) >= 0)) throw new Error("Invalid query snapshot");
 }
 
 export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCipher) {
@@ -83,11 +104,12 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
       await db.updateTable("query_sessions").set({ archived_at: new Date(), updated_at: new Date() }).where("id", "=", input.sessionId).execute();
     },
     async createTurn(input: CreateQueryTurnInput): Promise<QueryTurn> {
-      const session = await db.selectFrom("query_sessions").select(["created_by", "visibility", "archived_at"]).where("id", "=", input.sessionId).executeTakeFirst();
+      const session = await db.selectFrom("query_sessions").select(["created_by", "visibility", "archived_at", "title_ciphertext", "title_nonce", "title_tag", "title_key_version"]).where("id", "=", input.sessionId).executeTakeFirst();
       if (!session || session.archived_at || (input.actor.role !== "admin" && session.created_by !== input.actor.id && session.visibility !== "team")) throw new Error("Query access denied");
       try {
         if (!input.question.trim()) throw new Error();
-        [input.intentSnapshot, input.sourceSnapshot, input.gapSnapshot, input.configSnapshot].forEach(assertContentFreeSnapshot);
+        const title = cipher.decrypt({ ciphertext: session.title_ciphertext, nonce: session.title_nonce, tag: session.title_tag, keyVersion: session.title_key_version });
+        assertCreateSnapshots(input, [title, input.question]);
         const question = cipher.encrypt(input.question);
         const row = await db.insertInto("query_turns").values({ session_id: input.sessionId, created_by: input.actor.id, question_ciphertext: question.ciphertext, question_nonce: question.nonce, question_tag: question.tag, question_key_version: question.keyVersion, question_hmac: input.questionHmac, start_chapter: input.startChapter, end_chapter: input.endChapter, intent_snapshot: input.intentSnapshot, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, config_snapshot: input.configSnapshot, execution_signature: input.executionSignature, job_id: input.jobId ?? null, attempt_id: input.attemptId ?? null }).returningAll().executeTakeFirstOrThrow();
         return mapTurn(row);
@@ -110,9 +132,17 @@ export function createQueryRepository(db: DatabaseExecutor, cipher: ContentCiphe
     async completeTurn(input: CompleteTurnInput): Promise<QueryTurn> {
       await authorizedTurn(input.turnId, input.actor, true);
       try {
-        [input.sourceSnapshot, input.gapSnapshot].forEach(assertContentFreeSnapshot);
-        const snapshot = await db.selectFrom("query_turns").select("evidence_snapshot_hash").where("id", "=", input.turnId).executeTakeFirstOrThrow();
+        assertSourceSnapshot(input.sourceSnapshot);
+        const snapshot = await db.selectFrom("query_turns as t").innerJoin("query_sessions as s", "s.id", "t.session_id").select(["t.evidence_snapshot_hash", "t.question_ciphertext", "t.question_nonce", "t.question_tag", "t.question_key_version", "s.title_ciphertext", "s.title_nonce", "s.title_tag", "s.title_key_version"]).where("t.id", "=", input.turnId).executeTakeFirstOrThrow();
         if (!snapshot.evidence_snapshot_hash || snapshot.evidence_snapshot_hash !== input.evidenceSnapshotHash) throw new Error();
+        const evidenceRows = await db.selectFrom("turn_evidence as e").innerJoin("l2_facts as f", "f.id", "e.fact_id").select(["f.fact_ciphertext", "f.fact_nonce", "f.fact_tag", "f.fact_key_version"]).where("e.turn_id", "=", input.turnId).execute();
+        const sensitiveValues = [
+          cipher.decrypt({ ciphertext: snapshot.title_ciphertext, nonce: snapshot.title_nonce, tag: snapshot.title_tag, keyVersion: snapshot.title_key_version }),
+          cipher.decrypt({ ciphertext: snapshot.question_ciphertext, nonce: snapshot.question_nonce, tag: snapshot.question_tag, keyVersion: snapshot.question_key_version }),
+          ...evidenceRows.map((row) => cipher.decrypt({ ciphertext: row.fact_ciphertext, nonce: row.fact_nonce, tag: row.fact_tag, keyVersion: row.fact_key_version })),
+          ...(input.answer === null ? [] : [input.answer]),
+        ];
+        [input.sourceSnapshot, input.gapSnapshot].forEach((value) => assertNoSensitiveValues(value, sensitiveValues));
         const answer = input.answer === null ? null : cipher.encrypt(input.answer);
         const row = await db.updateTable("query_turns").set({ answer_ciphertext: answer?.ciphertext ?? null, answer_nonce: answer?.nonce ?? null, answer_tag: answer?.tag ?? null, answer_key_version: answer?.keyVersion ?? null, status: input.status, source_snapshot: input.sourceSnapshot, gap_snapshot: input.gapSnapshot, degradation: input.degradation, job_id: input.jobId, attempt_id: input.attemptId, updated_at: new Date(), completed_at: new Date() }).where("id", "=", input.turnId).returningAll().executeTakeFirstOrThrow();
         return mapTurn(row);
