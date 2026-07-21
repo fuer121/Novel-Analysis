@@ -179,6 +179,50 @@ describe("query session routes", () => {
     expect(page.nextCursor).not.toBeNull();
   });
 
+  it("normalizes legacy snapshots safely in history and selected-turn detail", async () => {
+    const sessionId = await createSession("team");
+    const turnId = await createTurn(sessionId, "legacy snapshot");
+    const aliases = Array.from({ length: 24 }, (_, index) => ` alias-${index} `);
+    const keywords = Array.from({ length: 54 }, (_, index) => ` keyword-${index} `);
+    await postgres.db.updateTable("query_turns").set({
+      intent_snapshot: {
+        kind: "unsupported",
+        target: "  Hero  ",
+        aliases: [...aliases, "   ", 42],
+        referents: ["  he  ", "", false],
+        categories: [...aliases, { unsafe: "CATEGORY_SENTINEL" }],
+        keywords: [...keywords, "   ", null],
+        rawSnapshot: "RAW_SNAPSHOT_SENTINEL",
+      },
+      source_snapshot: { candidates: "7", used: 3, excluded: -1, gaps: 2, providerError: "PROVIDER_ERROR_SENTINEL" },
+      gap_snapshot: { count: 2, credential: "CREDENTIAL_SENTINEL" },
+      config_snapshot: { recallPolicyVersion: "  recall-v1  ", summaryWorkflowVersion: "   ", executionSignature: "EXECUTION_SIGNATURE_SENTINEL" },
+    }).where("id", "=", turnId).execute();
+
+    const historyResponse = await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns`).set(auth("member"));
+    expect(historyResponse.status).toBe(200);
+    const history = QueryTurnHistoryPageSchema.parse(historyResponse.body);
+    const item = history.turns.find((turn) => turn.id === turnId)!;
+    expect(item.trace).toMatchObject({
+      kind: null,
+      target: "Hero",
+      aliases: aliases.slice(0, 20).map((value) => value.trim()),
+      referents: ["he"],
+      categories: aliases.slice(0, 20).map((value) => value.trim()),
+      keywords: keywords.slice(0, 50).map((value) => value.trim()),
+      sourceCounts: { candidates: 0, used: 3, excluded: 0 },
+      gapCount: 2,
+      recallPolicyVersion: "recall-v1",
+      summaryWorkflowVersion: null,
+    });
+
+    const detailResponse = await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}/turns/${turnId}`).set(auth("member"));
+    expect(detailResponse.status).toBe(200);
+    const detail = QueryTurnDetailSchema.parse(detailResponse.body.turn);
+    expect(detail.trace).toEqual(item.trace);
+    expect(JSON.stringify({ history: historyResponse.body, detail: detailResponse.body })).not.toMatch(/RAW_SNAPSHOT_SENTINEL|PROVIDER_ERROR_SENTINEL|CREDENTIAL_SENTINEL|EXECUTION_SIGNATURE_SENTINEL|CATEGORY_SENTINEL/);
+  });
+
   it("returns idempotency conflict for cross-book session replay and stores no plaintext-derived audit fingerprint", async () => {
     const key = "session-cross-book";
     const body = { groupId, title: "SENTINEL_SESSION_TITLE", visibility: "private", defaultStartChapter: 1, defaultEndChapter: 2 } as const;

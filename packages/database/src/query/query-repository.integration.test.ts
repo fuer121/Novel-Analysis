@@ -318,6 +318,22 @@ describe("continuous query repository", () => {
     expect((await postgres.db.selectFrom("query_turns").select(["answer_ciphertext", "completed_at"]).where("id", "=", turn.id).executeTakeFirstOrThrow())).toMatchObject({ answer_ciphertext: null, completed_at: null });
   });
 
+  test("does not list turns after a visibility revocation wins the session lock", async () => {
+    const repository = createQueryRepository(postgres.db, cipher);
+    const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "history-revoked", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });
+    await repository.createTurn({ sessionId: session.id, actor: member, question: "history-revoked-question", questionHmac: QUESTION_HMAC, startChapter: 1, endChapter: 1, intentSnapshot: {}, sourceSnapshot: {}, gapSnapshot: {}, configSnapshot: {}, executionSignature: EXECUTION_SIGNATURE });
+    const locked = deferred(); const release = deferred();
+    const revoke = postgres.db.transaction().execute(async (transaction) => {
+      await sql`select id from query_sessions where id = ${session.id} for update`.execute(transaction);
+      locked.resolve(); await release.promise;
+      await transaction.updateTable("query_sessions").set({ visibility: "private" }).where("id", "=", session.id).execute();
+    });
+    await locked.promise;
+    const list = repository.listTurns({ sessionId: session.id, actor: member, limit: 20 });
+    release.resolve(); await revoke;
+    await expect(list).rejects.toThrow("Query access denied");
+  });
+
   test("does not create a turn after archival wins the session lock", async () => {
     const repository = createQueryRepository(postgres.db, cipher);
     const session = await repository.createSession({ bookId, groupId, createdBy: owner.id, title: "archive-race", visibility: "team", defaultStartChapter: 1, defaultEndChapter: 3 });

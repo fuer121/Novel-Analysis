@@ -33,7 +33,8 @@ function publicTurn(turn: QueryTurn) {
   const gaps = turn.gapSnapshot as Partial<Record<"count", unknown>>;
   const config = turn.configSnapshot as Partial<Record<"recallPolicyVersion" | "summaryWorkflowVersion", unknown>>;
   const count = (value: unknown) => Number.isSafeInteger(value) && Number(value) >= 0 ? Number(value) : 0;
-  const strings = (value: unknown) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.length > 0) : [];
+  const text = (value: unknown) => typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+  const strings = (value: unknown, limit: number) => Array.isArray(value) ? value.filter((item): item is string => typeof item === "string").map((item) => item.trim()).filter((item) => item.length > 0).slice(0, limit) : [];
   const candidates = count(source.candidates); const used = count(source.used); const excluded = count(source.excluded); const gapCount = count(gaps.count ?? source.gaps);
   return {
     id: turn.id, sessionId: turn.sessionId, createdBy: turn.createdBy, question: turn.question,
@@ -42,11 +43,11 @@ function publicTurn(turn: QueryTurn) {
     sourceStats: { candidates, used, excluded, gaps: gapCount },
     trace: {
       kind: ["single-target", "collection", "general"].includes(String(intent.kind)) ? intent.kind as "single-target" | "collection" | "general" : null,
-      target: typeof intent.target === "string" && intent.target.length > 0 ? intent.target : null,
-      aliases: strings(intent.aliases), referents: strings(intent.referents), categories: strings(intent.categories), keywords: strings(intent.keywords),
+      target: text(intent.target),
+      aliases: strings(intent.aliases, 20), referents: strings(intent.referents, 20), categories: strings(intent.categories, 20), keywords: strings(intent.keywords, 50),
       sourceCounts: { candidates, used, excluded }, gapCount,
-      recallPolicyVersion: typeof config.recallPolicyVersion === "string" && config.recallPolicyVersion.length > 0 ? config.recallPolicyVersion : null,
-      summaryWorkflowVersion: typeof config.summaryWorkflowVersion === "string" && config.summaryWorkflowVersion.length > 0 ? config.summaryWorkflowVersion : null,
+      recallPolicyVersion: text(config.recallPolicyVersion),
+      summaryWorkflowVersion: text(config.summaryWorkflowVersion),
     },
   };
 }
