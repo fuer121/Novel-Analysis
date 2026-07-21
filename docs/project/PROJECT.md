@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 4b4cc227e9540f5a0764ae476c54a2090aa54a24
 baseline_status: current
-updated_at: 2026-07-21T08:49:56+08:00
+updated_at: 2026-07-21T09:16:19+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-TASK1-STARTED
+last_checkpoint: CP-20260721-PHASE3-TASK1-ACCEPTED
 next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -40,7 +40,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK1 | phase-3 | Query and analysis-summary contracts | implementation-agent | codex/phase3-task1-query-contracts | 9e044ab5f4bc25212b159587440a1cd2fe2a664a | none | in_progress | CP-20260721-PHASE3-PLAN-APPROVED | CP-20260721-PHASE3-TASK1-STARTED | implement with TDD from the started-contract merge SHA |
+| PHASE3-TASK1 | phase-3 | Query and analysis-summary contracts | controller-agent | codex/phase3-task1-query-contracts | d620e9625f4df3468c88b0fb820b5cc3a7c92fa3 | 6f4af6d8874f5499aecdba52d8155b82b7f5df59 | accepted | CP-20260721-PHASE3-TASK1-STARTED | CP-20260721-PHASE3-TASK1-ACCEPTED | create PR, verify CI and merge under DEC-0002 |
 
 ## Phase Ledgers
 
@@ -81,7 +81,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无，PHASE3-TASK1 Started Contract 合并后可按已批准范围实施
+无，PHASE3-TASK1 已接受并可按 DEC-0002 进入 PR、CI 与合并流程
 
 ## Next Gate
 
@@ -89,6 +89,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 1 accepted](checkpoints/CP-20260721-PHASE3-TASK1-ACCEPTED.md)
 - [Phase 3 Task 1 started](checkpoints/CP-20260721-PHASE3-TASK1-STARTED.md)
 - [Phase 3 plan approved](checkpoints/CP-20260721-PHASE3-PLAN-APPROVED.md)
 - [Phase 3 plan submitted](checkpoints/CP-20260721-PHASE3-PLAN-SUBMITTED.md)
