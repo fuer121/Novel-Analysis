@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 638df045745be567ca1cedbb9cd44676269a01fe
 baseline_status: current
-updated_at: 2026-07-21T20:14:51+08:00
+updated_at: 2026-07-21T20:23:08+08:00
 updated_by: controller-agent
-current_phase: phase-3-implementation
-last_checkpoint: CP-20260721-PHASE3-TASK7-MERGED
-next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
+current_phase: phase-4-planning
+last_checkpoint: CP-20260721-PHASE3-IMPLEMENTATION-ACCEPTED
+next_gate: GATE-PHASE4-PLAN-APPROVED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -34,13 +34,14 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementation-complete | Task 1-7 merged，Gate pending explicit user decision |
+| Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
+| Phase 4 | planning-ready | 可进入独立设计与规划，实施尚未授权 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK7 | phase-3 | Independent acceptance, concurrency and security evidence | controller-agent | main | e72a0a6143b5cb089d98416966ba79cc9e2af4c1 | 638df045745be567ca1cedbb9cd44676269a01fe | merged | CP-20260721-PHASE3-TASK6-MERGED | CP-20260721-PHASE3-TASK7-MERGED | wait for explicit user decision on GATE-PHASE3-IMPLEMENTATION-ACCEPTED |
+| PHASE4-PLAN | phase-4 | Advanced analysis and legacy history design and planning | unassigned | none | a7105c4bb18983d7e15c10264be5fca9d87e9e18 | none | planned | CP-20260721-PHASE3-IMPLEMENTATION-ACCEPTED | none | prepare independent design and implementation plan for review |
 
 ## Phase Ledgers
 
@@ -84,14 +85,15 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-需要用户明确决定是否通过 `GATE-PHASE3-IMPLEMENTATION-ACCEPTED`
+无待处理反馈，Phase 4 可进入独立设计与规划
 
 ## Next Gate
 
-下一阶段门禁为 `GATE-PHASE3-IMPLEMENTATION-ACCEPTED`，Task 1 至 Task 7 已完成，但门禁必须保持锁定直到用户明确确认
+下一阶段门禁为 `GATE-PHASE4-PLAN-APPROVED`，Phase 4 实施保持锁定，直到设计与计划完成审查并由用户明确批准
 
 ## Evidence Index
 
+- [Phase 3 implementation accepted](checkpoints/CP-20260721-PHASE3-IMPLEMENTATION-ACCEPTED.md)
 - [Phase 3 Task 7 merged](checkpoints/CP-20260721-PHASE3-TASK7-MERGED.md)
 - [Phase 3 Task 7 accepted](checkpoints/CP-20260721-PHASE3-TASK7-ACCEPTED.md)
 - [Phase 3 Task 7 started](checkpoints/CP-20260721-PHASE3-TASK7-STARTED.md)
