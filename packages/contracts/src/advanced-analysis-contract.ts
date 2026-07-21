@@ -41,6 +41,10 @@ function validChapterRange<T extends { startChapter: number; endChapter: number 
   return value.startChapter <= value.endChapter;
 }
 
+function validPartProgress<T extends { completedParts: number; totalParts: number }>(value: T): boolean {
+  return value.completedParts <= value.totalParts;
+}
+
 export const AnalysisTemplateCreateInputSchema = z.strictObject({
   bookId: IdSchema,
   name: NonEmptyStringSchema,
@@ -113,7 +117,9 @@ export const AnalysisRunSummarySchema = z.strictObject({
   totalParts: z.number().int().nonnegative(),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
-}).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
+})
+  .refine(validChapterRange, { message: "startChapter must not exceed endChapter" })
+  .refine(validPartProgress, { message: "completedParts must not exceed totalParts" });
 
 export const AnalysisPartSummarySchema = z.strictObject({
   id: IdSchema,
@@ -140,7 +146,9 @@ export const AnalysisRunDetailSchema = z.strictObject({
   diagnostics: z.array(NonEmptyStringSchema),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
-}).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
+})
+  .refine(validChapterRange, { message: "startChapter must not exceed endChapter" })
+  .refine(validPartProgress, { message: "completedParts must not exceed totalParts" });
 
 export const AdminAnalysisRunMetadataSchema = z.strictObject({
   id: IdSchema,
@@ -154,7 +162,7 @@ export const AdminAnalysisRunMetadataSchema = z.strictObject({
   errorCode: NonEmptyStringSchema.nullable(),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
-});
+}).refine(validPartProgress, { message: "completedParts must not exceed totalParts" });
 
 export const LegacyAnalysisSummarySchema = z.strictObject({
   id: NonEmptyStringSchema,

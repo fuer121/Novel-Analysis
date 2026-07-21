@@ -115,6 +115,30 @@ describe("advanced analysis contracts", () => {
     expect(AnalysisRunSummarySchema.safeParse({ ...summary, result: "private" }).success).toBe(false);
   });
 
+  it("rejects impossible owner and administrator progress", () => {
+    const summary = {
+      id: ids.analysis, bookId: ids.book, templateVersionId: ids.version,
+      jobId: ids.job, mode: "precision", startChapter: 1, endChapter: 100,
+      status: "running", completedParts: 2, totalParts: 1,
+      createdAt: now, updatedAt: now,
+    };
+    const part = {
+      id: ids.part, position: 0, kind: "chapter_review", status: "completed",
+      errorCode: null, createdAt: now, updatedAt: now,
+    };
+    const adminMetadata = {
+      id: ids.analysis, jobId: ids.job, bookId: ids.book, createdBy: ids.owner,
+      mode: "precision", status: "running", completedParts: 2, totalParts: 1,
+      errorCode: null, createdAt: now, updatedAt: now,
+    };
+
+    expect(AnalysisRunSummarySchema.safeParse(summary).success).toBe(false);
+    expect(AnalysisRunDetailSchema.safeParse({
+      ...summary, parts: [part], result: null, diagnostics: [],
+    }).success).toBe(false);
+    expect(AdminAnalysisRunMetadataSchema.safeParse(adminMetadata).success).toBe(false);
+  });
+
   it.each(["prompt", "outputSchema", "result", "partContent", "contentHash", "resultHmac", "partInputSignature"])(
     "rejects administrator metadata content or fingerprint key %s",
     (key) => {
