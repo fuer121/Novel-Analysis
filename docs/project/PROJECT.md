@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f4d47958a5c410c24d6d280aa298374318b18a11
 baseline_status: current
-updated_at: 2026-07-21T14:20:08+08:00
+updated_at: 2026-07-21T14:37:09+08:00
 updated_by: controller-agent
 current_phase: phase-3-implementation
 last_checkpoint: CP-20260721-PHASE3-TASK5-MERGED
@@ -34,13 +34,13 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 | Phase 0 | merged | [Phase 0 merged](checkpoints/CP-20260717-PHASE0-MERGED.md) |
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 3 | implementing | Task 1-5 merged，Task 6 ready |
+| Phase 3 | implementing | Task 1-5 merged，Task 6 Started Contract accepted |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE3-TASK6 | phase-3 | Continuous-query responsive workspace | controller-agent | none | f4d47958a5c410c24d6d280aa298374318b18a11 | none | ready | CP-20260721-PHASE3-TASK5-MERGED | none | create and merge a bounded Started Contract before implementation |
+| PHASE3-TASK6 | phase-3 | Continuous-query responsive workspace | implementation-agent | codex/phase3-task6-workspace | e7063b9320e741b1cec3ff0143618e776ee5a16a | none | in_progress | CP-20260721-PHASE3-TASK5-MERGED | CP-20260721-PHASE3-TASK6-STARTED | merge Started Contract, then implement with TDD from its merge SHA |
 
 ## Phase Ledgers
 
@@ -79,11 +79,11 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 - Fact category allowlist 在 contracts 与 database 分别维护，后续 category contract 演进必须同步验证
 - Task 6 必须保持 Query API、evidence semantics、fallback actions 与 server-owned job state 不变，只实现已批准的响应式工作区
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
-- 当前无证据冲突或 blocker，Task 5 可在 Started Contract 合并后实施
+- 当前无证据冲突或 blocker，Task 6 可在 Started Contract 合并后实施
 
 ## Pending Feedback
 
-无，PHASE3-TASK6 已解锁，可先创建模块边界 Started Contract
+无，PHASE3-TASK6 Started Contract 已接受，可在其合并后按批准范围实施
 
 ## Next Gate
 
@@ -91,6 +91,7 @@ next_gate: GATE-PHASE3-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 3 Task 6 started](checkpoints/CP-20260721-PHASE3-TASK6-STARTED.md)
 - [Phase 3 Task 5 merged](checkpoints/CP-20260721-PHASE3-TASK5-MERGED.md)
 - [Phase 3 Task 5 accepted](checkpoints/CP-20260721-PHASE3-TASK5-ACCEPTED.md)
 - [Phase 3 Task 5 started](checkpoints/CP-20260721-PHASE3-TASK5-STARTED.md)
