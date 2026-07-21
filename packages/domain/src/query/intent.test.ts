@@ -66,6 +66,17 @@ describe("resolveQueryIntent", () => {
     })).toMatchObject({ kind: "collection", target: null });
   });
 
+  it("selects the longest deterministic subject match independent of input order", () => {
+    expect(resolveQueryIntent({
+      question: "陈平安后来如何？",
+      recentQuestions: [],
+      knownSubjects: [
+        { subjectKey: "wrong", displayName: "别名角色", aliases: ["平安"] },
+        { subjectKey: "chen", displayName: "陈平安", aliases: [] },
+      ],
+    })).toMatchObject({ kind: "single-target", target: "chen", aliases: [] });
+  });
+
   it.each([
     ["各境界最强的人分别是谁", "collection"],
     ["有哪些重要法宝", "collection"],

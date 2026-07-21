@@ -12,15 +12,13 @@ const KEYWORD_PATTERN = /飞剑|法宝|境界|最强|变化|获得|最后|后来
 const CATEGORY_TERMS = ["character", "item", "event", "relationship"] as const;
 
 function findSubject(text: string, subjects: readonly KnownSubject[]): { subject: KnownSubject; matched: string } | undefined {
-  for (const subject of subjects) {
-    const names = [subject.displayName, ...subject.aliases]
-      .map((name) => name.trim())
-      .filter(Boolean)
-      .sort((left, right) => right.length - left.length);
-    const matched = names.find((name) => text.includes(name));
-    if (matched) return { subject, matched };
-  }
-  return undefined;
+  const matches = subjects.flatMap((subject) => [subject.displayName, ...subject.aliases]
+    .map((name, index) => ({ subject, matched: name.trim(), displayNameMatch: index === 0 }))
+    .filter(({ matched }) => matched.length > 0 && text.includes(matched)));
+  matches.sort((left, right) => right.matched.length - left.matched.length
+    || Number(right.displayNameMatch) - Number(left.displayNameMatch)
+    || (left.subject.subjectKey < right.subject.subjectKey ? -1 : left.subject.subjectKey > right.subject.subjectKey ? 1 : 0));
+  return matches[0];
 }
 
 function categoriesFor(question: string): string[] {

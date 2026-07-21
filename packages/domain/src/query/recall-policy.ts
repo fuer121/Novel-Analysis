@@ -105,6 +105,9 @@ export function recallFacts(input: {
     throw new Error("Recall limits must be non-negative integers and maxCandidates must be positive");
   }
 
+  const factIds = input.windows.flatMap((window) => window.facts.map((fact) => fact.id));
+  if (new Set(factIds).size !== factIds.length) throw new Error("Duplicate recall fact ID");
+
   const scored = input.windows.flatMap((window) => window.facts.map((fact) => ({
     fact,
     windowIndex: window.windowIndex,

@@ -133,6 +133,19 @@ describe("recallFacts", () => {
     expect(result.candidates[0]?.exclusionReason).toBe("used_budget");
   });
 
+  it("rejects duplicate fact IDs across windows", () => {
+    const intent = resolveQueryIntent({ question: "有哪些事件", recentQuestions: [], knownSubjects });
+    expect(() => recallFacts({
+      intent,
+      windows: [
+        { windowIndex: 1, facts: [fact("duplicate", 1)] },
+        { windowIndex: 2, facts: [fact("duplicate", 2)] },
+      ],
+      maxCandidates: 1,
+      maxUsed: 1,
+    })).toThrow("Duplicate recall fact ID");
+  });
+
   it("marks nonmatching facts and empty windows explicitly", () => {
     const intent = resolveQueryIntent({ question: "陈平安的飞剑", recentQuestions: [], knownSubjects });
     const result = recallFacts({
