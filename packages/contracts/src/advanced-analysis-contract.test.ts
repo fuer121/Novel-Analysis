@@ -72,10 +72,23 @@ describe("advanced analysis contracts", () => {
       startChapter: 3, endChapter: 12, chapterCount: 10,
       reviewChapterCount: 3, readsL1: true, readsL2: true,
       readsOriginalChapters: true, scopeHash: "a".repeat(64),
+      executionVersions: {
+        workflow: { target: "analysis-summary", id: ids.job, contractVersion: "summary-v1", dslHash: "dsl-v1" },
+        model: "deepseek-chat", reasoningEffort: "workflow-default", executorVersion: "advanced-analysis-v1",
+        l1SchemaVersion: "l1-route-v1", l2SchemaVersion: "l2-facts-v1", l2AdmissionVersion: "l2-admission-v1",
+      },
+      sourceSummary: {
+        indexGroupId: ids.group, indexGroupConfigHash: "group-v1", chapterSourceVersions: ["source-v1"],
+        l1: { selectedCount: 10, freshCount: 8 }, l2: { selectedCount: 10, freshCount: 7 },
+        readsL1: true, readsL2: true, readsOriginalChapters: true,
+        reviewedChapterBoundary: { startChapter: 3, endChapter: 12, maximumChapterCount: 3 },
+      },
     };
 
     expect(AnalysisScopePreviewSchema.parse(preview)).toEqual(preview);
     expect(AnalysisScopePreviewSchema.safeParse({ ...preview, endChapter: 2 }).success).toBe(false);
+    expect(AnalysisScopePreviewSchema.safeParse({ ...preview, executionVersions: { ...preview.executionVersions, unknown: true } }).success).toBe(false);
+    expect(AnalysisScopePreviewSchema.safeParse({ ...preview, sourceSummary: { ...preview.sourceSummary, prompt: "private" } }).success).toBe(false);
     for (const scopeHash of ["sha256:scope-v1", "a".repeat(63), "A".repeat(64), "g".repeat(64)]) {
       expect(AnalysisScopePreviewSchema.safeParse({ ...preview, scopeHash }).success).toBe(false);
     }

@@ -1,11 +1,13 @@
 import { createHash } from "node:crypto";
 import { sql } from "kysely";
 
-import type { AnalysisMode, AnalysisRunSummary, AnalysisScopePreview, PublicJob } from "@novel-analysis/contracts";
+import type { AnalysisExecutionVersions, AnalysisMode, AnalysisRunSummary, AnalysisScopePreview, AnalysisSourceSummary, PublicJob } from "@novel-analysis/contracts";
 import { createAnalysisRepository, type AnalysisActor, type ContentCipher, type DatabaseConnection, type DatabaseExecutor } from "@novel-analysis/database";
 import { modeSourcePolicy } from "@novel-analysis/domain";
 
 import { jobRowToPublic, PUBLIC_JOB_COLUMNS } from "../job-repository.js";
+import { L1_ROUTE_SCHEMA_VERSION } from "../library/l1-job.js";
+import { L2_ADMISSION_VERSION, L2_FACT_SCHEMA_VERSION } from "../library/l2-job.js";
 
 export class AnalysisNotFoundError extends Error {}
 export class AnalysisInvalidRequestError extends Error {}
@@ -30,14 +32,18 @@ export type AnalysisCreateInput = AnalysisPreviewInput & {
 
 type Selection = AnalysisScopePreview & {
   templateId: string;
-  indexGroupId: string | null;
   templateContentHash: string;
-  workflow: { id: string; contractVersion: string; dslHash: string };
-  chapters: Array<{ id: string; chapterIndex: number; contentHmac: string; sourceVersion: string }>;
+  indexGroup: { id: string; configHash: string; promptVersionId: string } | null;
+  chapters: Array<{
+    id: string; chapterIndex: number; contentHmac: string; sourceVersion: string;
+    l1: { id: string; promptVersionId: string; workflowVersionId: string; inputSignature: string; status: string } | null;
+    l2: { inputSignature: string; status: string } | null;
+  }>;
 };
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const requestLock = (ownerId: string, requestId: string) => `${ownerId}:advanced-analysis:${requestId}`;
+const EXECUTION_CONFIG = { model: "deepseek-chat", reasoningEffort: "workflow-default", executorVersion: "advanced-analysis-v1" } as const;
 
 function runToPublic(row: {
   id: string; book_id: string; template_version_id: string; job_id: string; mode: AnalysisMode;
@@ -56,21 +62,29 @@ export class AnalysisJobService {
       .innerJoin("analysis_template_versions as v", "v.id", "t.current_version_id")
       .innerJoin("books as b", "b.id", "t.book_id")
       .leftJoin("index_groups as g", "g.id", "t.index_group_id")
-      .select(["t.id", "t.book_id", "t.index_group_id", "v.id as version_id", "v.content_hash", "b.status as book_status", "g.status as group_status", "g.config_hash"])
+      .select(["t.id", "t.book_id", "t.index_group_id", "v.id as version_id", "v.content_hash", "b.status as book_status", "g.status as group_status", "g.config_hash", "g.prompt_version_id"])
       .where("t.id", "=", input.templateId).where("t.book_id", "=", input.bookId).where("t.created_by", "=", input.actor.id).executeTakeFirst();
     if (!template || template.book_status !== "active" || (input.mode !== "full_text" && (!template.index_group_id || template.group_status !== "active"))) throw new AnalysisNotFoundError();
     const workflow = await executor.selectFrom("workflow_versions").select(["id", "contract_version", "dsl_hash"]).where("target", "=", "analysis-summary").where("enabled", "=", true).orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst();
     if (!workflow) throw new AnalysisInvalidRequestError();
-    const chapters = await executor.selectFrom("chapters").select(["id", "chapter_index", "content_hmac", "source_version"]).where("book_id", "=", input.bookId).where("chapter_index", ">=", input.startChapter).where("chapter_index", "<=", input.endChapter).orderBy("chapter_index").execute();
+    const chapterRows = await executor.selectFrom("chapters as c")
+      .leftJoin("l1_indexes as l1", (join) => join.onRef("l1.chapter_id", "=", "c.id").on("l1.is_current", "=", true))
+      .leftJoin("l2_chapter_statuses as l2", (join) => join.onRef("l2.chapter_id", "=", "c.id").on("l2.group_id", "=", template.index_group_id))
+      .select(["c.id", "c.chapter_index", "c.content_hmac", "c.source_version", "l1.id as l1_id", "l1.prompt_version_id as l1_prompt_version_id", "l1.workflow_version_id as l1_workflow_version_id", "l1.input_signature as l1_input_signature", "l1.status as l1_status", "l2.input_signature as l2_input_signature", "l2.status as l2_status"])
+      .where("c.book_id", "=", input.bookId).where("c.chapter_index", ">=", input.startChapter).where("c.chapter_index", "<=", input.endChapter).orderBy("c.chapter_index").execute();
+    const chapters = chapterRows.map((row) => ({ id: row.id, chapterIndex: row.chapter_index, contentHmac: row.content_hmac, sourceVersion: row.source_version, l1: row.l1_id ? { id: row.l1_id, promptVersionId: row.l1_prompt_version_id!, workflowVersionId: row.l1_workflow_version_id!, inputSignature: row.l1_input_signature!, status: row.l1_status! } : null, l2: row.l2_input_signature ? { inputSignature: row.l2_input_signature, status: row.l2_status! } : null }));
     if (chapters.length !== input.endChapter - input.startChapter + 1) throw new AnalysisInvalidRequestError();
     const policy = modeSourcePolicy(input.mode, chapters.length);
-    const scopeHash = hash({ bookId: input.bookId, templateVersionId: template.version_id, templateContentHash: template.content_hash, indexGroupId: template.index_group_id, indexConfigHash: template.config_hash, mode: input.mode, range: [input.startChapter, input.endChapter], chapters: chapters.map((row) => ({ id: row.id, chapterIndex: row.chapter_index, contentHmac: row.content_hmac, sourceVersion: row.source_version })), workflow: { id: workflow.id, contractVersion: workflow.contract_version, dslHash: workflow.dsl_hash }, policy });
-    return { bookId: input.bookId, templateId: template.id, templateVersionId: template.version_id, templateContentHash: template.content_hash, indexGroupId: template.index_group_id, mode: input.mode, startChapter: input.startChapter, endChapter: input.endChapter, chapterCount: chapters.length, ...policy, scopeHash, workflow: { id: workflow.id, contractVersion: workflow.contract_version, dslHash: workflow.dsl_hash }, chapters: chapters.map((row) => ({ id: row.id, chapterIndex: row.chapter_index, contentHmac: row.content_hmac, sourceVersion: row.source_version })) };
+    const executionVersions: AnalysisExecutionVersions = { workflow: { target: "analysis-summary", id: workflow.id, contractVersion: workflow.contract_version, dslHash: workflow.dsl_hash }, ...EXECUTION_CONFIG, l1SchemaVersion: L1_ROUTE_SCHEMA_VERSION, l2SchemaVersion: L2_FACT_SCHEMA_VERSION, l2AdmissionVersion: L2_ADMISSION_VERSION };
+    const sourceSummary: AnalysisSourceSummary = { indexGroupId: template.index_group_id, indexGroupConfigHash: template.config_hash ?? null, chapterSourceVersions: [...new Set(chapters.map((chapter) => chapter.sourceVersion))], l1: { selectedCount: policy.readsL1 ? chapters.length : 0, freshCount: policy.readsL1 ? chapters.filter((chapter) => chapter.l1?.status === "fresh").length : 0 }, l2: { selectedCount: policy.readsL2 ? chapters.length : 0, freshCount: policy.readsL2 ? chapters.filter((chapter) => chapter.l2?.status === "fresh").length : 0 }, readsL1: policy.readsL1, readsL2: policy.readsL2, readsOriginalChapters: policy.readsOriginalChapters, reviewedChapterBoundary: policy.reviewChapterCount === 0 ? null : { startChapter: input.startChapter, endChapter: input.endChapter, maximumChapterCount: policy.reviewChapterCount } };
+    const indexGroup = template.index_group_id ? { id: template.index_group_id, configHash: template.config_hash!, promptVersionId: template.prompt_version_id! } : null;
+    const scopeHash = hash({ bookId: input.bookId, template: { id: template.id, versionId: template.version_id, contentHash: template.content_hash }, indexGroup, mode: input.mode, range: [input.startChapter, input.endChapter], chapters, executionVersions, sourceSummary });
+    return { bookId: input.bookId, templateId: template.id, templateVersionId: template.version_id, templateContentHash: template.content_hash, indexGroup, mode: input.mode, startChapter: input.startChapter, endChapter: input.endChapter, chapterCount: chapters.length, ...policy, executionVersions, sourceSummary, scopeHash, chapters };
   }
 
   async preview(input: AnalysisPreviewInput): Promise<AnalysisScopePreview> {
     const selection = await this.select(input);
-    return { bookId: selection.bookId, templateVersionId: selection.templateVersionId, mode: selection.mode, startChapter: selection.startChapter, endChapter: selection.endChapter, chapterCount: selection.chapterCount, reviewChapterCount: selection.reviewChapterCount, readsL1: selection.readsL1, readsL2: selection.readsL2, readsOriginalChapters: selection.readsOriginalChapters, scopeHash: selection.scopeHash };
+    return { bookId: selection.bookId, templateVersionId: selection.templateVersionId, mode: selection.mode, startChapter: selection.startChapter, endChapter: selection.endChapter, chapterCount: selection.chapterCount, reviewChapterCount: selection.reviewChapterCount, readsL1: selection.readsL1, readsL2: selection.readsL2, readsOriginalChapters: selection.readsOriginalChapters, executionVersions: selection.executionVersions, sourceSummary: selection.sourceSummary, scopeHash: selection.scopeHash };
   }
 
   async create(input: AnalysisCreateInput): Promise<{ run: AnalysisRunSummary; job: PublicJob }> {
@@ -85,7 +99,8 @@ export class AnalysisJobService {
       }
       const selection = await this.select(input, transaction);
       if (selection.templateVersionId !== input.templateVersionId || selection.scopeHash !== input.scopeHash) throw new AnalysisScopeChangedError();
-      const inserted = await transaction.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: input.actor.id, request_id: input.requestId, scope: { bookId: input.bookId, startChapter: input.startChapter, endChapter: input.endChapter }, config_snapshot: { operation: "create-analysis", mode: input.mode, requestFingerprint: fingerprint, scopeHash: selection.scopeHash, templateVersionId: selection.templateVersionId, templateContentHash: selection.templateContentHash, indexGroupId: selection.indexGroupId, workflow: selection.workflow }, concurrency_key: `advanced-analysis:${input.actor.id}:${input.requestId}`, progress: { total: selection.chapterCount, completed: 0, failed: 0, skipped: 0, current: "" } }).returning(PUBLIC_JOB_COLUMNS).executeTakeFirstOrThrow();
+      const executionSnapshot = { bookId: input.bookId, scopeHash: selection.scopeHash, template: { id: selection.templateId, versionId: selection.templateVersionId, contentHash: selection.templateContentHash }, mode: selection.mode, range: { startChapter: selection.startChapter, endChapter: selection.endChapter }, indexGroup: selection.indexGroup, executionVersions: selection.executionVersions, sourcePolicy: selection.sourceSummary, chapters: selection.chapters.map((chapter) => ({ id: chapter.id, position: chapter.chapterIndex, contentHmac: chapter.contentHmac, sourceVersion: chapter.sourceVersion, l1: chapter.l1, l2: chapter.l2 })) };
+      const inserted = await transaction.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: input.actor.id, request_id: input.requestId, scope: { bookId: input.bookId, startChapter: input.startChapter, endChapter: input.endChapter }, config_snapshot: { operation: "create-analysis", requestFingerprint: fingerprint, executionSnapshot }, concurrency_key: `advanced-analysis:${input.actor.id}:${input.requestId}`, progress: { total: selection.chapterCount, completed: 0, failed: 0, skipped: 0, current: "" } }).returning(PUBLIC_JOB_COLUMNS).executeTakeFirstOrThrow();
       const job = jobRowToPublic(inserted);
       const repository = createAnalysisRepository(transaction, this.cipher);
       const runRow = await repository.createRun({ bookId: input.bookId, createdBy: input.actor.id, templateVersionId: selection.templateVersionId, jobId: job.id, mode: input.mode, startChapter: input.startChapter, endChapter: input.endChapter, status: "queued", executionSignature: selection.scopeHash, totalParts: selection.chapterCount });

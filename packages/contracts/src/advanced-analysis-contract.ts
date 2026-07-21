@@ -92,6 +92,37 @@ export const AnalysisRunCreateInputSchema = z.strictObject({
   idempotencyKey: NonEmptyStringSchema,
 }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
 
+export const AnalysisExecutionVersionsSchema = z.strictObject({
+  workflow: z.strictObject({
+    target: z.literal("analysis-summary"),
+    id: IdSchema,
+    contractVersion: NonEmptyStringSchema,
+    dslHash: NonEmptyStringSchema,
+  }),
+  model: NonEmptyStringSchema,
+  reasoningEffort: NonEmptyStringSchema,
+  executorVersion: NonEmptyStringSchema,
+  l1SchemaVersion: NonEmptyStringSchema,
+  l2SchemaVersion: NonEmptyStringSchema,
+  l2AdmissionVersion: NonEmptyStringSchema,
+});
+
+export const AnalysisSourceSummarySchema = z.strictObject({
+  indexGroupId: IdSchema.nullable(),
+  indexGroupConfigHash: NonEmptyStringSchema.nullable(),
+  chapterSourceVersions: z.array(NonEmptyStringSchema),
+  l1: z.strictObject({ selectedCount: z.number().int().nonnegative(), freshCount: z.number().int().nonnegative() }),
+  l2: z.strictObject({ selectedCount: z.number().int().nonnegative(), freshCount: z.number().int().nonnegative() }),
+  readsL1: z.boolean(),
+  readsL2: z.boolean(),
+  readsOriginalChapters: z.boolean(),
+  reviewedChapterBoundary: z.strictObject({
+    startChapter: ChapterSchema,
+    endChapter: ChapterSchema,
+    maximumChapterCount: z.number().int().positive(),
+  }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" }).nullable(),
+});
+
 export const AnalysisScopePreviewSchema = z.strictObject({
   bookId: IdSchema,
   templateVersionId: IdSchema,
@@ -102,6 +133,8 @@ export const AnalysisScopePreviewSchema = z.strictObject({
   readsL1: z.boolean(),
   readsL2: z.boolean(),
   readsOriginalChapters: z.boolean(),
+  executionVersions: AnalysisExecutionVersionsSchema,
+  sourceSummary: AnalysisSourceSummarySchema,
   scopeHash: AnalysisScopeHashSchema,
 }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
 
@@ -200,6 +233,8 @@ export type AnalysisTemplateDetail = z.infer<typeof AnalysisTemplateDetailSchema
 export type AnalysisScopePreviewInput = z.infer<typeof AnalysisScopePreviewInputSchema>;
 export type AnalysisRunCreateInput = z.infer<typeof AnalysisRunCreateInputSchema>;
 export type AnalysisScopePreview = z.infer<typeof AnalysisScopePreviewSchema>;
+export type AnalysisExecutionVersions = z.infer<typeof AnalysisExecutionVersionsSchema>;
+export type AnalysisSourceSummary = z.infer<typeof AnalysisSourceSummarySchema>;
 export type AnalysisRunSummary = z.infer<typeof AnalysisRunSummarySchema>;
 export type AnalysisRunDetail = z.infer<typeof AnalysisRunDetailSchema>;
 export type AnalysisPartSummary = z.infer<typeof AnalysisPartSummarySchema>;

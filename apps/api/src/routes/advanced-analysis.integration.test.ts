@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "kysely";
 import request from "supertest";
 
+import { AnalysisScopePreviewSchema } from "@novel-analysis/contracts";
 import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../../packages/database/src/testing/postgres.js";
 
@@ -43,8 +45,14 @@ describe("advanced analysis routes", () => {
     expect(versioned.status).toBe(200); expect(versioned.body.template.currentVersionId).not.toBe(templateResponse.body.template.currentVersionId);
     const templates = await request(app()).get(`/api/books/${bookId}/analysis-templates`).set(auth("owner"));
     expect(templates.status).toBe(200); expect(templates.body.templates).toHaveLength(1); expect(JSON.stringify(templates.body)).not.toContain("SENTINEL_PROMPT");
+    expect((await request(app()).get(`/api/books/${bookId}/analysis-templates`).set(auth("member"))).body).toEqual({ templates: [] });
+    expect((await request(app()).get(`/api/books/${bookId}/analysis-templates`).set(auth("admin"))).body).toEqual({ templates: [] });
     const preview = await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("owner")).send({ bookId, templateId, mode: "balanced", startChapter: 1, endChapter: 2 });
-    expect(preview.status).toBe(200);
+    expect(preview.status).toBe(200); expect(AnalysisScopePreviewSchema.parse(preview.body)).toEqual(preview.body);
+    expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("member")).send({ bookId, templateId, mode: "balanced", startChapter: 1, endChapter: 2 })).status).toBe(404);
+    expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("admin")).send({ bookId, templateId, mode: "balanced", startChapter: 1, endChapter: 2 })).status).toBe(404);
+    expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("owner")).send({ bookId, templateId, mode: "unknown", startChapter: 1, endChapter: 2 })).status).toBe(400);
+    expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("owner")).send({ bookId, templateId, mode: "balanced", startChapter: 2, endChapter: 1 })).status).toBe(400);
     const created = await request(app()).post(`/api/books/${bookId}/advanced-analysis`).set(write("owner")).send({ bookId, templateId, templateVersionId: preview.body.templateVersionId, mode: "balanced", startChapter: 1, endChapter: 2, scopeHash: preview.body.scopeHash, idempotencyKey: "api-create" });
     expect(created.status).toBe(201); const runId = created.body.run.id as string;
     const list = await request(app()).get(`/api/books/${bookId}/advanced-analysis`).set(auth("owner"));
@@ -57,6 +65,7 @@ describe("advanced analysis routes", () => {
     expect((await request(app()).delete(`/api/books/${bookId}/advanced-analysis/${runId}`).set(write("admin")).send({})).status).toBe(404);
     const admin = await request(app()).get("/api/admin/advanced-analysis").set(auth("admin"));
     expect(admin.status).toBe(200); expect(admin.body.runs[0]).toMatchObject({ id: runId, createdBy: identities.owner!.id, bookId });
+    expect(Object.keys(admin.body.runs[0]).sort()).toEqual(["bookId", "completedParts", "createdAt", "createdBy", "errorCode", "id", "jobId", "mode", "status", "totalParts", "updatedAt"].sort());
     expect(JSON.stringify(admin.body)).not.toMatch(/SENTINEL_(PROMPT|SCHEMA|CHAPTER)/);
     const controlled = await request(app()).post(`/api/admin/advanced-analysis/${runId}/control`).set(write("admin")).send({ action: "pause", requestId: "admin-pause" });
     expect(controlled.status).toBe(200); expect(controlled.body.job.status).toBe("paused"); expect(JSON.stringify(controlled.body)).not.toMatch(/SENTINEL_(PROMPT|SCHEMA|CHAPTER)/);
@@ -64,6 +73,23 @@ describe("advanced analysis routes", () => {
 
   it("uses CSRF and strict contracts", async () => {
     expect((await request(app()).post(`/api/books/${bookId}/analysis-templates`).set(auth("owner")).send({})).status).toBe(403);
+    expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(auth("owner")).send({})).status).toBe(403);
+    expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).send({})).status).toBe(403);
+    expect((await request(app()).get(`/api/books/${bookId}/analysis-templates`)).status).toBe(401);
     expect((await request(app()).post(`/api/books/${bookId}/analysis-templates`).set(write("owner")).send({ bookId, name: "x", prompt: "p", outputSchema: {}, indexGroupId: null, extra: true })).status).toBe(400);
+  });
+
+  it("hard deletes the complete terminal graph and retains only safe deletion audit", async () => {
+    const template = await request(app()).post(`/api/books/${bookId}/analysis-templates`).set(write("owner")).send({ bookId, name: "Delete", prompt: "DELETE_PROMPT_SENTINEL", outputSchema: { secret: "DELETE_SCHEMA_SENTINEL" }, indexGroupId: groupId });
+    const templateId = template.body.template.id as string;
+    const preview = await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("owner")).send({ bookId, templateId, mode: "balanced", startChapter: 1, endChapter: 2 });
+    const created = await request(app()).post(`/api/books/${bookId}/advanced-analysis`).set(write("owner")).send({ bookId, templateId, templateVersionId: preview.body.templateVersionId, mode: "balanced", startChapter: 1, endChapter: 2, scopeHash: preview.body.scopeHash, idempotencyKey: "delete-graph" });
+    const runId = created.body.run.id as string; const jobId = created.body.job.id as string;
+    await postgres.db.updateTable("analysis_runs").set({ status: "cancelled" }).where("id", "=", runId).execute(); await postgres.db.updateTable("jobs").set({ status: "cancelled" }).where("id", "=", jobId).execute();
+    expect((await request(app()).delete(`/api/books/${bookId}/advanced-analysis/${runId}`).set(write("owner")).send({})).status).toBe(204);
+    const counts = await Promise.all(["analysis_runs", "analysis_parts", "jobs", "job_steps", "job_attempts", "job_events", "job_outbox"].map(async (table) => Number((await sql<{ count: string }>`select count(*)::text as count from ${sql.table(table)}`.execute(postgres.db)).rows[0]!.count)));
+    expect(counts).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    const audit = await postgres.db.selectFrom("audit_logs").selectAll().where("action", "=", "advanced_analysis.deleted").executeTakeFirstOrThrow();
+    expect(audit).toMatchObject({ actor_user_id: identities.owner!.id, target_id: runId, metadata: { bookId, jobId, status: "cancelled" } }); expect(JSON.stringify(audit)).not.toMatch(/DELETE_(PROMPT|SCHEMA)_SENTINEL/);
   });
 });
