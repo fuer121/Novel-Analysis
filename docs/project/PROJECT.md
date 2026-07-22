@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f207db4310b944eb0114a28ccde03bf973636161
 baseline_status: current
-updated_at: 2026-07-22T22:21:12+08:00
+updated_at: 2026-07-22T22:37:55+08:00
 updated_by: controller-agent
-current_phase: phase-4-implementation
-last_checkpoint: CP-20260722-PHASE4-TASK7-MERGED
-next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
+current_phase: phase-4-accepted
+last_checkpoint: CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED
+next_gate: GATE-PHASE5-PLAN-APPROVED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -35,13 +35,14 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 4 | awaiting-gate | Tasks 1-7 均 accepted and merged，等待用户明确决定 implementation Gate |
+| Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
+| Phase 5 | planned | 仅解锁独立规划，未授权编码、正式数据、部署、UAT 或切换 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GATE-PHASE4-IMPLEMENTATION-ACCEPTED | phase-4 | Explicit implementation acceptance decision | controller-agent | main | f207db4310b944eb0114a28ccde03bf973636161 | f207db4310b944eb0114a28ccde03bf973636161 | ready | CP-20260722-PHASE4-TASK7-MERGED | CP-20260722-PHASE4-TASK7-MERGED | request explicit user Gate decision；do not start deployment、formal data、cutover or Phase 5 |
+| PHASE5-PLAN | phase-5 | Independent migration、deployment and cutover planning | unassigned | main | ec2d025abd8528fce05c2f5e28a079b0b6c86d98 | ec2d025abd8528fce05c2f5e28a079b0b6c86d98 | planned | CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED | CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED | wait for explicit authorization to start Phase 5 planning；no implementation or formal operations |
 
 ## Phase Ledgers
 
@@ -87,7 +88,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-Phase 4 Tasks 1-7 已完成并合并；Gate 证据齐备，但必须由用户明确接受或拒绝 `GATE-PHASE4-IMPLEMENTATION-ACCEPTED`
+Phase 4 Gate 已明确通过；Phase 5 仅为 planned，尚未授权规划实施、正式数据、部署、UAT 或切换
 
 ## Next Gate
 
@@ -95,6 +96,7 @@ Phase 4 Tasks 1-7 已完成并合并；Gate 证据齐备，但必须由用户明
 
 ## Evidence Index
 
+- [Phase 4 implementation accepted](checkpoints/CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED.md)
 - [Phase 4 Task 7 merged](checkpoints/CP-20260722-PHASE4-TASK7-MERGED.md)
 - [Phase 4 Task 7 accepted](checkpoints/CP-20260722-PHASE4-TASK7-ACCEPTED.md)
 - [Phase 4 Task 6 merged and Task 7 started](checkpoints/CP-20260722-PHASE4-TASK6-MERGED-TASK7-STARTED.md)
