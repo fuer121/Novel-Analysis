@@ -43,14 +43,50 @@ describe("analysis executor", () => {
 
   afterEach(async () => postgres.destroy());
 
-  async function createClaim(requestId: string, workerId = "worker-a", leaseDurationMs = 30_000) {
+  async function createRun(requestId: string) {
     const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
     const input = { bookId, templateId, actor: { id: ownerId, role: "member" as const }, mode: "full_text" as const, startChapter: 1, endChapter: 2 };
     const preview = await service.preview(input);
-    const created = await service.create({ ...input, templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId });
+    return service.create({ ...input, templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId });
+  }
+
+  async function createClaim(requestId: string, workerId = "worker-a", leaseDurationMs = 30_000) {
+    const created = await createRun(requestId);
     const claim = await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs }).claimNext(created.job.id, workerId, new Date());
     return { ...created, claim: claim! };
   }
+
+  it("cancels a queued analysis Job, step, and run without exposing content or allowing a claim", async () => {
+    const created = await createRun("queued-cancel");
+
+    await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "cancel", requestId: "queued-cancel-control" });
+
+    expect((await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status).toBe("cancelled");
+    expect(await postgres.db.selectFrom("job_steps").select("status").where("job_id", "=", created.job.id).execute()).toEqual([{ status: "cancelled" }]);
+    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("cancelled");
+    await expect(new PostgresStepLeaseService({ database: postgres.db }).claimNext(created.job.id, "late-worker", new Date())).resolves.toBeNull();
+    const ordinary = JSON.stringify({
+      events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", created.job.id).execute(),
+      audit: await postgres.db.selectFrom("audit_logs").selectAll().where("target_id", "=", created.job.id).execute(),
+    });
+    expect(ordinary).not.toMatch(/SENTINEL_(PROMPT|CHAPTER)/);
+  });
+
+  it.each(["completed", "failed"] as const)("does not overwrite a %s analysis run when its Job is cancelled", async (terminalStatus) => {
+    const created = await createRun(`terminal-run-${terminalStatus}`);
+    const encrypted = cipher.encrypt(JSON.stringify({ answer: "TERMINAL_RESULT" }));
+    await postgres.db.updateTable("analysis_runs").set(terminalStatus === "completed" ? {
+      status: terminalStatus,
+      result_ciphertext: encrypted.ciphertext,
+      result_nonce: encrypted.nonce,
+      result_tag: encrypted.tag,
+      result_key_version: encrypted.keyVersion,
+    } : { status: terminalStatus }).where("id", "=", created.run.id).execute();
+
+    await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "cancel", requestId: `cancel-${terminalStatus}-run` });
+
+    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe(terminalStatus);
+  });
 
   it("commits encrypted parts and a schema-valid final result atomically", async () => {
     const { run, claim } = await createClaim("complete");
@@ -159,6 +195,29 @@ describe("analysis executor", () => {
     expect((await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status).toBe("completed");
     expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("completed");
     expect(calls.filter((key) => key.endsWith(":part:1"))).toHaveLength(1);
+  });
+
+  it("cancels a production Worker graph after it exits at a pause boundary", async () => {
+    const created = await createClaim("worker-pause-cancel", "pause-cancel-seed", 5_000);
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    const provider = {
+      async runAnalysisSummary() {
+        await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "pause", requestId: "worker-pause-before-cancel" });
+        return { text: "PAUSE_BOUNDARY_RESULT" };
+      },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    const worker = new JobWorker({ database: postgres.db, workerId: "pause-cancel-worker", executor: new AnalysisExecutor({ database: postgres.db, cipher, dify: provider, executionConfig }) });
+
+    await worker.processJob(created.job.id);
+    await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "cancel", requestId: "cancel-paused-boundary" });
+
+    expect((await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status).toBe("cancelled");
+    expect((await postgres.db.selectFrom("job_steps").select("status").where("id", "=", created.claim.stepId).executeTakeFirstOrThrow()).status).toBe("cancelled");
+    expect((await postgres.db.selectFrom("job_attempts").select("status").where("step_id", "=", created.claim.stepId).orderBy("attempt_no", "desc").executeTakeFirstOrThrow()).status).toBe("cancelled");
+    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("cancelled");
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    await expect(new PostgresStepLeaseService({ database: postgres.db }).claimNext(created.job.id, "recovery-worker", new Date())).resolves.toBeNull();
   });
 
   it("cancels without persisting a late provider result", async () => {
