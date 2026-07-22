@@ -124,6 +124,99 @@ describe("Phase 4 privacy, deletion, legacy, and sentinel evidence", () => {
     }
   });
 
+  it("keeps a successful terminal result encrypted and denies member and administrator result reads", async () => {
+    harness = await startPhase4ProcessHarness();
+    const fixture = await harness.prepareGoldenFixtures();
+    const templateResponse = await fixture.requestAs("owner", `/books/${fixture.bookId}/analysis-templates`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bookId: fixture.bookId,
+        name: "Successful result evidence",
+        prompt: "PHASE4_SUCCESS_PROMPT",
+        outputSchema,
+        indexGroupId: fixture.groupId,
+      }),
+    });
+    expect(templateResponse.status).toBe(201);
+    const template = (await templateResponse.json() as { template: { id: string } }).template;
+    const previewResponse = await fixture.requestAs("owner", `/books/${fixture.bookId}/advanced-analysis/preview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookId: fixture.bookId, templateId: template.id, mode: "full_text", startChapter: 1, endChapter: 1 }),
+    });
+    expect(previewResponse.status).toBe(200);
+    const preview = await previewResponse.json() as { templateVersionId: string; scopeHash: string };
+    const createdResponse = await fixture.requestAs("owner", `/books/${fixture.bookId}/advanced-analysis`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        bookId: fixture.bookId,
+        templateId: template.id,
+        templateVersionId: preview.templateVersionId,
+        mode: "full_text",
+        startChapter: 1,
+        endChapter: 1,
+        scopeHash: preview.scopeHash,
+        idempotencyKey: "phase4-success-result",
+      }),
+    });
+    expect(createdResponse.status).toBe(201);
+    const created = await createdResponse.json() as { run: { id: string }; job: { id: string } };
+    expect(await fixture.waitForRun(created.run.id)).toMatchObject({
+      status: "completed",
+      result: { summary: "phase4-result" },
+    });
+
+    const ownerDetail = await fixture.requestAs("owner", `/books/${fixture.bookId}/advanced-analysis/${created.run.id}`);
+    expect(ownerDetail.status).toBe(200);
+    expect(await ownerDetail.json()).toMatchObject({ run: { status: "completed", result: { summary: "phase4-result" } } });
+    for (const actor of ["member", "admin"] as const) {
+      const denied = await fixture.requestAs(actor, `/books/${fixture.bookId}/advanced-analysis/${created.run.id}`);
+      expect(denied.status).toBe(404);
+      expect(await denied.json()).toEqual({ error: "not_found" });
+    }
+
+    const successfulRows = await sql<{ table_name: string; row_json: string }>`
+      select table_name, row_json::text from (
+        select 'analysis_runs' table_name, row_to_json(t) row_json from analysis_runs t where id = ${created.run.id}
+        union all select 'analysis_parts', row_to_json(t) from analysis_parts t where run_id = ${created.run.id}
+        union all select 'jobs', row_to_json(t) from jobs t where id = ${created.job.id}
+        union all select 'job_steps', row_to_json(t) from job_steps t where job_id = ${created.job.id}
+        union all select 'job_events', row_to_json(t) from job_events t where job_id = ${created.job.id}
+        union all select 'job_outbox', row_to_json(t) from job_outbox t where job_id = ${created.job.id}
+        union all select 'job_attempts', row_to_json(t) from job_attempts t where step_id in (select id from job_steps where job_id = ${created.job.id})
+        union all select 'audit_logs', row_to_json(t) from audit_logs t
+      ) rows
+    `.execute(harness.database);
+    expect(successfulRows.rows.map((row) => row.table_name)).toEqual(expect.arrayContaining([
+      "analysis_runs",
+      "analysis_parts",
+      "jobs",
+      "job_steps",
+      "job_events",
+      "job_outbox",
+      "job_attempts",
+      "audit_logs",
+    ]));
+    const persistedAndMetadata = successfulRows.rows.map((row) => `${row.table_name}:${row.row_json}`).join("\n");
+    expect(persistedAndMetadata).not.toContain("phase4-result");
+    const ordinaryJobResponses = await Promise.all((["owner", "member", "admin"] as const).map(async (actor) => {
+      const response = await fixture.requestAs(actor, `/jobs/${created.job.id}`);
+      expect(response.status).toBe(200);
+      return response.text();
+    }));
+    const ordinaryAnalysisResponses = await Promise.all([
+      fixture.requestAs("owner", `/books/${fixture.bookId}/advanced-analysis`),
+      fixture.requestAs("admin", "/admin/advanced-analysis"),
+    ]).then((responses) => Promise.all(responses.map((response) => {
+      expect(response.status).toBe(200);
+      return response.text();
+    })));
+    expect([...ordinaryJobResponses, ...ordinaryAnalysisResponses].join("\n")).not.toContain("phase4-result");
+    expect([...harness.api.logs, ...harness.worker.logs].join("\n")).not.toContain("phase4-result");
+  });
+
   it("keeps plaintext, credentials, and controlled provider errors out of persisted and ordinary surfaces", async () => {
     harness = await startPhase4ProcessHarness();
     const fixture = await harness.prepareGoldenFixtures();

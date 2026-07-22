@@ -1,9 +1,16 @@
 import { createHash } from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createServer as createNetServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { AdvancedAnalysisExecutionSnapshotSchema } from "@novel-analysis/contracts";
+import {
+  AdvancedAnalysisExecutionSnapshotSchema,
+  type AdvancedAnalysisExecutionSnapshot,
+  type AnalysisMode,
+} from "@novel-analysis/contracts";
 import {
   createAnalysisRepository,
   createContentCipher,
@@ -11,12 +18,17 @@ import {
   createLibraryRepository,
   type DatabaseConnection,
 } from "@novel-analysis/database";
-import { L1_ROUTE_SCHEMA_VERSION } from "@novel-analysis/jobs";
+import {
+  L1_ROUTE_SCHEMA_VERSION,
+  L2_ADMISSION_VERSION,
+  L2_FACT_SCHEMA_VERSION,
+} from "@novel-analysis/jobs";
 import { sql } from "kysely";
 import {
   createDisposablePostgres,
   type DisposablePostgres,
 } from "../../../packages/database/src/testing/postgres.js";
+import { ANALYSIS_MODE_GOLDEN } from "../fixtures/analysis-mode-golden.js";
 
 const CONTENT_KEY = Buffer.alloc(32, 41).toString("base64");
 const HMAC_KEY = Buffer.alloc(32, 42).toString("base64");
@@ -28,6 +40,16 @@ const cipher = createContentCipher({
 type DifyCall = {
   authorization: string | undefined;
   inputs: Record<string, unknown>;
+};
+
+type V8Coverage = {
+  result?: Array<{
+    url: string;
+    functions: Array<{
+      functionName: string;
+      ranges: Array<{ count: number }>;
+    }>;
+  }>;
 };
 
 interface ManagedChild {
@@ -84,6 +106,20 @@ function startChild(entry: string, environment: NodeJS.ProcessEnv, logs: string[
   };
 }
 
+function readWorkerCoverage(directory: string): { decryptFrozenChapter: number } {
+  let decryptFrozenChapter = 0;
+  for (const filename of readdirSync(directory).filter((entry) => entry.endsWith(".json"))) {
+    const coverage = JSON.parse(readFileSync(join(directory, filename), "utf8")) as V8Coverage;
+    for (const script of coverage.result ?? []) {
+      if (!script.url.endsWith("/apps/worker/src/analysis-executor.ts")) continue;
+      for (const fn of script.functions) {
+        if (fn.functionName === "decryptFrozenChapter") decryptFrozenChapter += fn.ranges[0]?.count ?? 0;
+      }
+    }
+  }
+  return { decryptFrozenChapter };
+}
+
 async function waitUntil(check: () => Promise<boolean>, label: string, children: ManagedChild[]): Promise<void> {
   const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
@@ -136,7 +172,7 @@ async function startDifyFake(): Promise<{
           return;
         }
         const result = context.stage === "final"
-          ? JSON.stringify({ items: [{ label: "accepted" }], summary: "phase4-result" })
+          ? JSON.stringify({ items: [{ label: "accepted & <verified> \"quoted\"" }], summary: "phase4-result" })
           : `phase4-${context.stage ?? "unknown"}-${context.position ?? context.batchIndex ?? calls.length}`;
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ data: { outputs: { result } } }));
@@ -187,6 +223,7 @@ export interface Phase4ProcessHarness {
   readonly api: { origin: string; child: ChildProcess; logs: string[] };
   readonly worker: { child: ChildProcess; logs: string[] };
   prepareGoldenFixtures(): Promise<Phase4GoldenFixture>;
+  captureWorkerCoverage(): Promise<{ decryptFrozenChapter: number }>;
   killWorker(): Promise<void>;
   restartWorker(): Promise<void>;
   stop(): Promise<void>;
@@ -201,7 +238,12 @@ export interface Phase4GoldenFixture {
   waitForRun(runId: string): Promise<Record<string, unknown>>;
   difyCallsSince(index: number): DifyCall[];
   difyCallCount(): number;
-  executionSnapshot(runId: string): Promise<Record<string, unknown>>;
+  executionSnapshot(runId: string): Promise<AdvancedAnalysisExecutionSnapshot>;
+  expectedExecutionSnapshot(input: {
+    mode: AnalysisMode;
+    scopeHash: string;
+    template: AdvancedAnalysisExecutionSnapshot["template"];
+  }): AdvancedAnalysisExecutionSnapshot;
   blockPart(position: number): { started: Promise<void>; release(): void };
   actorId(actor: Phase4Actor): string;
   legacyRequestAs(actor: Phase4Actor, path: string, init?: RequestInit): Promise<Response>;
@@ -237,6 +279,7 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
     children.push(api);
     const workerEnvironment = {
       ...sharedEnvironment,
+      NODE_V8_COVERAGE: mkdtempSync(join(tmpdir(), "phase4-task7-worker-coverage-")),
       DIFY_BASE_URL: dify.origin,
       DIFY_CHAPTER_IMPORT_KEY: "phase4-chapter-key",
       DIFY_L1_WORKFLOW_API_KEY: "phase4-l1-key",
@@ -309,7 +352,7 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
           contentHash: createHash("sha256").update(l2PromptContent).digest("hex"),
         });
         const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "phase4-l1-v1", dslHash: "phase4-l1-dsl" });
-        await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "phase4-summary-v1", dslHash: "phase4-summary-dsl" });
+        const summaryWorkflow = await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "phase4-summary-v1", dslHash: "phase4-summary-dsl" });
         const group = await indexes.createIndexGroup({
           bookId: book.id,
           key: "general",
@@ -332,6 +375,7 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
           [55, { importance: 0.8, confidence: 0.4 }],
           [67, { importance: 0.7, confidence: 0.5 }],
         ]);
+        const frozenChapters: AdvancedAnalysisExecutionSnapshot["chapters"] = [];
         for (let position = 1; position <= 100; position += 1) {
           const chapter = await library.insertChapter({
             bookId: book.id,
@@ -341,28 +385,55 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
             contentHmac: `phase4-hmac-${position}`,
             sourceVersion: "phase4-source-v1",
           });
-          await indexes.putL1Index({
+          const route = {
+            route_schema_version: L1_ROUTE_SCHEMA_VERSION,
+            route_entities: [],
+            route_keywords: [`chapter-${position}`],
+            signals: [],
+            category_scores: {},
+          };
+          const l1 = await indexes.putL1Index({
             chapterId: chapter.id,
             promptVersionId: l1Prompt.id,
             workflowVersionId: l1Workflow.id,
             inputSignature: `phase4-l1-${position}`,
             status: "fresh",
-            route: {
-              route_schema_version: L1_ROUTE_SCHEMA_VERSION,
-              route_entities: [],
-              route_keywords: [`chapter-${position}`],
-              signals: [],
-              category_scores: {},
-            },
+            route,
           });
           await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: `phase4-l2-${position}`, status: "fresh" });
-          await indexes.addFact({
+          const metadata = risk.get(position) ?? { importance: 0.1, confidence: 0.9 };
+          const fact = await indexes.addFact({
             groupId: group.id,
             chapterId: chapter.id,
             subjectKey: "phase4-subject",
             factType: "event",
             plaintext: `PHASE4_FACT_PLAINTEXT_${position}`,
-            metadata: risk.get(position) ?? { importance: 0.1, confidence: 0.9 },
+            metadata,
+          });
+          frozenChapters.push({
+            id: chapter.id,
+            position,
+            contentHmac: `phase4-hmac-${position}`,
+            sourceVersion: "phase4-source-v1",
+            l1: {
+              id: l1.id,
+              promptVersionId: l1Prompt.id,
+              workflowVersionId: l1Workflow.id,
+              inputSignature: `phase4-l1-${position}`,
+              status: "fresh",
+              route,
+            },
+            l2: {
+              inputSignature: `phase4-l2-${position}`,
+              status: "fresh",
+              facts: [{
+                id: fact.id,
+                subjectKey: "phase4-subject",
+                factType: "event",
+                payload: `PHASE4_FACT_PLAINTEXT_${position}`,
+                metadata,
+              }],
+            },
           });
         }
 
@@ -400,7 +471,59 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
               schema: AdvancedAnalysisExecutionSnapshotSchema,
             });
             if (!snapshot) throw new Error(`Missing execution snapshot for ${runId}`);
-            return snapshot as unknown as Record<string, unknown>;
+            return snapshot;
+          },
+          expectedExecutionSnapshot(input) {
+            const expected = ANALYSIS_MODE_GOLDEN[input.mode];
+            const usesIndexes = input.mode !== "full_text";
+            return AdvancedAnalysisExecutionSnapshotSchema.parse({
+              bookId: book.id,
+              scopeHash: input.scopeHash,
+              template: input.template,
+              mode: input.mode,
+              range: { startChapter: 1, endChapter: 100 },
+              indexGroup: {
+                id: group.id,
+                key: "general",
+                name: "Phase 4 General",
+                categoryScope: "general",
+                configHash: "phase4-group-v1",
+                promptVersionId: l2Prompt.id,
+              },
+              executionVersions: {
+                workflow: {
+                  target: "analysis-summary",
+                  id: summaryWorkflow.id,
+                  contractVersion: "phase4-summary-v1",
+                  dslHash: "phase4-summary-dsl",
+                },
+                model: "phase4-model",
+                reasoningEffort: "medium",
+                executorVersion: "phase4-executor-v1",
+                l1SchemaVersion: L1_ROUTE_SCHEMA_VERSION,
+                l2SchemaVersion: L2_FACT_SCHEMA_VERSION,
+                l2AdmissionVersion: L2_ADMISSION_VERSION,
+              },
+              sourcePolicy: {
+                indexGroupId: group.id,
+                indexGroupConfigHash: "phase4-group-v1",
+                chapterSourceVersions: ["phase4-source-v1"],
+                l1: { selectedCount: expected.l1, freshCount: expected.l1 },
+                l2: { selectedCount: expected.l2, freshCount: expected.l2 },
+                readsL1: usesIndexes,
+                readsL2: usesIndexes,
+                readsOriginalChapters: input.mode !== "fast_index",
+                reviewedChapterBoundary: expected.reviewedPositions.length === 0 ? null : {
+                  startChapter: 1,
+                  endChapter: 100,
+                  maximumChapterCount: expected.reviewedPositions.length,
+                },
+              },
+              chapters: frozenChapters.map((chapter) => ({
+                ...chapter,
+                l2: input.mode === "full_text" && chapter.l2 ? { ...chapter.l2, facts: [] } : chapter.l2,
+              })),
+            });
           },
           blockPart(position: number) {
             return dify!.blockPart(position);
@@ -443,6 +566,10 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
             return [...dify!.controlledErrors];
           },
         };
+      },
+      async captureWorkerCoverage() {
+        await worker.stop();
+        return readWorkerCoverage(workerEnvironment.NODE_V8_COVERAGE);
       },
       async killWorker() {
         await worker.stop("SIGKILL");
