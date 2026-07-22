@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   AdminAnalysisRunMetadataSchema,
+  AdvancedAnalysisExecutionConfigSchema,
+  AdvancedAnalysisExecutionSnapshotSchema,
   AnalysisModeSchema,
   AnalysisPartSummarySchema,
   AnalysisRunCreateInputSchema,
@@ -30,6 +32,26 @@ const ids = {
 const now = "2026-07-21T12:00:00.000Z";
 
 describe("advanced analysis contracts", () => {
+  it("strictly validates explicit execution config and encrypted snapshot payload", () => {
+    const config = { model: "deepseek-chat", reasoningEffort: "high", executorVersion: "analysis-v1" };
+    expect(AdvancedAnalysisExecutionConfigSchema.parse(config)).toEqual(config);
+    expect(AdvancedAnalysisExecutionConfigSchema.safeParse({ ...config, extra: true }).success).toBe(false);
+    const snapshot = {
+      bookId: ids.book, scopeHash: "a".repeat(64), template: { id: ids.template, versionId: ids.version, contentHash: "b".repeat(64) }, mode: "balanced",
+      range: { startChapter: 1, endChapter: 1 }, indexGroup: { id: ids.group, key: "people", name: "People", categoryScope: "general", configHash: "group-v1", promptVersionId: ids.version },
+      executionVersions: { workflow: { target: "analysis-summary", id: ids.job, contractVersion: "v1", dslHash: "dsl" }, ...config, l1SchemaVersion: "l1-route-v1", l2SchemaVersion: "l2-v1", l2AdmissionVersion: "admission-v1" },
+      sourcePolicy: { indexGroupId: ids.group, indexGroupConfigHash: "group-v1", chapterSourceVersions: ["source-v1"], l1: { selectedCount: 1, freshCount: 1 }, l2: { selectedCount: 1, freshCount: 1 }, readsL1: true, readsL2: true, readsOriginalChapters: true, reviewedChapterBoundary: { startChapter: 1, endChapter: 1, maximumChapterCount: 1 } },
+      chapters: [{ id: ids.part, position: 1, contentHmac: "chapter-hmac", sourceVersion: "source-v1", l1: { id: ids.analysis, promptVersionId: ids.version, workflowVersionId: ids.job, inputSignature: "l1-signature", status: "fresh", route: { route_schema_version: "l1-route-v1", route_entities: [], route_keywords: ["L1_ROUTE_SENTINEL"], signals: [], category_scores: {} } }, l2: { inputSignature: "l2-signature", status: "fresh", facts: [{ id: ids.analysis, subjectKey: "hero", factType: "event", payload: "FACT_PAYLOAD_SENTINEL", metadata: { category: "event" } }] } }],
+    };
+    expect(AdvancedAnalysisExecutionSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    expect(AdvancedAnalysisExecutionSnapshotSchema.safeParse({ ...snapshot, plaintextChapter: "forbidden" }).success).toBe(false);
+    const l1 = snapshot.chapters[0]!.l1!;
+    expect(AdvancedAnalysisExecutionSnapshotSchema.safeParse({ ...snapshot, chapters: [{ ...snapshot.chapters[0], l1: { ...l1, route: undefined } }] }).success).toBe(false);
+    expect(AdvancedAnalysisExecutionSnapshotSchema.safeParse({ ...snapshot, chapters: [{ ...snapshot.chapters[0], l1: { ...l1, route: { unexpected: "QUALITY_REVIEW_PAYLOAD" } } }] }).success).toBe(false);
+    expect(AdvancedAnalysisExecutionSnapshotSchema.safeParse({ ...snapshot, chapters: [{ ...snapshot.chapters[0], l1: { ...l1, route: { ...l1.route, route_schema_version: "l1-route-v2" } } }] }).success).toBe(false);
+    expect(AdvancedAnalysisExecutionSnapshotSchema.safeParse({ ...snapshot, chapters: [{ ...snapshot.chapters[0], l1: { ...l1, route: { score: Number.NaN } } }] }).success).toBe(false);
+    expect(AdvancedAnalysisExecutionSnapshotSchema.safeParse({ ...snapshot, chapters: [{ ...snapshot.chapters[0], l1: { ...l1, route: { createdAt: new Date() } } }] }).success).toBe(false);
+  });
   it("accepts exactly the four compatible modes", () => {
     expect(AnalysisModeSchema.options).toEqual([
       "fast_index", "balanced", "precision", "full_text",
@@ -72,10 +94,23 @@ describe("advanced analysis contracts", () => {
       startChapter: 3, endChapter: 12, chapterCount: 10,
       reviewChapterCount: 3, readsL1: true, readsL2: true,
       readsOriginalChapters: true, scopeHash: "a".repeat(64),
+      executionVersions: {
+        workflow: { target: "analysis-summary", id: ids.job, contractVersion: "summary-v1", dslHash: "dsl-v1" },
+        model: "deepseek-chat", reasoningEffort: "workflow-default", executorVersion: "advanced-analysis-v1",
+        l1SchemaVersion: "l1-route-v1", l2SchemaVersion: "l2-facts-v1", l2AdmissionVersion: "l2-admission-v1",
+      },
+      sourceSummary: {
+        indexGroupId: ids.group, indexGroupConfigHash: "group-v1", chapterSourceVersions: ["source-v1"],
+        l1: { selectedCount: 10, freshCount: 8 }, l2: { selectedCount: 10, freshCount: 7 },
+        readsL1: true, readsL2: true, readsOriginalChapters: true,
+        reviewedChapterBoundary: { startChapter: 3, endChapter: 12, maximumChapterCount: 3 },
+      },
     };
 
     expect(AnalysisScopePreviewSchema.parse(preview)).toEqual(preview);
     expect(AnalysisScopePreviewSchema.safeParse({ ...preview, endChapter: 2 }).success).toBe(false);
+    expect(AnalysisScopePreviewSchema.safeParse({ ...preview, executionVersions: { ...preview.executionVersions, unknown: true } }).success).toBe(false);
+    expect(AnalysisScopePreviewSchema.safeParse({ ...preview, sourceSummary: { ...preview.sourceSummary, prompt: "private" } }).success).toBe(false);
     for (const scopeHash of ["sha256:scope-v1", "a".repeat(63), "A".repeat(64), "g".repeat(64)]) {
       expect(AnalysisScopePreviewSchema.safeParse({ ...preview, scopeHash }).success).toBe(false);
     }

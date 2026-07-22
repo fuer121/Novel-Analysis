@@ -2,13 +2,13 @@ import { z } from "zod";
 
 import type { AnalysisMode, AnalysisPartStatus, AnalysisRunStatus, DatabaseExecutor } from "../db.js";
 import type { ContentCipher, EncryptedContent } from "../library/content-encryption.js";
-import { decryptJson, encryptJson } from "./content.js";
+import { decryptJson, encryptJson, type ParseSchema } from "./content.js";
 
 const JsonSchema = z.json();
 export interface AnalysisActor { id: string; role: "admin" | "member" }
 export interface CreateAnalysisTemplateInput { bookId: string; createdBy: string; name: string; prompt: string; outputSchema: unknown; contentHash: string; indexGroupId: string | null }
 export interface UpdateAnalysisTemplateInput { templateId: string; actor: AnalysisActor; name: string; prompt: string; outputSchema: unknown; contentHash: string; indexGroupId: string | null }
-export interface CreateAnalysisRunInput { bookId: string; createdBy: string; templateVersionId: string; jobId: string; mode: AnalysisMode; startChapter: number; endChapter: number; status: AnalysisRunStatus; executionSignature: string; totalParts: number }
+export interface CreateAnalysisRunInput { bookId: string; createdBy: string; templateVersionId: string; jobId: string; mode: AnalysisMode; startChapter: number; endChapter: number; status: AnalysisRunStatus; executionSignature: string; totalParts: number; executionSnapshot?: unknown; executionSnapshotSchema?: ParseSchema<unknown> }
 export interface CreateAnalysisPartInput { runId: string; position: number; kind: string; status: AnalysisPartStatus; inputSignature: string }
 
 const encrypted = (row: { result_ciphertext: Buffer | null; result_nonce: Buffer | null; result_tag: Buffer | null; result_key_version: string | null }): EncryptedContent | null => row.result_ciphertext === null ? null : ({ ciphertext: row.result_ciphertext, nonce: row.result_nonce!, tag: row.result_tag!, keyVersion: row.result_key_version! });
@@ -59,10 +59,12 @@ export function createAnalysisRepository(db: DatabaseExecutor, cipher: ContentCi
       return { id: row.id, bookId: row.book_id, name: row.name, currentVersionId: row.current_version_id!, indexGroupId: row.index_group_id, prompt: cipher.decrypt({ ciphertext: row.prompt_ciphertext, nonce: row.prompt_nonce, tag: row.prompt_tag, keyVersion: row.prompt_key_version }), outputSchema: decryptJson(cipher, { ciphertext: row.schema_ciphertext, nonce: row.schema_nonce, tag: row.schema_tag, keyVersion: row.schema_key_version }, JsonSchema), createdAt: row.created_at, updatedAt: row.updated_at };
     },
     async createRun(input: CreateAnalysisRunInput) {
+      if ((input.executionSnapshot === undefined) !== (input.executionSnapshotSchema === undefined)) throw new Error("Invalid analysis execution snapshot");
+      const snapshot = input.executionSnapshotSchema ? encryptJson(cipher, input.executionSnapshotSchema.parse(input.executionSnapshot)) : null;
       const ownership = await db.selectFrom("analysis_template_versions as v").innerJoin("analysis_templates as t", "t.id", "v.template_id").select(["t.book_id", "t.created_by"]).where("v.id", "=", input.templateVersionId).executeTakeFirst();
       const job = await db.selectFrom("jobs").select("requested_by").where("id", "=", input.jobId).executeTakeFirst();
       if (!ownership || !job || ownership.book_id !== input.bookId || ownership.created_by !== input.createdBy || job.requested_by !== input.createdBy) throw new Error("Invalid analysis run");
-      return db.insertInto("analysis_runs").values({ book_id: input.bookId, created_by: input.createdBy, template_version_id: input.templateVersionId, job_id: input.jobId, mode: input.mode, start_chapter: input.startChapter, end_chapter: input.endChapter, status: input.status, execution_signature: input.executionSignature, total_parts: input.totalParts, diagnostics: {} }).returningAll().executeTakeFirstOrThrow();
+      return db.insertInto("analysis_runs").values({ book_id: input.bookId, created_by: input.createdBy, template_version_id: input.templateVersionId, job_id: input.jobId, mode: input.mode, start_chapter: input.startChapter, end_chapter: input.endChapter, status: input.status, execution_signature: input.executionSignature, execution_snapshot_ciphertext: snapshot?.ciphertext ?? null, execution_snapshot_nonce: snapshot?.nonce ?? null, execution_snapshot_auth_tag: snapshot?.tag ?? null, execution_snapshot_key_version: snapshot?.keyVersion ?? null, total_parts: input.totalParts, diagnostics: {} }).returningAll().executeTakeFirstOrThrow();
     },
     async createPart(input: CreateAnalysisPartInput) {
       return db.insertInto("analysis_parts").values({ run_id: input.runId, position: input.position, kind: input.kind, status: input.status, input_signature: input.inputSignature, result_ciphertext: null, result_nonce: null, result_tag: null, result_key_version: null, error_code: null, output_ref: null }).returningAll().executeTakeFirstOrThrow();
@@ -80,6 +82,17 @@ export function createAnalysisRepository(db: DatabaseExecutor, cipher: ContentCi
       const row = await authorizeRun(db, input.runId, input.actor);
       const result = encrypted(row);
       return result ? decryptJson(cipher, result, JsonSchema) : null;
+    },
+    async getRunExecutionSnapshot<T>(input: { runId: string; actor: AnalysisActor; schema: ParseSchema<T> }) {
+      const row = await authorizeRun(db, input.runId, input.actor);
+      if (!row.execution_snapshot_ciphertext) return null;
+      return decryptJson(cipher, { ciphertext: row.execution_snapshot_ciphertext, nonce: row.execution_snapshot_nonce!, tag: row.execution_snapshot_auth_tag!, keyVersion: row.execution_snapshot_key_version! }, input.schema);
+    },
+    async getRunExecutionSnapshotForExecutor<T>(input: { runId: string; schema: ParseSchema<T> }) {
+      const row = await db.selectFrom("analysis_runs").select(["execution_snapshot_ciphertext", "execution_snapshot_nonce", "execution_snapshot_auth_tag", "execution_snapshot_key_version"]).where("id", "=", input.runId).executeTakeFirst();
+      if (!row) throw new Error("Analysis access denied");
+      if (!row.execution_snapshot_ciphertext) return null;
+      return decryptJson(cipher, { ciphertext: row.execution_snapshot_ciphertext, nonce: row.execution_snapshot_nonce!, tag: row.execution_snapshot_auth_tag!, keyVersion: row.execution_snapshot_key_version! }, input.schema);
     },
     async findReusablePart(input: { runId: string; position: number; kind: string; inputSignature: string; actor: AnalysisActor }) {
       await authorizeRun(db, input.runId, input.actor);

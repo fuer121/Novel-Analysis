@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { L1IndexOutputSchema } from "./dify-contract.js";
+import { FactRetrievalMetadataSchema } from "./library-contract.js";
 
 const IdSchema = z.string().uuid();
 const ChapterSchema = z.number().int().positive();
@@ -92,6 +94,70 @@ export const AnalysisRunCreateInputSchema = z.strictObject({
   idempotencyKey: NonEmptyStringSchema,
 }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
 
+export const AdvancedAnalysisExecutionConfigSchema = z.strictObject({
+  model: NonEmptyStringSchema,
+  reasoningEffort: NonEmptyStringSchema,
+  executorVersion: NonEmptyStringSchema,
+});
+
+export const AnalysisExecutionVersionsSchema = z.strictObject({
+  workflow: z.strictObject({
+    target: z.literal("analysis-summary"),
+    id: IdSchema,
+    contractVersion: NonEmptyStringSchema,
+    dslHash: NonEmptyStringSchema,
+  }),
+  ...AdvancedAnalysisExecutionConfigSchema.shape,
+  l1SchemaVersion: NonEmptyStringSchema,
+  l2SchemaVersion: NonEmptyStringSchema,
+  l2AdmissionVersion: NonEmptyStringSchema,
+});
+
+export const AnalysisSourceSummarySchema = z.strictObject({
+  indexGroupId: IdSchema.nullable(),
+  indexGroupConfigHash: NonEmptyStringSchema.nullable(),
+  chapterSourceVersions: z.array(NonEmptyStringSchema),
+  l1: z.strictObject({ selectedCount: z.number().int().nonnegative(), freshCount: z.number().int().nonnegative() }),
+  l2: z.strictObject({ selectedCount: z.number().int().nonnegative(), freshCount: z.number().int().nonnegative() }),
+  readsL1: z.boolean(),
+  readsL2: z.boolean(),
+  readsOriginalChapters: z.boolean(),
+  reviewedChapterBoundary: z.strictObject({
+    startChapter: ChapterSchema,
+    endChapter: ChapterSchema,
+    maximumChapterCount: z.number().int().positive(),
+  }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" }).nullable(),
+});
+
+export const AdvancedAnalysisExecutionSnapshotSchema = z.strictObject({
+  bookId: IdSchema,
+  scopeHash: AnalysisScopeHashSchema,
+  template: z.strictObject({ id: IdSchema, versionId: IdSchema, contentHash: AnalysisScopeHashSchema }),
+  mode: AnalysisModeSchema,
+  range: z.strictObject({ ...ChapterRangeSchema }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" }),
+  indexGroup: z.strictObject({ id: IdSchema, key: NonEmptyStringSchema, name: NonEmptyStringSchema, categoryScope: z.enum(["general", "magical_creature"]), configHash: NonEmptyStringSchema, promptVersionId: IdSchema }).nullable(),
+  executionVersions: AnalysisExecutionVersionsSchema,
+  sourcePolicy: AnalysisSourceSummarySchema,
+  chapters: z.array(z.strictObject({
+    id: IdSchema,
+    position: ChapterSchema,
+    contentHmac: NonEmptyStringSchema,
+    sourceVersion: NonEmptyStringSchema,
+    l1: z.strictObject({ id: IdSchema, promptVersionId: IdSchema, workflowVersionId: IdSchema, inputSignature: NonEmptyStringSchema, status: z.enum(["fresh", "failed", "stale"]), route: L1IndexOutputSchema }).nullable(),
+    l2: z.strictObject({
+      inputSignature: NonEmptyStringSchema,
+      status: z.enum(["fresh", "failed", "stale"]),
+      facts: z.array(z.strictObject({ id: IdSchema, subjectKey: NonEmptyStringSchema, factType: NonEmptyStringSchema, payload: NonEmptyStringSchema, metadata: FactRetrievalMetadataSchema })),
+    }).nullable(),
+  })),
+}).superRefine((snapshot, context) => {
+  snapshot.chapters.forEach((chapter, index) => {
+    if (chapter.l1 && chapter.l1.route.route_schema_version !== snapshot.executionVersions.l1SchemaVersion) {
+      context.addIssue({ code: "custom", message: "L1 route schema version mismatch", path: ["chapters", index, "l1", "route", "route_schema_version"] });
+    }
+  });
+});
+
 export const AnalysisScopePreviewSchema = z.strictObject({
   bookId: IdSchema,
   templateVersionId: IdSchema,
@@ -102,6 +168,8 @@ export const AnalysisScopePreviewSchema = z.strictObject({
   readsL1: z.boolean(),
   readsL2: z.boolean(),
   readsOriginalChapters: z.boolean(),
+  executionVersions: AnalysisExecutionVersionsSchema,
+  sourceSummary: AnalysisSourceSummarySchema,
   scopeHash: AnalysisScopeHashSchema,
 }).refine(validChapterRange, { message: "startChapter must not exceed endChapter" });
 
@@ -200,6 +268,10 @@ export type AnalysisTemplateDetail = z.infer<typeof AnalysisTemplateDetailSchema
 export type AnalysisScopePreviewInput = z.infer<typeof AnalysisScopePreviewInputSchema>;
 export type AnalysisRunCreateInput = z.infer<typeof AnalysisRunCreateInputSchema>;
 export type AnalysisScopePreview = z.infer<typeof AnalysisScopePreviewSchema>;
+export type AnalysisExecutionVersions = z.infer<typeof AnalysisExecutionVersionsSchema>;
+export type AnalysisSourceSummary = z.infer<typeof AnalysisSourceSummarySchema>;
+export type AdvancedAnalysisExecutionConfig = z.infer<typeof AdvancedAnalysisExecutionConfigSchema>;
+export type AdvancedAnalysisExecutionSnapshot = z.infer<typeof AdvancedAnalysisExecutionSnapshotSchema>;
 export type AnalysisRunSummary = z.infer<typeof AnalysisRunSummarySchema>;
 export type AnalysisRunDetail = z.infer<typeof AnalysisRunDetailSchema>;
 export type AnalysisPartSummary = z.infer<typeof AnalysisPartSummarySchema>;
