@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 93f1e635be9f122e589f894c5eda2db984c66d88
 baseline_status: current
-updated_at: 2026-07-22T08:33:23+08:00
+updated_at: 2026-07-22T09:59:41+08:00
 updated_by: controller-agent
 current_phase: phase-4-implementation
-last_checkpoint: CP-20260722-PHASE4-TASK3-CONTRACT-CORRECTION
+last_checkpoint: CP-20260722-PHASE4-TASK3-ACCEPTED
 next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -35,13 +35,13 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 4 | implementing-task-3 | Task 2 merged，Task 3 contract 已接受 |
+| Phase 4 | task-3-accepted | Task 3 与 DEC-0016 实现已接受，等待 PR #114 合并 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE4-TASK3 | phase-4 | Private API, transactional run creation, encrypted execution snapshot and terminal hard delete | implementation-agent | codex/phase4-task3-analysis-api | 220a20ca1b1bfb3c9ee6b7bae0262a16a2655c97 | 231aee15033b7e16a4cfaf6a77a7cf9dee5f1699 | ready | CP-20260722-PHASE4-TASK2-MERGED-TASK3-STARTED | CP-20260722-PHASE4-TASK3-CONTRACT-CORRECTION | resume encrypted snapshot correction after governance merge |
+| PHASE4-TASK3 | phase-4 | Private API, transactional run creation, encrypted execution snapshot and terminal hard delete | implementation-agent | codex/phase4-task3-analysis-api | 6368007224930c2bd10b4b1eaf9e85832a2ff3b0 | 92a21cbfc3aaebb774b1d37b03d6d29dffe4d0a0 | accepted | CP-20260722-PHASE4-TASK3-CONTRACT-CORRECTION | CP-20260722-PHASE4-TASK3-ACCEPTED | merge PR #114 after accepted checkpoint merge |
 
 ## Phase Ledgers
 
@@ -87,7 +87,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-用户已选择方案 A，PHASE4-TASK3 在 encrypted execution snapshot correction 合并后恢复 Subagent-Driven 实施
+无待处理反馈，PHASE4-TASK3 已通过 corrected contract、双审查、总控验证与 PR #114 CI，可按自动 PR 授权完成治理与实现合并
 
 ## Next Gate
 
@@ -95,6 +95,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 4 Task 3 accepted](checkpoints/CP-20260722-PHASE4-TASK3-ACCEPTED.md)
 - [Phase 4 Task 3 contract correction](checkpoints/CP-20260722-PHASE4-TASK3-CONTRACT-CORRECTION.md)
 - [Encrypted advanced analysis execution snapshot decision](decisions/DEC-0016-phase4-encrypted-execution-snapshot.md)
 - [Phase 4 Task 2 merged and Task 3 started](checkpoints/CP-20260722-PHASE4-TASK2-MERGED-TASK3-STARTED.md)
