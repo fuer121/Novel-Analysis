@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: 6e882a10496b6931ba70af0618176edd6121aa5d
+baseline_commit: 5a398472682d8a2cf06f48614f5fe4764601751e
 baseline_status: current
-updated_at: 2026-07-22T12:47:48+08:00
+updated_at: 2026-07-22T12:54:08+08:00
 updated_by: controller-agent
 current_phase: phase-4-implementation
-last_checkpoint: CP-20260722-PHASE4-TASK4-ACCEPTED
+last_checkpoint: CP-20260722-PHASE4-TASK4-MERGED-TASK5-STARTED
 next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `6e882a10496b6931ba70af0618176edd6121aa5d` |
-| Latest merged implementation | PR #114 `https://github.com/fuer121/Novel-Analysis/pull/114` |
+| Accepted implementation baseline | `5a398472682d8a2cf06f48614f5fe4764601751e` |
+| Latest merged implementation | PR #117 `https://github.com/fuer121/Novel-Analysis/pull/117` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -35,13 +35,13 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 4 | task-4-accepted | Task 4 实现与独立审查已接受，等待实现 PR 合并 |
+| Phase 4 | implementing-task-5 | Task 4 merged，Task 5 contract 已接受 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE4-TASK4 | phase-4 | Snapshot-only recoverable four-mode Worker executor | implementation-agent | codex/phase4-task4-analysis-worker | 08b423bf50c88ac7afd94b8af309cc5ece34fdbe | 1921577ab8773b96919a6688640fedcca232af30 | accepted | CP-20260722-PHASE4-TASK3-MERGED-TASK4-STARTED | CP-20260722-PHASE4-TASK4-ACCEPTED | merge accepted checkpoint，then merge PR #117 |
+| PHASE4-TASK5 | phase-4 | Legacy history read-only port and fixture API | implementation-agent | codex/phase4-task5-legacy-history-api | 5a398472682d8a2cf06f48614f5fe4764601751e | none | ready | CP-20260722-PHASE4-TASK4-ACCEPTED | CP-20260722-PHASE4-TASK4-MERGED-TASK5-STARTED | implement GET-only list/detail with TDD after governance merge |
 
 ## Phase Ledgers
 
@@ -87,7 +87,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无待处理反馈，PHASE4-TASK4 已通过规格、质量与总控验证，等待治理 checkpoint 与实现 PR 合并
+无待处理反馈，PHASE4-TASK5 可按 accepted contract 与 Subagent-Driven 顺序推进
 
 ## Next Gate
 
@@ -95,6 +95,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 4 Task 4 merged and Task 5 started](checkpoints/CP-20260722-PHASE4-TASK4-MERGED-TASK5-STARTED.md)
 - [Phase 4 Task 4 accepted](checkpoints/CP-20260722-PHASE4-TASK4-ACCEPTED.md)
 - [Phase 4 Task 3 merged and Task 4 started](checkpoints/CP-20260722-PHASE4-TASK3-MERGED-TASK4-STARTED.md)
 - [Phase 4 Task 3 accepted](checkpoints/CP-20260722-PHASE4-TASK3-ACCEPTED.md)
