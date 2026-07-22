@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { sql } from "kysely";
 
-import { AdvancedAnalysisExecutionConfigSchema, AdvancedAnalysisExecutionSnapshotSchema, type AdvancedAnalysisExecutionConfig, type AdvancedAnalysisExecutionSnapshot, type AnalysisExecutionVersions, type AnalysisMode, type AnalysisRunSummary, type AnalysisScopePreview, type AnalysisSourceSummary, type PublicJob } from "@novel-analysis/contracts";
+import { AdvancedAnalysisExecutionConfigSchema, AdvancedAnalysisExecutionSnapshotSchema, L1IndexOutputSchema, type AdvancedAnalysisExecutionConfig, type AdvancedAnalysisExecutionSnapshot, type AnalysisExecutionVersions, type AnalysisMode, type AnalysisRunSummary, type AnalysisScopePreview, type AnalysisSourceSummary, type L1IndexOutput, type PublicJob } from "@novel-analysis/contracts";
 import { createAnalysisRepository, type AnalysisActor, type ContentCipher, type DatabaseConnection, type DatabaseExecutor, type FactRetrievalMetadata } from "@novel-analysis/database";
 import { modeSourcePolicy } from "@novel-analysis/domain";
 
@@ -36,7 +36,7 @@ type Selection = AnalysisScopePreview & {
   indexGroup: { id: string; key: string; name: string; categoryScope: "general" | "magical_creature"; configHash: string; promptVersionId: string } | null;
   chapters: Array<{
     id: string; chapterIndex: number; contentHmac: string; sourceVersion: string;
-    l1: { id: string; promptVersionId: string; workflowVersionId: string; inputSignature: string; status: "fresh" | "failed" | "stale"; route: unknown } | null;
+    l1: { id: string; promptVersionId: string; workflowVersionId: string; inputSignature: string; status: "fresh" | "failed" | "stale"; route: L1IndexOutput } | null;
     l2: { inputSignature: string; status: "fresh" | "failed" | "stale"; facts: Array<{ id: string; subjectKey: string; factType: string; payload: string; metadata: FactRetrievalMetadata }> } | null;
   }>;
 };
@@ -75,7 +75,11 @@ export class AnalysisJobService {
       .leftJoin("l2_chapter_statuses as l2", (join) => join.onRef("l2.chapter_id", "=", "c.id").on("l2.group_id", "=", template.index_group_id))
       .select(["c.id", "c.chapter_index", "c.content_hmac", "c.source_version", "l1.id as l1_id", "l1.prompt_version_id as l1_prompt_version_id", "l1.workflow_version_id as l1_workflow_version_id", "l1.input_signature as l1_input_signature", "l1.status as l1_status", "l1.route as l1_route", "l2.input_signature as l2_input_signature", "l2.status as l2_status"])
       .where("c.book_id", "=", input.bookId).where("c.chapter_index", ">=", input.startChapter).where("c.chapter_index", "<=", input.endChapter).orderBy("c.chapter_index").execute();
-    let chapters = chapterRows.map((row) => ({ id: row.id, chapterIndex: row.chapter_index, contentHmac: row.content_hmac, sourceVersion: row.source_version, l1: row.l1_id ? { id: row.l1_id, promptVersionId: row.l1_prompt_version_id!, workflowVersionId: row.l1_workflow_version_id!, inputSignature: row.l1_input_signature!, status: row.l1_status!, route: row.l1_route! } : null, l2: row.l2_input_signature ? { inputSignature: row.l2_input_signature, status: row.l2_status!, facts: [] as Array<{ id: string; subjectKey: string; factType: string; payload: string; metadata: FactRetrievalMetadata }> } : null }));
+    let chapters = chapterRows.map((row) => {
+      const route = row.l1_id ? L1IndexOutputSchema.safeParse(row.l1_route) : null;
+      if (route && (!route.success || route.data.route_schema_version !== L1_ROUTE_SCHEMA_VERSION)) throw new AnalysisInvalidRequestError();
+      return { id: row.id, chapterIndex: row.chapter_index, contentHmac: row.content_hmac, sourceVersion: row.source_version, l1: row.l1_id ? { id: row.l1_id, promptVersionId: row.l1_prompt_version_id!, workflowVersionId: row.l1_workflow_version_id!, inputSignature: row.l1_input_signature!, status: row.l1_status!, route: route!.data } : null, l2: row.l2_input_signature ? { inputSignature: row.l2_input_signature, status: row.l2_status!, facts: [] as Array<{ id: string; subjectKey: string; factType: string; payload: string; metadata: FactRetrievalMetadata }> } : null };
+    });
     if (chapters.length !== input.endChapter - input.startChapter + 1) throw new AnalysisInvalidRequestError();
     const policy = modeSourcePolicy(input.mode, chapters.length);
     if (policy.readsL2 && template.index_group_id) {

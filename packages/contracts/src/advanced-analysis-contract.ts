@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { L1IndexOutputSchema } from "./dify-contract.js";
 import { FactRetrievalMetadataSchema } from "./library-contract.js";
 
 const IdSchema = z.string().uuid();
@@ -142,13 +143,19 @@ export const AdvancedAnalysisExecutionSnapshotSchema = z.strictObject({
     position: ChapterSchema,
     contentHmac: NonEmptyStringSchema,
     sourceVersion: NonEmptyStringSchema,
-    l1: z.strictObject({ id: IdSchema, promptVersionId: IdSchema, workflowVersionId: IdSchema, inputSignature: NonEmptyStringSchema, status: z.enum(["fresh", "failed", "stale"]), route: z.json() }).nullable(),
+    l1: z.strictObject({ id: IdSchema, promptVersionId: IdSchema, workflowVersionId: IdSchema, inputSignature: NonEmptyStringSchema, status: z.enum(["fresh", "failed", "stale"]), route: L1IndexOutputSchema }).nullable(),
     l2: z.strictObject({
       inputSignature: NonEmptyStringSchema,
       status: z.enum(["fresh", "failed", "stale"]),
       facts: z.array(z.strictObject({ id: IdSchema, subjectKey: NonEmptyStringSchema, factType: NonEmptyStringSchema, payload: NonEmptyStringSchema, metadata: FactRetrievalMetadataSchema })),
     }).nullable(),
   })),
+}).superRefine((snapshot, context) => {
+  snapshot.chapters.forEach((chapter, index) => {
+    if (chapter.l1 && chapter.l1.route.route_schema_version !== snapshot.executionVersions.l1SchemaVersion) {
+      context.addIssue({ code: "custom", message: "L1 route schema version mismatch", path: ["chapters", index, "l1", "route", "route_schema_version"] });
+    }
+  });
 });
 
 export const AnalysisScopePreviewSchema = z.strictObject({
