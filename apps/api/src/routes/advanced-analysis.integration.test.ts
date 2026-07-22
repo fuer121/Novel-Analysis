@@ -55,11 +55,17 @@ describe("advanced analysis routes", () => {
     expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("owner")).send({ bookId, templateId, mode: "unknown", startChapter: 1, endChapter: 2 })).status).toBe(400);
     expect((await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("owner")).send({ bookId, templateId, mode: "balanced", startChapter: 2, endChapter: 1 })).status).toBe(400);
     const created = await request(app()).post(`/api/books/${bookId}/advanced-analysis`).set(write("owner")).send({ bookId, templateId, templateVersionId: preview.body.templateVersionId, mode: "balanced", startChapter: 1, endChapter: 2, scopeHash: preview.body.scopeHash, idempotencyKey: "api-create" });
-    expect(created.status).toBe(201); const runId = created.body.run.id as string;
+    expect(created.status).toBe(201); const runId = created.body.run.id as string; const jobId = created.body.job.id as string;
     const list = await request(app()).get(`/api/books/${bookId}/advanced-analysis`).set(auth("owner"));
     expect(list.status).toBe(200); expect(list.body.runs[0].id).toBe(runId);
     const detail = await request(app()).get(`/api/books/${bookId}/advanced-analysis/${runId}`).set(auth("owner"));
     expect(detail.status).toBe(200); expect(detail.body.run.parts).toHaveLength(2);
+    const paused = await request(app()).post(`/api/jobs/${jobId}/pause`).set({ ...write("owner"), "Idempotency-Key": "owner-pause" }).send({});
+    expect(paused.status).toBe(200); expect(paused.body.job.status).toBe("paused");
+    expect((await request(app()).get(`/api/books/${bookId}/advanced-analysis/${runId}`).set(auth("owner"))).body.run.status).toBe("paused");
+    const resumed = await request(app()).post(`/api/jobs/${jobId}/resume`).set({ ...write("owner"), "Idempotency-Key": "owner-resume" }).send({});
+    expect(resumed.status).toBe(200); expect(resumed.body.job.status).toBe("queued");
+    expect((await request(app()).get(`/api/books/${bookId}/advanced-analysis/${runId}`).set(auth("owner"))).body.run.status).toBe("queued");
     expect((await request(app()).get(`/api/books/${bookId}/advanced-analysis/${runId}`).set(auth("member"))).status).toBe(404);
     expect((await request(app()).get(`/api/books/${bookId}/advanced-analysis/${runId}`).set(auth("admin"))).status).toBe(404);
     expect((await request(app()).delete(`/api/books/${bookId}/advanced-analysis/${runId}`).set(write("member")).send({})).status).toBe(404);

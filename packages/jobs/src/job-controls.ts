@@ -92,6 +92,17 @@ export class JobControls {
         .executeTakeFirstOrThrow();
       const result = jobRowToPublic(updated);
 
+      if (locked.type === "advanced-analysis") {
+        const activeRunStatuses = input.action === "resume"
+          ? ["paused" as const]
+          : ["queued" as const, "running" as const, "retrying" as const, "paused" as const];
+        await transaction.updateTable("analysis_runs")
+          .set({ status: to, updated_at: now })
+          .where("job_id", "=", input.jobId)
+          .where("status", "in", activeRunStatuses)
+          .execute();
+      }
+
       if (input.action === "cancel") {
         const unfinishedSteps = transaction.selectFrom("job_steps")
           .select("id")
@@ -111,13 +122,6 @@ export class JobControls {
           .where("job_id", "=", input.jobId)
           .where("status", "in", ["queued", "running", "failed"])
           .execute();
-        if (locked.type === "advanced-analysis") {
-          await transaction.updateTable("analysis_runs")
-            .set({ status: "cancelled", updated_at: now })
-            .where("job_id", "=", input.jobId)
-            .where("status", "in", ["queued", "running", "retrying", "paused"])
-            .execute();
-        }
       }
 
       await transaction.insertInto("job_events").values({

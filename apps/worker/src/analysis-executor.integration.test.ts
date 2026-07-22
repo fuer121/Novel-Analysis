@@ -56,6 +56,56 @@ describe("analysis executor", () => {
     return { ...created, claim: claim! };
   }
 
+  function deferred<T>() {
+    let resolve!: (value: T | PromiseLike<T>) => void;
+    const promise = new Promise<T>((complete) => { resolve = complete; });
+    return { promise, resolve };
+  }
+
+  async function blockUpdates(table: "analysis_parts" | "analysis_runs", key: number, when = "true") {
+    const functionName = `block_${table}_update_${key}`;
+    const triggerName = `${functionName}_trigger`;
+    await sql`
+      create function ${sql.id(functionName)}() returns trigger language plpgsql as $$
+      begin
+        if ${sql.raw(when)} then
+          perform pg_advisory_xact_lock(${sql.raw(String(key))});
+        end if;
+        return new;
+      end
+      $$
+    `.execute(postgres.db);
+    await sql`
+      create trigger ${sql.id(triggerName)} before update on ${sql.table(table)}
+      for each row execute function ${sql.id(functionName)}()
+    `.execute(postgres.db);
+
+    const acquired = deferred<void>();
+    const gate = deferred<void>();
+    const holder = postgres.db.transaction().execute(async (transaction) => {
+      await sql`select pg_advisory_xact_lock(${key})`.execute(transaction);
+      acquired.resolve();
+      await gate.promise;
+    });
+    await acquired.promise;
+    return { release: () => gate.resolve(), holder };
+  }
+
+  async function waitForJobLock(jobId: string): Promise<void> {
+    for (let attempt = 0; attempt < 1_000; attempt += 1) {
+      try {
+        await postgres.db.transaction().execute(async (transaction) => {
+          await transaction.selectFrom("jobs").select("id").where("id", "=", jobId).forUpdate().noWait().executeTakeFirstOrThrow();
+        });
+      } catch (error) {
+        if ((error as { code?: string }).code === "55P03") return;
+        throw error;
+      }
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    }
+    throw new Error("Timed out waiting for the analysis Job row lock");
+  }
+
   it("cancels a queued analysis Job, step, and run without exposing content or allowing a claim", async () => {
     const created = await createRun("queued-cancel");
 
@@ -191,22 +241,96 @@ describe("analysis executor", () => {
     expect((await postgres.db.selectFrom("analysis_runs").select("error_code").where("id", "=", mismatch.run.id).executeTakeFirstOrThrow()).error_code).toBe("configuration_error");
   });
 
-  it("pauses only after an atomic part boundary", async () => {
-    const created = await createClaim("pause");
-    const calls: string[] = [];
+  it("keeps a linked run paused when pause wins before an old Worker part commit", async () => {
+    const created = await createClaim("pause-first-linked-race");
+    const providerEntered = deferred<void>();
+    const releaseProvider = deferred<void>();
     const dify = {
       async runAnalysisSummary(input: { invocationKey: string }) {
-        calls.push(input.invocationKey);
-        await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "pause", requestId: "pause-boundary" });
-        return { text: "FIRST_PART" };
+        providerEntered.resolve();
+        await releaseProvider.promise;
+        return { text: input.invocationKey.endsWith(":final") ? JSON.stringify({ answer: "FINAL" }) : "LATE_PART" };
       },
       async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
     };
+    const executing = new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(created.claim);
+    await providerEntered.promise;
+    await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "pause", requestId: "pause-first-linked-control" });
+    const repairBlocker = await blockUpdates("analysis_runs", 46_001, "new.status = 'paused' and old.status = 'running'");
 
-    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(created.claim)).resolves.toEqual({ disposition: "paused-boundary" });
-    expect(calls).toEqual([`${created.run.id}:part:1`]);
-    expect(await postgres.db.selectFrom("analysis_parts").select(["position", "status"]).where("run_id", "=", created.run.id).orderBy("position").execute()).toEqual([{ position: 1, status: "completed" }, { position: 2, status: "queued" }]);
-    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("paused");
+    try {
+      releaseProvider.resolve();
+      const settled = executing.then(() => true);
+      for (let attempt = 0; attempt < 1_000; attempt += 1) {
+        const runStatus = (await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status;
+        if (runStatus === "running" || await Promise.race([settled, new Promise<false>((resolve) => setImmediate(() => resolve(false))) ])) break;
+      }
+      expect({
+        job: (await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status,
+        run: (await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status,
+      }).toEqual({ job: "paused", run: "paused" });
+    } finally {
+      repairBlocker.release();
+      await repairBlocker.holder;
+    }
+
+    await expect(executing).resolves.toEqual({ disposition: "paused-boundary" });
+    expect(await postgres.db.selectFrom("analysis_parts").select(["position", "status"]).where("run_id", "=", created.run.id).orderBy("position").execute()).toEqual([{ position: 1, status: "queued" }, { position: 2, status: "queued" }]);
+  });
+
+  it.each(["commitPart", "commitHierarchicalCheckpoint", "commitFinalCheckpoint", "fail", "complete"] as const)("rejects a paused old claim at the %s transaction boundary", async (boundary) => {
+    const created = await createClaim(`paused-${boundary}`);
+    await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "pause", requestId: `pause-${boundary}` });
+    const executor = new AnalysisExecutor({ database: postgres.db, cipher, executionConfig }) as unknown as {
+      commitPart: (claim: typeof created.claim, runId: string, position: number, inputSignature: string, result: unknown) => Promise<string | null>;
+      commitCheckpoint: (claim: typeof created.claim, runId: string, checkpoint: { position: number; kind: string; inputSignature: string; result: unknown }) => Promise<{ disposition?: string }>;
+      fail: (claim: typeof created.claim, runId: string, partPosition: number | null, errorCode: string) => Promise<{ disposition: string }>;
+      complete: (claim: typeof created.claim, runId: string, snapshot: { chapters: [] }, outputSchema: unknown, finalCheckpoint: { position: number; kind: string; inputSignature: string; result: unknown }) => Promise<{ disposition: string }>;
+    };
+    const firstPart = await postgres.db.selectFrom("analysis_parts").select(["position", "input_signature"]).where("run_id", "=", created.run.id).orderBy("position").executeTakeFirstOrThrow();
+    let disposition: string | null | undefined;
+
+    if (boundary === "commitPart") disposition = await executor.commitPart(created.claim, created.run.id, firstPart.position, firstPart.input_signature, "LATE_PART");
+    if (boundary === "commitHierarchicalCheckpoint") disposition = (await executor.commitCheckpoint(created.claim, created.run.id, { position: 10, kind: "analysis-hierarchical-summary", inputSignature: "late-hierarchical", result: "LATE_CHECKPOINT" })).disposition;
+    if (boundary === "commitFinalCheckpoint") disposition = (await executor.commitCheckpoint(created.claim, created.run.id, { position: 11, kind: "analysis-final", inputSignature: "late-final", result: { answer: "LATE_FINAL" } })).disposition;
+    if (boundary === "fail") disposition = (await executor.fail(created.claim, created.run.id, firstPart.position, "provider_timeout")).disposition;
+    if (boundary === "complete") disposition = (await executor.complete(created.claim, created.run.id, { chapters: [] }, {}, { position: 12, kind: "analysis-final", inputSignature: "late-complete", result: { answer: "LATE_COMPLETE" } })).disposition;
+
+    expect(disposition).toBe("paused-boundary");
+    expect({
+      job: (await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status,
+      run: (await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status,
+      completedParts: await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", created.run.id).where("status", "=", "completed").execute(),
+      failedParts: await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", created.run.id).where("status", "=", "failed").execute(),
+    }).toEqual({ job: "paused", run: "paused", completedParts: [], failedParts: [] });
+  });
+
+  it("lets a Worker part commit finish before a waiting pause coordinates the linked run", async () => {
+    const created = await createClaim("worker-first-linked-race");
+    const providerEntered = deferred<void>();
+    const commitBlocker = await blockUpdates("analysis_parts", 46_002);
+    const dify = {
+      async runAnalysisSummary(input: { invocationKey: string }) {
+        providerEntered.resolve();
+        return { text: input.invocationKey.endsWith(":final") ? JSON.stringify({ answer: "FINAL" }) : "AUTHORIZED_PART" };
+      },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    const executing = new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(created.claim);
+    await providerEntered.promise;
+    await waitForJobLock(created.job.id);
+    const pausing = new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "pause", requestId: "worker-first-linked-control" });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    commitBlocker.release();
+    await commitBlocker.holder;
+
+    await expect(pausing).resolves.toMatchObject({ status: "paused" });
+    await expect(executing).resolves.toEqual({ disposition: "paused-boundary" });
+    expect({
+      job: (await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status,
+      run: (await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status,
+      parts: await postgres.db.selectFrom("analysis_parts").select(["position", "status"]).where("run_id", "=", created.run.id).orderBy("position").execute(),
+    }).toEqual({ job: "paused", run: "paused", parts: [{ position: 1, status: "completed" }, { position: 2, status: "queued" }] });
   });
 
   it("keeps the production Worker step recoverable across pause and resume", async () => {
@@ -238,7 +362,7 @@ describe("analysis executor", () => {
     await worker.processJob(created.job.id);
     expect((await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status).toBe("completed");
     expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("completed");
-    expect(calls.filter((key) => key.endsWith(":part:1"))).toHaveLength(1);
+    expect(calls.filter((key) => key.endsWith(":part:1"))).toHaveLength(2);
   });
 
   it("cancels a production Worker graph after it exits at a pause boundary", async () => {
