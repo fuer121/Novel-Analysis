@@ -142,7 +142,7 @@ export const AdvancedAnalysisExecutionSnapshotSchema = z.strictObject({
     position: ChapterSchema,
     contentHmac: NonEmptyStringSchema,
     sourceVersion: NonEmptyStringSchema,
-    l1: z.strictObject({ id: IdSchema, promptVersionId: IdSchema, workflowVersionId: IdSchema, inputSignature: NonEmptyStringSchema, status: z.enum(["fresh", "failed", "stale"]) }).nullable(),
+    l1: z.strictObject({ id: IdSchema, promptVersionId: IdSchema, workflowVersionId: IdSchema, inputSignature: NonEmptyStringSchema, status: z.enum(["fresh", "failed", "stale"]), route: z.json() }).nullable(),
     l2: z.strictObject({
       inputSignature: NonEmptyStringSchema,
       status: z.enum(["fresh", "failed", "stale"]),

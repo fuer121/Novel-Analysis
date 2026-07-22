@@ -134,7 +134,8 @@ describe("Analysis job service", () => {
     const indexes = createIndexRepository(postgres.db, cipher);
     const l1Prompt = await indexes.createPromptVersion({ target: "l1-index", version: "l1-v1", content: "l1", contentHash: createHash("sha256").update("l1").digest("hex") });
     const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-contract-v1", dslHash: "l1-dsl-v1" });
-    const l1 = await indexes.putL1Index({ chapterId: chapterIds[0]!, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-input-v1", status: "fresh", route: {} });
+    const l1Route = { people: ["L1_ROUTE_SENTINEL"], nested: { score: 0.75 } };
+    const l1 = await indexes.putL1Index({ chapterId: chapterIds[0]!, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-input-v1", status: "fresh", route: l1Route });
     await indexes.putL2ChapterStatus({ groupId, chapterId: chapterIds[0]!, inputSignature: "l2-input-v1", status: "fresh" });
     await indexes.registerSubject({ groupId, subjectKey: "hero", displayName: "Hero", aliases: [] });
     const originalFact = await indexes.addFact({ groupId, chapterId: chapterIds[0]!, subjectKey: "hero", factType: "event", plaintext: "L2_FACT_PAYLOAD_SENTINEL", metadata: { category: "event", confidence: 0.9 } });
@@ -142,14 +143,17 @@ describe("Analysis job service", () => {
     expect(preview.sourceSummary).toMatchObject({ l1: { selectedCount: 3, freshCount: 1 }, l2: { selectedCount: 3, freshCount: 1 } });
     const created = await service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "source-versions" });
     const snapshot = await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshot({ runId: created.run.id, actor: input().actor, schema: AdvancedAnalysisExecutionSnapshotSchema });
-    expect(snapshot!.chapters[0]).toMatchObject({ id: chapterIds[0], position: 1, l1: { id: l1.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-input-v1", status: "fresh" }, l2: { inputSignature: "l2-input-v1", status: "fresh", facts: [{ id: originalFact.id, subjectKey: "hero", factType: "event", payload: "L2_FACT_PAYLOAD_SENTINEL", metadata: { category: "event", confidence: 0.9 } }] } });
+    expect(snapshot!.chapters[0]).toMatchObject({ id: chapterIds[0], position: 1, l1: { id: l1.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-input-v1", status: "fresh", route: l1Route }, l2: { inputSignature: "l2-input-v1", status: "fresh", facts: [{ id: originalFact.id, subjectKey: "hero", factType: "event", payload: "L2_FACT_PAYLOAD_SENTINEL", metadata: { category: "event", confidence: 0.9 } }] } });
+    await postgres.db.updateTable("l1_indexes").set({ route: { people: ["REPLACED_L1_ROUTE"] } }).where("id", "=", l1.id).execute();
+    expect((await service.preview(input())).scopeHash).not.toBe(preview.scopeHash);
+    expect((await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshotForExecutor({ runId: created.run.id, schema: AdvancedAnalysisExecutionSnapshotSchema }))!.chapters[0]!.l1!.route).toEqual(l1Route);
     await postgres.db.transaction().execute(async (transaction) => createIndexRepository(transaction, cipher).replaceL2ChapterResult({ groupId, chapterId: chapterIds[0]!, inputSignature: "l2-input-v2", acceptedCount: 1, candidateCount: 0, rejectedCount: 0, facts: [{ subjectKey: "hero", displayName: "Hero", aliases: [], factType: "event", plaintext: "REBUILT_FACT_PAYLOAD", metadata: { category: "event" } }] }));
     expect(await postgres.db.selectFrom("l2_facts").select("id").where("id", "=", originalFact.id).execute()).toEqual([]);
     const recovered = await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshotForExecutor({ runId: created.run.id, schema: AdvancedAnalysisExecutionSnapshotSchema });
     expect(recovered!.chapters[0]!.l2!.facts[0]).toMatchObject({ id: originalFact.id, payload: "L2_FACT_PAYLOAD_SENTINEL" });
-    expect(JSON.stringify(await postgres.db.selectFrom("analysis_runs").selectAll().where("id", "=", created.run.id).executeTakeFirstOrThrow())).not.toContain("L2_FACT_PAYLOAD_SENTINEL");
+    expect(JSON.stringify(await postgres.db.selectFrom("analysis_runs").selectAll().where("id", "=", created.run.id).executeTakeFirstOrThrow())).not.toMatch(/L1_ROUTE_SENTINEL|L2_FACT_PAYLOAD_SENTINEL/);
     const ordinary = JSON.stringify({ job: await postgres.db.selectFrom("jobs").selectAll().where("id", "=", created.job.id).execute(), events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", created.job.id).execute(), outbox: await postgres.db.selectFrom("job_outbox").selectAll().where("job_id", "=", created.job.id).execute(), audits: await postgres.db.selectFrom("audit_logs").selectAll().where("target_id", "=", created.run.id).execute() });
-    expect(ordinary).not.toMatch(/L2_FACT_PAYLOAD_SENTINEL|REBUILT_FACT_PAYLOAD/);
+    expect(ordinary).not.toMatch(/L1_ROUTE_SENTINEL|REPLACED_L1_ROUTE|L2_FACT_PAYLOAD_SENTINEL|REBUILT_FACT_PAYLOAD/);
     expect((await service.preview(input())).scopeHash).not.toBe(preview.scopeHash);
   });
 
