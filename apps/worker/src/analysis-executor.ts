@@ -21,10 +21,23 @@ function expectedPartSignature(snapshot: AdvancedAnalysisExecutionSnapshot, chap
 }
 
 export function checkpointPositions(snapshot: AdvancedAnalysisExecutionSnapshot): { hierarchical: number[]; final: number } {
-  const maximum = Math.max(...snapshot.chapters.map((chapter) => chapter.position));
   const count = Math.ceil(snapshot.chapters.length / HIERARCHICAL_BATCH_SIZE);
-  const hierarchical = Array.from({ length: count }, (_, index) => maximum + index + 1);
-  return { hierarchical, final: maximum + count + 1 };
+  const allocated = allocateCheckpointPositions(snapshot.chapters.map((chapter) => chapter.position), count + 1);
+  return { hierarchical: allocated.slice(0, count), final: allocated[count]! };
+}
+
+export function allocateCheckpointPositions(usedPositions: number[], count: number): number[] {
+  if (!Number.isSafeInteger(count) || count < 0 || usedPositions.some((position) => !Number.isSafeInteger(position) || position < 0 || position > 2_147_483_647)) throw new Error("invalid checkpoint positions");
+  const used = new Set(usedPositions);
+  const allocated: number[] = [];
+  for (let candidate = 0; allocated.length < count; candidate += 1) {
+    if (candidate > 2_147_483_647) throw new Error("no checkpoint positions available");
+    if (!used.has(candidate)) {
+      allocated.push(candidate);
+      used.add(candidate);
+    }
+  }
+  return allocated;
 }
 
 export function buildHierarchicalSummaryInput(snapshot: AdvancedAnalysisExecutionSnapshot, children: Array<{ position: number; inputSignature: string; result: unknown }>) {
@@ -230,8 +243,10 @@ export class AnalysisExecutor {
       const position = positions[batchIndex]!;
       const batch = children.slice(batchIndex * HIERARCHICAL_BATCH_SIZE, (batchIndex + 1) * HIERARCHICAL_BATCH_SIZE);
       const built = buildHierarchicalSummaryInput(snapshot, batch);
-      const reusable = await this.reusableCheckpoint(runId, position, "analysis-hierarchical-summary", built.inputSignature);
+      let reusable: CompletedCheckpoint | null;
+      try { reusable = await this.reusableCheckpoint(runId, position, "analysis-hierarchical-summary", built.inputSignature); } catch { return this.fail(claim, runId, null, "invalid_execution_checkpoint"); }
       if (reusable) {
+        if (typeof reusable.result !== "string" || !reusable.result.trim()) return this.fail(claim, runId, null, "invalid_execution_checkpoint");
         checkpoints.push(reusable);
         continue;
       }
@@ -261,9 +276,10 @@ export class AnalysisExecutor {
     if (boundary) return { disposition: boundary };
     const position = checkpointPositions(snapshot).final;
     const built = buildFinalCheckpointInput(snapshot, hierarchical);
-    const reusable = await this.reusableCheckpoint(runId, position, "analysis-final", built.inputSignature);
+    let reusable: CompletedCheckpoint | null;
+    try { reusable = await this.reusableCheckpoint(runId, position, "analysis-final", built.inputSignature); } catch { return this.fail(claim, runId, null, "invalid_execution_checkpoint"); }
     if (reusable) {
-      try { reusable.result = validateFinalValue(reusable.result, template.outputSchema); } catch { return this.fail(claim, runId, null, "invalid_output_schema"); }
+      try { reusable.result = validateFinalValue(reusable.result, template.outputSchema); } catch { return this.fail(claim, runId, null, "invalid_execution_checkpoint"); }
       return { checkpoint: reusable };
     }
     let result: unknown;

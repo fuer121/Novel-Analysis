@@ -67,8 +67,8 @@ describe("analysis executor", () => {
     expect(detail).toEqual({ answer: "FINAL_SENTINEL" });
     expect(await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", run.id).where("kind", "=", "analysis-part").where("status", "=", "completed").execute()).toHaveLength(2);
     expect(await postgres.db.selectFrom("analysis_parts").select(["kind", "position", "status"]).where("run_id", "=", run.id).where("kind", "in", ["analysis-hierarchical-summary", "analysis-final"]).orderBy("position").execute()).toEqual([
-      { kind: "analysis-hierarchical-summary", position: 3, status: "completed" },
-      { kind: "analysis-final", position: 4, status: "completed" },
+      { kind: "analysis-hierarchical-summary", position: 0, status: "completed" },
+      { kind: "analysis-final", position: 3, status: "completed" },
     ]);
     const ordinary = JSON.stringify({
       run: await postgres.db.selectFrom("analysis_runs").selectAll().where("id", "=", run.id).executeTakeFirstOrThrow(),
@@ -127,6 +127,38 @@ describe("analysis executor", () => {
     expect(calls).toEqual([`${created.run.id}:part:1`]);
     expect(await postgres.db.selectFrom("analysis_parts").select(["position", "status"]).where("run_id", "=", created.run.id).orderBy("position").execute()).toEqual([{ position: 1, status: "completed" }, { position: 2, status: "queued" }]);
     expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("paused");
+  });
+
+  it("keeps the production Worker step recoverable across pause and resume", async () => {
+    const created = await createClaim("worker-pause-resume", "pause-seed", 5_000);
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    let shouldPause = true;
+    const calls: string[] = [];
+    const provider = {
+      async runAnalysisSummary(input: { invocationKey: string }) {
+        calls.push(input.invocationKey);
+        if (shouldPause) {
+          shouldPause = false;
+          await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "pause", requestId: "worker-pause" });
+        }
+        return { text: input.invocationKey.endsWith(":final") ? JSON.stringify({ answer: "RESUMED_FINAL" }) : "checkpoint" };
+      },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    const worker = new JobWorker({ database: postgres.db, workerId: "pause-worker", executor: new AnalysisExecutor({ database: postgres.db, cipher, dify: provider, executionConfig }) });
+
+    await worker.processJob(created.job.id);
+    expect((await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status).toBe("paused");
+    expect((await postgres.db.selectFrom("job_steps").select("status").where("id", "=", created.claim.stepId).executeTakeFirstOrThrow()).status).toBe("running");
+    expect((await postgres.db.selectFrom("job_attempts").select("status").where("step_id", "=", created.claim.stepId).orderBy("attempt_no", "desc").executeTakeFirstOrThrow()).status).toBe("running");
+    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("paused");
+
+    await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "resume", requestId: "worker-resume" });
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    await worker.processJob(created.job.id);
+    expect((await postgres.db.selectFrom("jobs").select("status").where("id", "=", created.job.id).executeTakeFirstOrThrow()).status).toBe("completed");
+    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("completed");
+    expect(calls.filter((key) => key.endsWith(":part:1"))).toHaveLength(1);
   });
 
   it("cancels without persisting a late provider result", async () => {
@@ -239,8 +271,8 @@ describe("analysis executor", () => {
     expect(calls.filter((key) => key.includes(":hierarchical:"))).toHaveLength(1);
     expect(calls.filter((key) => key.endsWith(":final"))).toHaveLength(1);
     expect(await postgres.db.selectFrom("analysis_parts").select(["kind", "position", "status"]).where("run_id", "=", created.run.id).where("kind", "in", ["analysis-hierarchical-summary", "analysis-final"]).orderBy("position").execute()).toEqual([
-      { kind: "analysis-hierarchical-summary", position: 3, status: "completed" },
-      { kind: "analysis-final", position: 4, status: "completed" },
+      { kind: "analysis-hierarchical-summary", position: 0, status: "completed" },
+      { kind: "analysis-final", position: 3, status: "completed" },
     ]);
     expect((await postgres.db.selectFrom("analysis_runs").select(["completed_parts", "total_parts", "status"]).where("id", "=", created.run.id).executeTakeFirstOrThrow())).toEqual({ completed_parts: 2, total_parts: 2, status: "completed" });
   });
@@ -313,5 +345,39 @@ describe("analysis executor", () => {
     });
     expect(ordinary).not.toContain("RAW_PROVIDER_ERROR_SENTINEL");
     expect(ordinary).toContain("provider_invalid_response");
+  });
+
+  it.each(["hierarchical", "final"] as const)("fails safely without provider rebuild for a corrupt reusable %s checkpoint", async (kind) => {
+    const created = await createClaim(`corrupt-${kind}`, "corrupt-a", 5_000);
+    const providerCalls: string[] = [];
+    const provider = {
+      async runAnalysisSummary(input: { invocationKey: string }) { providerCalls.push(input.invocationKey); return { text: input.invocationKey.endsWith(":final") ? JSON.stringify({ answer: "CORRUPT_FINAL" }) : "checkpoint" }; },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify: provider, executionConfig, checkpointBarrier: { async afterCheckpointCommitted(checkpointKind) { if (checkpointKind === kind) throw new Error("checkpoint-crash"); } } }).execute(created.claim)).rejects.toThrow("checkpoint-crash");
+    const partKind = kind === "hierarchical" ? "analysis-hierarchical-summary" : "analysis-final";
+    const replacement = kind === "hierarchical" ? cipher.encrypt("not-json") : cipher.encrypt(JSON.stringify({ wrong: "structure" }));
+    await postgres.db.updateTable("analysis_parts").set({ result_ciphertext: replacement.ciphertext, result_nonce: replacement.nonce, result_tag: replacement.tag, result_key_version: replacement.keyVersion }).where("run_id", "=", created.run.id).where("kind", "=", partKind).execute();
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    const claimB = (await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs: 1_000 }).claimNext(created.job.id, "corrupt-b", new Date()))!;
+    const callsBeforeRetry = providerCalls.length;
+    const captured: string[] = [];
+    const original = console.error;
+    console.error = (...values: unknown[]) => { captured.push(values.map(String).join(" ")); };
+
+    try {
+      await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify: provider, executionConfig }).execute(claimB)).resolves.toEqual({ disposition: "failed" });
+    } finally {
+      console.error = original;
+    }
+    expect(providerCalls).toHaveLength(callsBeforeRetry);
+    expect((await postgres.db.selectFrom("analysis_runs").select("error_code").where("id", "=", created.run.id).executeTakeFirstOrThrow()).error_code).toBe("invalid_execution_checkpoint");
+    const ordinary = JSON.stringify({
+      logs: captured,
+      attempt: await postgres.db.selectFrom("job_attempts").select(["error_code", "error_message"]).where("id", "=", claimB.attemptId).executeTakeFirstOrThrow(),
+      events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", created.job.id).execute(),
+    });
+    expect(ordinary).toContain("invalid_execution_checkpoint");
+    expect(ordinary).not.toMatch(/not-json|wrong|structure|CORRUPT_FINAL/);
   });
 });

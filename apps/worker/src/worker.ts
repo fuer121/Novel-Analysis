@@ -323,6 +323,7 @@ export class JobWorker {
         if (disposition !== "completed") return;
         continue;
       }
+      if (claim.kind === "advanced-analysis" && output && typeof output === "object" && "disposition" in output) return;
       const result = await this.leases.completeStep(claim, output);
       if (result.disposition !== "completed") return;
     }
