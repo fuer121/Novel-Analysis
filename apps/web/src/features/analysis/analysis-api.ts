@@ -63,8 +63,8 @@ export function listAnalysisRuns(bookId: string) {
 export function readAnalysisRun(bookId: string, runId: string) {
   return apiRead<{ run: AnalysisRunDetail }>(`/books/${bookId}/advanced-analysis/${runId}`);
 }
-export function controlAnalysisRun(jobId: string, action: "pause" | "resume" | "cancel") {
-  return apiWrite<JobResponse>(`/jobs/${jobId}/${action}`, { method: "POST" });
+export function controlAnalysisRun(jobId: string, action: "pause" | "resume" | "cancel", idempotencyKey: string) {
+  return apiWrite<JobResponse>(`/jobs/${jobId}/${action}`, { method: "POST" }, idempotencyKey);
 }
 export function deleteAnalysisRun(bookId: string, runId: string) {
   return apiWrite<void>(`/books/${bookId}/advanced-analysis/${runId}`, { method: "DELETE" });

@@ -1,4 +1,4 @@
-import type { AnalysisMode, AnalysisScopePreview, AnalysisTemplateCreateInput, AnalysisTemplateDetail } from "@novel-analysis/contracts";
+import type { AnalysisMode, AnalysisRunDetail, AnalysisScopePreview, AnalysisTemplateCreateInput, AnalysisTemplateDetail } from "@novel-analysis/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { List, Plus } from "lucide-react";
 import { useCallback, useRef, useState, type FormEvent } from "react";
@@ -27,6 +27,11 @@ import { LegacyAnalysisPanel } from "./LegacyAnalysisPanel.js";
 
 type TemplateValue = Omit<AnalysisTemplateCreateInput, "bookId">;
 type EditorProps = { bookId: string; groups: IndexGroup[]; template?: AnalysisTemplateDetail; pending: boolean; error: string | null; onCancel: () => void; onSave: (value: TemplateValue) => void };
+type ControlAction = "pause" | "resume" | "cancel";
+type ControlInput = { runId: string; jobId: string; action: ControlAction };
+type ControlAttempt = ControlInput & { key: string };
+
+const controlTarget: Record<ControlAction, AnalysisRunDetail["status"]> = { pause: "paused", resume: "queued", cancel: "cancelled" };
 
 function TemplateEditor({ bookId, groups, template, pending, error, onCancel, onSave }: EditorProps) {
   const [validation, setValidation] = useState<string | null>(null);
@@ -62,6 +67,7 @@ function RunCreator({ book, template, groups, onCreated }: { book: BookSummary; 
   const [endChapter, setEndChapter] = useState(Math.min(Math.max(1, book.chapterCount), 20));
   const [message, setMessage] = useState<string | null>(null);
   const attemptKey = ["analysis", book.id, "create-attempt", template.id] as const;
+  client.setQueryDefaults(attemptKey, { gcTime: Infinity });
   const validRange = Number.isInteger(startChapter) && Number.isInteger(endChapter) && startChapter >= 1 && endChapter <= book.chapterCount && startChapter <= endChapter;
   const preview = useMutation({ mutationFn: () => previewAnalysis(book.id, { bookId: book.id, templateId: template.id, mode, startChapter, endChapter }), onSuccess: (value) => { const fingerprint = JSON.stringify(value); const current = client.getQueryData<{ fingerprint: string; key: string }>(attemptKey); if (current?.fingerprint !== fingerprint) client.setQueryData(attemptKey, { fingerprint, key: crypto.randomUUID() }); setMessage(null); }, onError: (error) => setMessage(error instanceof ApiError && error.status === 404 ? "模板或范围不存在" : "范围预览失败，请重试") });
   const create = useMutation({
@@ -77,7 +83,7 @@ function RunCreator({ book, template, groups, onCreated }: { book: BookSummary; 
       setMessage(error instanceof ApiError && error.code === "idempotency_conflict" ? "创建请求与先前内容冲突，请重新预览" : "提交结果未确认，请使用同一范围重试");
     },
   });
-  const invalidatePreview = () => { preview.reset(); setMessage(null); };
+  const invalidatePreview = () => { preview.reset(); client.removeQueries({ queryKey: attemptKey, exact: true }); setMessage(null); };
   const selectedGroup = groups.find((group) => group.id === (preview.data?.sourceSummary.indexGroupId ?? template.indexGroupId));
   return <section className="analysis-creator" aria-label="创建分析任务">
     <div className="analysis-section-heading"><div><p className="eyebrow">新任务</p><h2>创建分析任务</h2></div><span>模板版本 {template.currentVersionId.slice(0, 8)}</span></div>
@@ -103,6 +109,8 @@ export function AdvancedAnalysisPage() {
   const groups = useQuery({ queryKey: ["book", book.id, "index-groups"], queryFn: () => apiRead<{ indexGroups: IndexGroup[] }>(`/books/${book.id}/index-groups`), staleTime: 60_000, enabled: view === "new" });
   const selectedTemplateId = params.get("template") ?? templates.data?.templates[0]?.id ?? null;
   const selectedRunId = params.get("run") ?? runs.data?.runs[0]?.id ?? null;
+  const controlAttemptKey = ["analysis", book.id, "control-attempt"] as const;
+  client.setQueryDefaults(controlAttemptKey, { gcTime: Infinity });
   const template = useQuery({ queryKey: analysisKeys.template(book.id, selectedTemplateId ?? "none"), queryFn: () => readAnalysisTemplate(book.id, selectedTemplateId!), enabled: view === "new" && Boolean(selectedTemplateId) });
   const run = useQuery({ queryKey: analysisKeys.run(book.id, selectedRunId ?? "none"), queryFn: () => readAnalysisRun(book.id, selectedRunId!), enabled: view === "new" && Boolean(selectedRunId), refetchInterval: (query) => query.state.data && ["queued", "running", "retrying"].includes(query.state.data.run.status) ? 3_000 : false });
   const setParam = (key: string, value: string | null) => { const next = new URLSearchParams(params); if (value) next.set(key, value); else next.delete(key); setParams(next, { replace: true }); };
@@ -110,7 +118,24 @@ export function AdvancedAnalysisPage() {
 
   const createTemplate = useMutation({ mutationFn: (value: TemplateValue) => createAnalysisTemplate(book.id, { bookId: book.id, ...value }), onSuccess: async ({ template: created }) => { await client.invalidateQueries({ queryKey: analysisKeys.templates(book.id) }); setParam("template", created.id); setEditor(null); } });
   const updateTemplate = useMutation({ mutationFn: (value: TemplateValue) => updateAnalysisTemplate(book.id, selectedTemplateId!, value), onSuccess: async () => { await client.invalidateQueries({ queryKey: ["analysis", book.id, "template"] }); await client.invalidateQueries({ queryKey: analysisKeys.templates(book.id) }); setEditor(null); } });
-  const control = useMutation({ mutationFn: (action: "pause" | "resume" | "cancel") => controlAnalysisRun(run.data!.run.jobId, action), onSuccess: async () => { await Promise.all([client.invalidateQueries({ queryKey: analysisKeys.run(book.id, selectedRunId!) }), client.invalidateQueries({ queryKey: analysisKeys.runs(book.id) })]); } });
+  const control = useMutation({
+    mutationFn: (input: ControlInput) => {
+      let attempt = client.getQueryData<ControlAttempt>(controlAttemptKey);
+      if (!attempt || attempt.runId !== input.runId || attempt.jobId !== input.jobId || attempt.action !== input.action) {
+        attempt = { ...input, key: crypto.randomUUID() };
+        client.setQueryData(controlAttemptKey, attempt);
+      }
+      return controlAnalysisRun(input.jobId, input.action, attempt.key);
+    },
+    onSettled: async (_data, _error, input) => {
+      await Promise.all([
+        client.invalidateQueries({ queryKey: analysisKeys.run(book.id, input.runId) }),
+        client.invalidateQueries({ queryKey: analysisKeys.runs(book.id) }),
+      ]);
+      const authoritative = client.getQueryData<{ run: AnalysisRunDetail }>(analysisKeys.run(book.id, input.runId));
+      if (authoritative?.run.status === controlTarget[input.action]) client.removeQueries({ queryKey: controlAttemptKey, exact: true });
+    },
+  });
   const remove = useMutation({ mutationFn: () => deleteAnalysisRun(book.id, selectedRunId!), onSuccess: async () => { const removedId = selectedRunId!; client.setQueryData<Awaited<ReturnType<typeof listAnalysisRuns>>>(analysisKeys.runs(book.id), (current) => current ? { runs: current.runs.filter((item) => item.id !== removedId) } : current); client.removeQueries({ queryKey: analysisKeys.run(book.id, removedId) }); setParam("run", null); await client.invalidateQueries({ queryKey: analysisKeys.runs(book.id) }); } });
 
   const loading = view === "new" && (templates.isPending || runs.isPending || groups.isPending);
@@ -123,7 +148,7 @@ export function AdvancedAnalysisPage() {
       <main className="analysis-main">
         {editor === "create" ? <TemplateEditor key="create" bookId={book.id} groups={groups.data?.indexGroups ?? []} pending={createTemplate.isPending} error={createTemplate.isError ? "模板创建失败，请重试" : null} onCancel={() => setEditor(null)} onSave={(value) => createTemplate.mutate(value)} /> : editor === "edit" ? template.isPending ? <p className="empty-state">正在读取模板...</p> : template.isError || !template.data ? <div className="error-notice">模板不存在或读取失败 <button className="text-button" type="button" onClick={() => void template.refetch()}>重试模板</button></div> : <TemplateEditor key={template.data.template.currentVersionId} bookId={book.id} groups={groups.data?.indexGroups ?? []} template={template.data.template} pending={updateTemplate.isPending} error={updateTemplate.isError ? "模板更新失败，请重试" : null} onCancel={() => setEditor(null)} onSave={(value) => updateTemplate.mutate(value)} /> : null}
         {creatorOpen ? template.isPending ? <p className="empty-state">正在读取模板版本...</p> : template.isError || !template.data ? <div className="error-notice">模板不存在或无权访问 <button className="text-button" type="button" onClick={() => void template.refetch()}>重试模板</button></div> : <><RunCreator key={template.data.template.currentVersionId} book={book} template={template.data.template} groups={groups.data?.indexGroups ?? []} onCreated={(id) => { setCreatorOpen(false); setParam("run", id); }} /><button className="text-button analysis-close-creator" type="button" onClick={() => setCreatorOpen(false)}>收起创建区域</button></> : null}
-        {!selectedRunId ? <p className="empty-state">选择模板创建任务，或从左侧打开已有任务</p> : run.isPending ? <p className="empty-state">正在读取任务进度...</p> : run.isError ? <div className="error-notice">{run.error instanceof ApiError && run.error.status === 404 ? "任务不存在或无权访问" : "任务读取失败，服务可能暂时不可用"} <button className="text-button" type="button" onClick={() => void run.refetch()}>重试读取任务</button></div> : run.data ? <><AnalysisRunPanel run={run.data.run} pending={control.isPending || remove.isPending} onControl={(action) => control.mutate(action)} onDelete={() => remove.mutate()} />{control.isError ? <p className="error-notice">操作未完成，任务状态可能已变化，请刷新后重试</p> : null}{remove.isError ? <p className="error-notice">删除失败，任务状态可能已变化</p> : null}</> : null}
+        {!selectedRunId ? <p className="empty-state">选择模板创建任务，或从左侧打开已有任务</p> : run.isPending ? <p className="empty-state">正在读取任务进度...</p> : run.isError ? <div className="error-notice">{run.error instanceof ApiError && run.error.status === 404 ? "任务不存在或无权访问" : "任务读取失败，服务可能暂时不可用"} <button className="text-button" type="button" onClick={() => void run.refetch()}>重试读取任务</button></div> : run.data ? <><AnalysisRunPanel run={run.data.run} pending={control.isPending || remove.isPending} onControl={(action) => control.mutate({ runId: run.data.run.id, jobId: run.data.run.jobId, action })} onDelete={() => remove.mutate()} />{control.isError && (!control.variables || run.data.run.status !== controlTarget[control.variables.action]) ? <p className="error-notice">操作未完成，已刷新任务状态，请重试</p> : null}{remove.isError ? <p className="error-notice">删除失败，任务状态可能已变化</p> : null}</> : null}
       </main>
     </div>}
   </section>;

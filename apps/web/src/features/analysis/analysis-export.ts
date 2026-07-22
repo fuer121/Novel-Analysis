@@ -13,7 +13,6 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function rowsFromArray(key: string, value: unknown[]): AnalysisTable | null {
   const rows = value.map((entry) => asRecord(entry) ?? { value: entry });
-  if (!rows.length) return null;
   const keys = [...new Set(rows.flatMap((row) => Object.keys(row)))];
   return { key, title: key === "items" ? "分析条目" : key, rows, columns: keys.map((column) => ({ key: column, label: column })) };
 }
@@ -50,9 +49,9 @@ function excelWorkbookXml(value: unknown, title: string): string {
   const sheets = tables.map((table) => {
     const base = String(table.title || table.key || "结果").replace(/[:\\/?*[\]]/g, " ").replace(/\s+/g, " ").trim().slice(0, 31) || "结果";
     let name = base; let index = 2;
-    while (usedNames.has(name)) { const suffix = ` ${index}`; name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`; index += 1; }
-    usedNames.add(name);
-    const header = `<Row>${table.columns.map((column) => `<Cell><Data ss:Type="String">${escapeXml(column.label)}</Data></Cell>`).join("")}</Row>`;
+    while (usedNames.has(name.toLowerCase())) { const suffix = ` ${index}`; name = `${base.slice(0, Math.max(1, 31 - suffix.length))}${suffix}`; index += 1; }
+    usedNames.add(name.toLowerCase());
+    const header = table.columns.length ? `<Row>${table.columns.map((column) => `<Cell><Data ss:Type="String">${escapeXml(column.label)}</Data></Cell>`).join("")}</Row>` : "";
     const rows = table.rows.map((row) => `<Row>${table.columns.map((column) => {
       const value = row[column.key];
       const rendered = typeof value === "object" && value !== null ? JSON.stringify(value) : value;

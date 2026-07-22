@@ -171,7 +171,7 @@ describe("book-scoped advanced analysis workspace", () => {
     expect(writes.filter((write) => write.url.endsWith("/advanced-analysis") && write.method === "POST")).toHaveLength(1);
   });
 
-  it("reuses an uncertain create key after route remount", async () => {
+  it("reuses an uncertain create key after more than five minutes away from the route", async () => {
     const createKeys: string[] = [];
     let creates = 0;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -185,18 +185,59 @@ describe("book-scoped advanced analysis workspace", () => {
       const response = baseRead(url); if (response) return response;
       throw new Error(`unexpected ${url}`);
     }));
-    renderPath();
+    const rendered = renderPath();
     await userEvent.click(await screen.findByRole("button", { name: "创建分析任务" }));
     await userEvent.click(screen.getByRole("button", { name: "预览分析范围" }));
     await userEvent.click(await screen.findByRole("button", { name: "确认创建任务" }));
     expect(await screen.findByText("提交结果未确认", { exact: false })).toBeTruthy();
-    await userEvent.click(screen.getByRole("link", { name: "概览" }));
-    await userEvent.click(await screen.findByRole("link", { name: "高级分析" }));
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole("link", { name: "概览" }));
+    const attempt = rendered.client.getQueryCache().find({ queryKey: ["analysis", ids.book, "create-attempt", ids.template] });
+    expect(attempt).toBeTruthy();
+    (attempt as unknown as { scheduleGc(): void }).scheduleGc();
+    await vi.advanceTimersByTimeAsync(5 * 60_000 + 1);
+    fireEvent.click(screen.getByRole("link", { name: "高级分析" }));
+    vi.useRealTimers();
     await userEvent.click(await screen.findByRole("button", { name: "创建分析任务" }));
     await userEvent.click(screen.getByRole("button", { name: "预览分析范围" }));
     await userEvent.click(await screen.findByRole("button", { name: "确认创建任务" }));
     await waitFor(() => expect(createKeys).toHaveLength(2));
     expect(new Set(createKeys).size).toBe(1);
+  });
+
+  it.each([
+    { action: "pause", initial: "running", target: "paused", button: "暂停", recovered: "继续" },
+    { action: "resume", initial: "paused", target: "queued", button: "继续", recovered: "暂停" },
+    { action: "cancel", initial: "running", target: "cancelled", button: "取消", recovered: "删除任务" },
+  ] as const)("reconciles a lost $action response and retries with one stable request key", async ({ action, initial, target, button, recovered }) => {
+    let detail: Omit<typeof runDetail, "status"> & { status: string } = { ...runDetail, status: initial };
+    const controlKeys: string[] = [];
+    let controlCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith(`/advanced-analysis/${ids.run}`) && (!init?.method || init.method === "GET")) return json({ run: detail });
+      if (url.endsWith("/advanced-analysis") && (!init?.method || init.method === "GET")) return json({ runs: [{ ...runSummary, status: detail.status }] });
+      if (init?.method === "POST" && url === `/api/jobs/${ids.job}/${action}`) {
+        controlCalls += 1;
+        controlKeys.push(new Headers(init.headers).get("Idempotency-Key")!);
+        if (controlCalls === 2) detail = { ...detail, status: target };
+        return json({ error: "response_lost" }, 503);
+      }
+      const response = baseRead(url); if (response) return response;
+      throw new Error(`unexpected ${url}`);
+    }));
+    const view = renderPath(`/books/${ids.book}/analysis?run=${ids.run}`);
+
+    await userEvent.click(await screen.findByRole("button", { name: button }));
+    expect(await screen.findByText("操作未完成", { exact: false })).toBeTruthy();
+    expect(screen.getByRole("button", { name: button })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: button }));
+
+    expect(await screen.findByRole("button", { name: recovered })).toBeTruthy();
+    expect(controlKeys).toHaveLength(2);
+    expect(new Set(controlKeys).size).toBe(1);
+    expect(view.client.getQueryData<{ runs: Array<{ status: string }> }>(["analysis", ids.book, "runs"])?.runs[0]?.status).toBe(target);
+    expect(screen.queryByText("操作未完成", { exact: false })).toBeNull();
   });
 
   it("uses real run progress, exposes controls by state, and requires terminal delete confirmation", async () => {
@@ -213,6 +254,7 @@ describe("book-scoped advanced analysis workspace", () => {
     const view = renderPath(`/books/${ids.book}/analysis?run=${ids.run}`);
     expect(await screen.findByText("1 / 4 parts")).toBeTruthy();
     expect(screen.getAllByText("chapter-review").length).toBeGreaterThan(0);
+    expect(screen.getByText("位置 1")).toBeTruthy();
     expect(screen.getByRole("button", { name: "暂停" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "删除任务" })).toBeNull();
@@ -367,11 +409,24 @@ describe("advanced analysis export", () => {
     for (const value of ["陈平安", "未结构化补充", "人物关系稳定", "0.82"]) expect(content).toContain(value);
   });
 
-  it("sanitizes, falls back, and deterministically deduplicates worksheet names", () => {
-    const content = buildAnalysisExport("工作表", { "a/b": [{ value: 1 }], "a:b": [{ value: 2 }], "": [{ value: 3 }] }).content;
+  it("deduplicates worksheet names case-insensitively and preserves sanitized fallback and empty arrays", () => {
+    const result = {
+      Report: [{ value: 1 }],
+      report: [{ value: 2 }],
+      "///": [],
+      "": [],
+      mixed: [{ name: "陈平安" }, "补充观察"],
+      summary: "人物关系稳定",
+    };
+    const tables = tableViewsFromJson(result);
+    expect(tables.find((table) => table.key === "///")).toMatchObject({ rows: [], columns: [] });
+    expect(tables.find((table) => table.key === "")).toMatchObject({ rows: [], columns: [] });
+    const content = buildAnalysisExport("工作表", result).content;
     const names = [...content.matchAll(/<Worksheet ss:Name="([^"]+)"/g)].map((match) => match[1]);
-    expect(names).toEqual(["a b", "a b 2", "结果"]);
-    expect(new Set(names).size).toBe(names.length);
+    expect(names).toEqual(["Report", "report 2", "结果", "结果 2", "mixed", "结果字段"]);
+    expect(content).toContain('<Worksheet ss:Name="结果"><Table></Table></Worksheet>');
+    expect(content).toContain('<Worksheet ss:Name="结果 2"><Table></Table></Worksheet>');
+    for (const value of ["陈平安", "补充观察", "人物关系稳定"]) expect(content).toContain(value);
   });
 
   it("exports text as Markdown and non-tabular values as formatted JSON", () => {

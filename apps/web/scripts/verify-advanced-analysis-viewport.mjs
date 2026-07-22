@@ -1,3 +1,7 @@
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
 const ids = {
   user: "00000000-0000-4000-8000-000000000001",
   book: "00000000-0000-4000-8000-000000000010",
@@ -118,13 +122,31 @@ async function inspectGeometry(page) {
       const height = Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top);
       return width > 1 && height > 1 ? [{ left: leftName, right: rightName, width, height }] : [];
     });
+    const requiredBySelector = new Map(pairs.flatMap(([leftName, leftSelector, rightName, rightSelector]) => [
+      [leftName, leftSelector],
+      [rightName, rightSelector],
+    ]).map(([name, selector]) => [selector, { name, selector }]));
+    const required = [...requiredBySelector.values()];
+    const missing = required.flatMap(({ name, selector }) => {
+      const element = document.querySelector(selector);
+      return element instanceof HTMLElement && visible(element) ? [] : [name];
+    });
     return {
       rootScroll: root.scrollWidth - root.clientWidth,
       bodyScroll: body.scrollWidth - body.clientWidth,
       overflow,
       overlaps,
+      missing,
     };
   });
+}
+
+export function validateViewportGeometry(viewport, geometry) {
+  assert(geometry.missing.length === 0, "required viewport components are missing", { viewport, ...geometry });
+  assert(geometry.rootScroll === 0, "document root has horizontal scroll", { viewport, ...geometry });
+  assert(geometry.bodyScroll === 0, "document body has horizontal scroll", { viewport, ...geometry });
+  assert(geometry.overflow.length === 0, "unintended element overflow detected", { viewport, ...geometry });
+  assert(geometry.overlaps.length === 0, "component overlap detected", { viewport, ...geometry });
 }
 
 async function verifyDrawerFocus(page, viewport) {
@@ -144,7 +166,7 @@ async function verifyDrawerFocus(page, viewport) {
 
 export async function verifyAdvancedAnalysisViewport(page, options = {}) {
   const baseUrl = options.baseUrl ?? "http://127.0.0.1:4176";
-  const screenshotDir = options.screenshotDir ?? "/tmp";
+  const screenshotDir = options.screenshotDir ?? tmpdir();
   await installFixtures(page);
   const results = [];
 
@@ -154,10 +176,7 @@ export async function verifyAdvancedAnalysisViewport(page, options = {}) {
     await page.getByRole("heading", { name: "高级分析" }).waitFor();
     await page.getByRole("region", { name: "分析结果" }).waitFor();
     const geometry = await inspectGeometry(page);
-    assert(geometry.rootScroll === 0, "document root has horizontal scroll", { viewport, ...geometry });
-    assert(geometry.bodyScroll === 0, "document body has horizontal scroll", { viewport, ...geometry });
-    assert(geometry.overflow.length === 0, "unintended element overflow detected", { viewport, ...geometry });
-    assert(geometry.overlaps.length === 0, "component overlap detected", { viewport, ...geometry });
+    validateViewportGeometry(viewport, geometry);
     const screenshot = `${screenshotDir}/phase4-task6-worker-correction-${viewport.width}.png`;
     await page.screenshot({ path: screenshot, fullPage: true });
     const drawerFocusRestored = await verifyDrawerFocus(page, viewport);
@@ -172,4 +191,33 @@ export async function verifyAdvancedAnalysisViewport(page, options = {}) {
   }
 
   return results;
+}
+
+async function main() {
+  const moduleSpecifier = process.env.PLAYWRIGHT_MODULE;
+  if (!moduleSpecifier) throw new Error("PLAYWRIGHT_MODULE is required");
+  const executablePath = process.env.PLAYWRIGHT_EXECUTABLE_PATH;
+  const channel = process.env.PLAYWRIGHT_CHANNEL;
+  if (!executablePath && !channel) throw new Error("PLAYWRIGHT_CHANNEL or PLAYWRIGHT_EXECUTABLE_PATH is required");
+  const runtime = await import(moduleSpecifier);
+  const chromium = runtime.chromium ?? runtime.default?.chromium;
+  if (!chromium) throw new Error("PLAYWRIGHT_MODULE does not export chromium");
+  const browser = await chromium.launch(executablePath ? { executablePath } : { channel });
+  try {
+    const page = await browser.newPage();
+    const results = await verifyAdvancedAnalysisViewport(page, {
+      baseUrl: process.env.ADVANCED_ANALYSIS_BASE_URL,
+      screenshotDir: process.env.ADVANCED_ANALYSIS_SCREENSHOT_DIR,
+    });
+    console.log(JSON.stringify(results, null, 2));
+  } finally {
+    await browser.close();
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exitCode = 1;
+  });
 }
