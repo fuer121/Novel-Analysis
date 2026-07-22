@@ -6,11 +6,13 @@ import {
   JobWorker,
   createWorkerStepExecutor,
   parseLibraryRuntimeConfig,
+  parseAnalysisRuntimeConfig,
   parseQueryRuntimeConfig,
   createCoordinatedShutdown,
   installBossErrorShutdown,
 } from "./worker.js";
 import { LibraryImportExecutor } from "./library-executor.js";
+import { AnalysisExecutor } from "./analysis-executor.js";
 import { QueryExecutor } from "./query-executor.js";
 
 const databaseUrl = process.env.DATABASE_URL;
@@ -20,6 +22,7 @@ const database = createDatabase(databaseUrl);
 const boss = createBoss(databaseUrl);
 const libraryConfig = parseLibraryRuntimeConfig(process.env);
 const queryConfig = parseQueryRuntimeConfig(process.env);
+const analysisConfig = parseAnalysisRuntimeConfig(process.env);
 const cipher = libraryConfig
   ? createContentCipher({ activeKeyVersion: libraryConfig.contentKeyVersion, keys: { [libraryConfig.contentKeyVersion]: libraryConfig.contentKey } })
   : undefined;
@@ -47,7 +50,10 @@ const libraryExecutor = libraryConfig
 const queryExecutor = cipher
   ? new QueryExecutor({ database, cipher, dify: queryConfig.analysisSummaryKey ? adapter : undefined })
   : undefined;
-const executor = createWorkerStepExecutor({ database, libraryExecutor, queryExecutor });
+const analysisExecutor = cipher
+  ? new AnalysisExecutor({ database, cipher, dify: queryConfig.analysisSummaryKey ? adapter : undefined, executionConfig: analysisConfig })
+  : undefined;
+const executor = createWorkerStepExecutor({ database, libraryExecutor, queryExecutor, analysisExecutor });
 const productionBarrier: ExecutionBarrier = {
   async afterAttemptStarted() {},
 };

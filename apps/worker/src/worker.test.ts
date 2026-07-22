@@ -5,6 +5,7 @@ import {
   INTERACTIVE_WAKE_QUEUE,
   JobWorker,
   createWorkerStepExecutor,
+  parseAnalysisRuntimeConfig,
   parseQueryRuntimeConfig,
   type WorkerBoss,
 } from "./worker.js";
@@ -43,5 +44,20 @@ describe("interactive Worker queues", () => {
     const claim = { jobId: "job", stepId: "step", attemptId: "attempt", attemptNo: 1, position: 1, kind: "l2-query", workerId: "worker", leaseExpiresAt: new Date() };
     await expect(executor.execute(claim)).resolves.toEqual({ disposition: "completed" });
     expect(calls).toEqual(["l2-query"]);
+  });
+
+  it("requires an explicit advanced analysis runtime contract", () => {
+    expect(() => parseAnalysisRuntimeConfig({})).toThrow("advanced analysis runtime configuration");
+    expect(parseAnalysisRuntimeConfig({ ADVANCED_ANALYSIS_MODEL: "model", ADVANCED_ANALYSIS_REASONING_EFFORT: "high", ADVANCED_ANALYSIS_EXECUTOR_VERSION: "v1" })).toEqual({ model: "model", reasoningEffort: "high", executorVersion: "v1" });
+    expect(() => parseAnalysisRuntimeConfig({ ADVANCED_ANALYSIS_MODEL: "model" })).toThrow("advanced analysis runtime configuration");
+    expect(() => parseAnalysisRuntimeConfig({ ADVANCED_ANALYSIS_MODEL: "", ADVANCED_ANALYSIS_REASONING_EFFORT: "high", ADVANCED_ANALYSIS_EXECUTOR_VERSION: "v1" })).toThrow("advanced analysis runtime configuration");
+  });
+
+  it("routes advanced analysis only to its configured executor", async () => {
+    const calls: string[] = [];
+    const executor = createWorkerStepExecutor({ database: {} as never, analysisExecutor: { async execute(claim) { calls.push(claim.kind); return { disposition: "completed" as const }; } } });
+    const claim = { jobId: "job", stepId: "step", attemptId: "attempt", attemptNo: 1, position: 1, kind: "advanced-analysis", workerId: "worker", leaseExpiresAt: new Date() };
+    await expect(executor.execute(claim)).resolves.toEqual({ disposition: "completed" });
+    expect(calls).toEqual(["advanced-analysis"]);
   });
 });

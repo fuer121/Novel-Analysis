@@ -74,7 +74,7 @@ describe("Analysis job service", () => {
     expect(await postgres.db.selectFrom("jobs").select("id").execute()).toHaveLength(1);
     expect(await postgres.db.selectFrom("job_steps").select(["kind", "output_ref"]).execute()).toEqual([{ kind: "advanced-analysis", output_ref: { runId: created.run.id } }]);
     expect(await postgres.db.selectFrom("job_events").select("id").execute()).toHaveLength(1);
-    expect(await postgres.db.selectFrom("job_outbox").select("id").execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("job_outbox").select(["id", "topic"]).execute()).toEqual([{ id: expect.any(String), topic: "jobs.wake" }]);
     expect(await postgres.db.selectFrom("audit_logs").select("id").execute()).toHaveLength(1);
     const snapshot = await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshot({ runId: created.run.id, actor: input().actor, schema: AdvancedAnalysisExecutionSnapshotSchema });
     expect(snapshot).toMatchObject({ bookId, scopeHash: preview.scopeHash, template: { id: templateId, versionId: preview.templateVersionId }, mode: "balanced", range: { startChapter: 1, endChapter: 3 }, indexGroup: { id: groupId, configHash: "group-v1" }, executionVersions: preview.executionVersions, sourcePolicy: preview.sourceSummary, chapters: [
@@ -107,7 +107,7 @@ describe("Analysis job service", () => {
     const preview = await service.preview(input());
     await expect(service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: "0".repeat(64), requestId: "stale" })).rejects.toBeInstanceOf(AnalysisScopeChangedError);
     await sql`create function reject_analysis_outbox_insert() returns trigger language plpgsql as $$ begin raise exception 'forced outbox failure'; end $$`.execute(postgres.db);
-    await sql`create trigger reject_analysis_outbox before insert on job_outbox for each row when (new.topic = 'jobs.advanced-analysis.wake') execute function reject_analysis_outbox_insert()`.execute(postgres.db);
+    await sql`create trigger reject_analysis_outbox before insert on job_outbox for each row when (new.topic = 'jobs.wake') execute function reject_analysis_outbox_insert()`.execute(postgres.db);
     await expect(service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "rollback" })).rejects.toThrow();
     expect(await postgres.db.selectFrom("analysis_runs").select("id").execute()).toEqual([]);
     expect(await postgres.db.selectFrom("jobs").select("id").execute()).toEqual([]);
