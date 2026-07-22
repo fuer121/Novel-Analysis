@@ -32,6 +32,13 @@ export const modeLabels: Record<AnalysisMode, string> = {
   full_text: "全文分析",
 };
 
+export const modeDescriptions: Record<AnalysisMode, string> = {
+  fast_index: "仅读取 L1、L2 索引，不读取原文",
+  balanced: "读取 L1、L2，并复核少量原文章节",
+  precision: "读取 L1、L2，并复核更多原文章节",
+  full_text: "读取所选章节全文",
+};
+
 export function listAnalysisTemplates(bookId: string) {
   return apiRead<{ templates: AnalysisTemplateSummary[] }>(`/books/${bookId}/analysis-templates`);
 }

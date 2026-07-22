@@ -291,6 +291,7 @@ button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible
 .analysis-editor label, .analysis-scope-controls label { min-width: 0; color: #4a5565; font-size: 12px; }
 .analysis-editor input, .analysis-editor textarea, .analysis-editor select, .analysis-scope-controls input, .analysis-scope-controls select { width: 100%; margin-top: 6px; border: 1px solid #b9c2cd; border-radius: 4px; padding: 8px 9px; color: #17202a; background: #fff; }
 .analysis-editor input, .analysis-editor select, .analysis-scope-controls input, .analysis-scope-controls select { height: 38px; }
+.analysis-mode-description { display: block; margin-top: 6px; color: #697586; line-height: 1.45; }
 .analysis-editor textarea { resize: vertical; line-height: 1.55; }
 .analysis-scope-controls { display: grid; grid-template-columns: 1.2fr repeat(2, minmax(110px, .8fr)); gap: 12px; margin-bottom: 14px; }
 .analysis-preview { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)); margin-top: 16px; border: 1px solid #b7cae5; background: #f8fbff; }
