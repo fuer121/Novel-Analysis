@@ -273,6 +273,7 @@ describe("book-scoped advanced analysis workspace", () => {
     detail = completedRun;
     await view.client.invalidateQueries({ queryKey: ["analysis", ids.book, "run", ids.run] });
     expect(await screen.findByRole("button", { name: "删除任务" })).toBeTruthy();
+    expect(screen.getByText("陈平安").getAttribute("data-label")).toBe("name");
     await userEvent.click(screen.getByRole("button", { name: "删除任务" }));
     const dialog = screen.getByRole("dialog", { name: "永久删除分析任务" });
     expect(within(dialog).getByText("无法恢复", { exact: false })).toBeTruthy();

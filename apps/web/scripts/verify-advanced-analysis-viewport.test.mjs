@@ -11,8 +11,15 @@ test("fails closed when a required overlap component is missing", () => {
   assert.equal(typeof viewportVerifier.validateViewportGeometry, "function");
   assert.throws(() => viewportVerifier.validateViewportGeometry(
     { width: 390, height: 760 },
-    { rootScroll: 0, bodyScroll: 0, overflow: [], overlaps: [], missing: ["analysis layout"] },
+    { rootScroll: 0, bodyScroll: 0, overflow: [], overlaps: [], missing: ["analysis layout"], internalClipping: [] },
   ), /required viewport components are missing/);
+});
+
+test("fails closed when navigation or result content is internally clipped", () => {
+  assert.throws(() => viewportVerifier.validateViewportGeometry(
+    { width: 390, height: 760 },
+    { rootScroll: 0, bodyScroll: 0, overflow: [], overlaps: [], missing: [], internalClipping: ["workspace tab: 高级分析"] },
+  ), /internally clipped/);
 });
 
 test("direct execution requires an explicit Playwright runtime configuration", () => {

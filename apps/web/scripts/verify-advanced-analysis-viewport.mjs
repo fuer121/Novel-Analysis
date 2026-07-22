@@ -131,12 +131,23 @@ async function inspectGeometry(page) {
       const element = document.querySelector(selector);
       return element instanceof HTMLElement && visible(element) ? [] : [name];
     });
+    const workspaceTabs = document.querySelector(".book-workspace > .workspace-tabs");
+    const clippedTabs = workspaceTabs instanceof HTMLElement ? [...workspaceTabs.querySelectorAll("a")].flatMap((link) => {
+      const container = workspaceTabs.getBoundingClientRect();
+      const item = link.getBoundingClientRect();
+      return item.left < container.left - 1 || item.right > container.right + 1 ? [`workspace tab: ${link.textContent?.trim()}`] : [];
+    }) : [];
+    const clippedTables = [...document.querySelectorAll(".analysis-result-table > .data-table-wrap")].flatMap((element, index) => {
+      if (!(element instanceof HTMLElement)) return [];
+      return element.scrollWidth > element.clientWidth + 1 ? [`analysis result table ${index + 1}`] : [];
+    });
     return {
       rootScroll: root.scrollWidth - root.clientWidth,
       bodyScroll: body.scrollWidth - body.clientWidth,
       overflow,
       overlaps,
       missing,
+      internalClipping: [...clippedTabs, ...clippedTables],
     };
   });
 }
@@ -147,6 +158,7 @@ export function validateViewportGeometry(viewport, geometry) {
   assert(geometry.bodyScroll === 0, "document body has horizontal scroll", { viewport, ...geometry });
   assert(geometry.overflow.length === 0, "unintended element overflow detected", { viewport, ...geometry });
   assert(geometry.overlaps.length === 0, "component overlap detected", { viewport, ...geometry });
+  assert(geometry.internalClipping.length === 0, "navigation or result content is internally clipped", { viewport, ...geometry });
 }
 
 async function verifyDrawerFocus(page, viewport) {
