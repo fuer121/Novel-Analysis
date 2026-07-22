@@ -10,12 +10,42 @@ import type { ClaimedStep, CompletionDisposition } from "@novel-analysis/jobs";
 import { selectAnalysisSources, type SelectedAnalysisSources } from "./analysis-source-selector.js";
 
 const JsonSchema = z.json();
+const HIERARCHICAL_BATCH_SIZE = 20;
 type ExecutionResult = { disposition: CompletionDisposition | "failed" };
+type CompletedCheckpoint = { position: number; kind: string; inputSignature: string; result: unknown };
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 
 function expectedPartSignature(snapshot: AdvancedAnalysisExecutionSnapshot, chapter: AdvancedAnalysisExecutionSnapshot["chapters"][number]): string {
   return hash({ scopeHash: snapshot.scopeHash, chapterId: chapter.id, chapterIndex: chapter.position, contentHmac: chapter.contentHmac, sourceVersion: chapter.sourceVersion });
+}
+
+export function checkpointPositions(snapshot: AdvancedAnalysisExecutionSnapshot): { hierarchical: number[]; final: number } {
+  const maximum = Math.max(...snapshot.chapters.map((chapter) => chapter.position));
+  const count = Math.ceil(snapshot.chapters.length / HIERARCHICAL_BATCH_SIZE);
+  const hierarchical = Array.from({ length: count }, (_, index) => maximum + index + 1);
+  return { hierarchical, final: maximum + count + 1 };
+}
+
+export function buildHierarchicalSummaryInput(snapshot: AdvancedAnalysisExecutionSnapshot, children: Array<{ position: number; inputSignature: string; result: unknown }>) {
+  const ordered = [...children].sort((left, right) => left.position - right.position);
+  const input = {
+    scopeHash: snapshot.scopeHash,
+    executionConfig: { model: snapshot.executionVersions.model, reasoningEffort: snapshot.executionVersions.reasoningEffort, executorVersion: snapshot.executionVersions.executorVersion },
+    children: ordered.map((child) => ({ ...child, resultHash: hash(child.result) })),
+  };
+  return { input, inputSignature: hash({ kind: "analysis-hierarchical-summary", input }) };
+}
+
+export function buildFinalCheckpointInput(snapshot: AdvancedAnalysisExecutionSnapshot, hierarchical: Array<{ position: number; inputSignature: string; result: unknown }>) {
+  const ordered = [...hierarchical].sort((left, right) => left.position - right.position);
+  const input = {
+    scopeHash: snapshot.scopeHash,
+    templateContentHash: snapshot.template.contentHash,
+    executionConfig: { model: snapshot.executionVersions.model, reasoningEffort: snapshot.executionVersions.reasoningEffort, executorVersion: snapshot.executionVersions.executorVersion },
+    hierarchical: ordered.map((checkpoint) => ({ ...checkpoint, resultHash: hash(checkpoint.result) })),
+  };
+  return { input, inputSignature: hash({ kind: "analysis-final", input }) };
 }
 
 async function validateClaim(transaction: Transaction<Database>, claim: ClaimedStep): Promise<CompletionDisposition | null> {
@@ -45,6 +75,10 @@ function nonEmpty(value: unknown): boolean {
 export function validateFinalAnalysisResult(text: string, outputSchema: unknown): unknown {
   let value: unknown;
   try { value = JSON.parse(text); } catch { throw new Error("invalid_output_schema"); }
+  return validateFinalValue(value, outputSchema);
+}
+
+function validateFinalValue(value: unknown, outputSchema: unknown): unknown {
   if (!nonEmpty(value)) throw new Error("invalid_output_schema");
   try { return z.fromJSONSchema(outputSchema as never).parse(value); } catch { throw new Error("invalid_output_schema"); }
 }
@@ -52,7 +86,7 @@ export function validateFinalAnalysisResult(text: string, outputSchema: unknown)
 export class AnalysisExecutor {
   private readonly executionConfig: AdvancedAnalysisExecutionConfig;
 
-  constructor(private readonly options: { database: DatabaseConnection; cipher: ContentCipher; dify?: DifyAdapter; executionConfig?: unknown }) {
+  constructor(private readonly options: { database: DatabaseConnection; cipher: ContentCipher; dify?: DifyAdapter; executionConfig?: unknown; checkpointBarrier?: { afterCheckpointCommitted(kind: "hierarchical" | "final"): Promise<void> } }) {
     this.executionConfig = AdvancedAnalysisExecutionConfigSchema.parse(options.executionConfig);
   }
 
@@ -82,44 +116,15 @@ export class AnalysisExecutor {
     } catch {
       return this.fail(claim, context.runId, null, "invalid_execution_snapshot");
     }
-    const completed: Array<{ position: number; result: unknown }> = [];
-    for (const chapter of snapshot.chapters) {
-      const boundary = await this.boundary(claim, context.runId);
-      if (boundary) return { disposition: boundary };
-      const signature = expectedPartSignature(snapshot, chapter);
-      const reusable = await this.reusablePart(context.runId, chapter.position, signature);
-      if (reusable) {
-        completed.push({ position: chapter.position, result: reusable.result });
-        continue;
-      }
-      let output: string;
-      try {
-        output = (await this.options.dify.runAnalysisSummary({
-          invocationKey: `${context.runId}:part:${chapter.position}`,
-          taskType: "l2_query",
-          prompt: template.prompt,
-          contextJson: JSON.stringify({ stage: "part", mode: snapshot.mode, position: chapter.position, l1: sources.l1.find((item) => item.position === chapter.position)?.value ?? null, l2: sources.l2.find((item) => item.position === chapter.position)?.value ?? null, chapter: sources.chapters.find((item) => item.position === chapter.position)?.content ?? null }),
-        })).text;
-      } catch (error) {
-        const code = error instanceof DifyAdapterError ? error.code : "provider_invalid_response";
-        return this.fail(claim, context.runId, chapter.position, code);
-      }
-      const committed = await this.commitPart(claim, context.runId, chapter.position, signature, output);
-      if (committed) return { disposition: committed };
-      completed.push({ position: chapter.position, result: output });
-    }
-
-    const boundary = await this.boundary(claim, context.runId);
-    if (boundary) return { disposition: boundary };
-    let finalText: string;
-    try {
-      finalText = (await this.options.dify.runAnalysisSummary({ invocationKey: `${context.runId}:final`, taskType: "l2_query", prompt: template.prompt, contextJson: JSON.stringify({ stage: "final", mode: snapshot.mode, parts: completed }) })).text;
-    } catch (error) {
-      return this.fail(claim, context.runId, null, error instanceof DifyAdapterError ? error.code : "provider_invalid_response");
-    }
-    let result: unknown;
-    try { result = validateFinalAnalysisResult(finalText, template.outputSchema); } catch { return this.fail(claim, context.runId, null, "invalid_output_schema"); }
-    return this.complete(claim, context.runId, snapshot, result);
+    const chapterParts = await this.executeChapterParts(claim, context.runId, snapshot, template.prompt, sources);
+    if ("disposition" in chapterParts) return chapterParts;
+    const hierarchical = await this.executeHierarchicalSummary(claim, context.runId, snapshot, template.prompt, chapterParts.checkpoints);
+    if ("disposition" in hierarchical) return hierarchical;
+    const final = await this.executeFinalCheckpoint(claim, context.runId, snapshot, template, hierarchical.checkpoints);
+    if ("disposition" in final) return final;
+    const terminalBoundary = await this.boundary(claim, context.runId);
+    if (terminalBoundary) return { disposition: terminalBoundary };
+    return this.complete(claim, context.runId, snapshot, template.outputSchema, final.checkpoint);
   }
 
   private async loadContext(claim: ClaimedStep): Promise<{ runId: string }> {
@@ -169,6 +174,132 @@ export class AnalysisExecutor {
     return { result: decryptJson(this.options.cipher, { ciphertext: row.result_ciphertext, nonce: row.result_nonce, tag: row.result_tag, keyVersion: row.result_key_version }, JsonSchema) };
   }
 
+  private async reusableCheckpoint(runId: string, position: number, kind: string, inputSignature: string): Promise<CompletedCheckpoint | null> {
+    const row = await this.options.database.selectFrom("analysis_parts").selectAll().where("run_id", "=", runId).where("position", "=", position).where("kind", "=", kind).where("input_signature", "=", inputSignature).where("status", "=", "completed").executeTakeFirst();
+    if (!row || !row.result_ciphertext || !row.result_nonce || !row.result_tag || !row.result_key_version) return null;
+    return { position, kind, inputSignature, result: decryptJson(this.options.cipher, { ciphertext: row.result_ciphertext, nonce: row.result_nonce, tag: row.result_tag, keyVersion: row.result_key_version }, JsonSchema) };
+  }
+
+  private async executeChapterParts(
+    claim: ClaimedStep,
+    runId: string,
+    snapshot: AdvancedAnalysisExecutionSnapshot,
+    prompt: string,
+    sources: SelectedAnalysisSources,
+  ): Promise<{ checkpoints: Array<{ position: number; inputSignature: string; result: unknown }> } | ExecutionResult> {
+    const checkpoints: Array<{ position: number; inputSignature: string; result: unknown }> = [];
+    for (const chapter of snapshot.chapters) {
+      const boundary = await this.boundary(claim, runId);
+      if (boundary) return { disposition: boundary };
+      const inputSignature = expectedPartSignature(snapshot, chapter);
+      const reusable = await this.reusablePart(runId, chapter.position, inputSignature);
+      if (reusable) {
+        checkpoints.push({ position: chapter.position, inputSignature, result: reusable.result });
+        continue;
+      }
+      let result: string;
+      try {
+        result = (await this.options.dify!.runAnalysisSummary({
+          invocationKey: `${runId}:part:${chapter.position}`,
+          taskType: "l2_query",
+          prompt,
+          contextJson: JSON.stringify({ stage: "part", mode: snapshot.mode, position: chapter.position, l1: sources.l1.find((item) => item.position === chapter.position)?.value ?? null, l2: sources.l2.find((item) => item.position === chapter.position)?.value ?? null, chapter: sources.chapters.find((item) => item.position === chapter.position)?.content ?? null }),
+        })).text;
+      } catch (error) {
+        return this.fail(claim, runId, chapter.position, error instanceof DifyAdapterError ? error.code : "provider_invalid_response");
+      }
+      const committed = await this.commitPart(claim, runId, chapter.position, inputSignature, result);
+      if (committed) return { disposition: committed };
+      checkpoints.push({ position: chapter.position, inputSignature, result });
+    }
+    return { checkpoints };
+  }
+
+  private async executeHierarchicalSummary(
+    claim: ClaimedStep,
+    runId: string,
+    snapshot: AdvancedAnalysisExecutionSnapshot,
+    prompt: string,
+    children: Array<{ position: number; inputSignature: string; result: unknown }>,
+  ): Promise<{ checkpoints: CompletedCheckpoint[] } | ExecutionResult> {
+    const positions = checkpointPositions(snapshot).hierarchical;
+    const checkpoints: CompletedCheckpoint[] = [];
+    for (let batchIndex = 0; batchIndex < positions.length; batchIndex += 1) {
+      const boundary = await this.boundary(claim, runId);
+      if (boundary) return { disposition: boundary };
+      const position = positions[batchIndex]!;
+      const batch = children.slice(batchIndex * HIERARCHICAL_BATCH_SIZE, (batchIndex + 1) * HIERARCHICAL_BATCH_SIZE);
+      const built = buildHierarchicalSummaryInput(snapshot, batch);
+      const reusable = await this.reusableCheckpoint(runId, position, "analysis-hierarchical-summary", built.inputSignature);
+      if (reusable) {
+        checkpoints.push(reusable);
+        continue;
+      }
+      let result: string;
+      try {
+        result = (await this.options.dify!.runAnalysisSummary({ invocationKey: `${runId}:hierarchical:${batchIndex}`, taskType: "l2_query", prompt, contextJson: JSON.stringify({ stage: "hierarchical", batchIndex, ...built.input }) })).text;
+        if (!result.trim()) throw new DifyAdapterError("provider_invalid_response");
+      } catch (error) {
+        return this.fail(claim, runId, null, error instanceof DifyAdapterError ? error.code : "provider_invalid_response");
+      }
+      const committed = await this.commitCheckpoint(claim, runId, { position, kind: "analysis-hierarchical-summary", inputSignature: built.inputSignature, result });
+      if ("disposition" in committed) return committed;
+      if (committed.created) await this.options.checkpointBarrier?.afterCheckpointCommitted("hierarchical");
+      checkpoints.push(committed.checkpoint);
+    }
+    return { checkpoints };
+  }
+
+  private async executeFinalCheckpoint(
+    claim: ClaimedStep,
+    runId: string,
+    snapshot: AdvancedAnalysisExecutionSnapshot,
+    template: { prompt: string; outputSchema: unknown },
+    hierarchical: CompletedCheckpoint[],
+  ): Promise<{ checkpoint: CompletedCheckpoint } | ExecutionResult> {
+    const boundary = await this.boundary(claim, runId);
+    if (boundary) return { disposition: boundary };
+    const position = checkpointPositions(snapshot).final;
+    const built = buildFinalCheckpointInput(snapshot, hierarchical);
+    const reusable = await this.reusableCheckpoint(runId, position, "analysis-final", built.inputSignature);
+    if (reusable) {
+      try { reusable.result = validateFinalValue(reusable.result, template.outputSchema); } catch { return this.fail(claim, runId, null, "invalid_output_schema"); }
+      return { checkpoint: reusable };
+    }
+    let result: unknown;
+    try {
+      const text = (await this.options.dify!.runAnalysisSummary({ invocationKey: `${runId}:final`, taskType: "l2_query", prompt: template.prompt, contextJson: JSON.stringify({ stage: "final", ...built.input }) })).text;
+      result = validateFinalAnalysisResult(text, template.outputSchema);
+    } catch (error) {
+      const code = error instanceof DifyAdapterError ? error.code : error instanceof Error && error.message === "invalid_output_schema" ? "invalid_output_schema" : "provider_invalid_response";
+      return this.fail(claim, runId, null, code);
+    }
+    const committed = await this.commitCheckpoint(claim, runId, { position, kind: "analysis-final", inputSignature: built.inputSignature, result });
+    if ("disposition" in committed) return committed;
+    if (committed.created) await this.options.checkpointBarrier?.afterCheckpointCommitted("final");
+    return { checkpoint: committed.checkpoint };
+  }
+
+  private commitCheckpoint(claim: ClaimedStep, runId: string, checkpoint: CompletedCheckpoint): Promise<{ checkpoint: CompletedCheckpoint; created: boolean } | ExecutionResult> {
+    return this.options.database.transaction().execute(async (transaction) => {
+      const invalid = await validateClaim(transaction, claim);
+      if (invalid) return { disposition: invalid };
+      const existing = await transaction.selectFrom("analysis_parts").selectAll().where("run_id", "=", runId).where("position", "=", checkpoint.position).forUpdate().executeTakeFirst();
+      if (existing?.status === "completed") {
+        if (existing.kind !== checkpoint.kind || existing.input_signature !== checkpoint.inputSignature || !existing.result_ciphertext || !existing.result_nonce || !existing.result_tag || !existing.result_key_version) return { disposition: "terminal-noop" };
+        return { checkpoint: { ...checkpoint, result: decryptJson(this.options.cipher, { ciphertext: existing.result_ciphertext, nonce: existing.result_nonce, tag: existing.result_tag, keyVersion: existing.result_key_version }, JsonSchema) }, created: false };
+      }
+      if (existing && (existing.kind !== checkpoint.kind || existing.input_signature !== checkpoint.inputSignature || existing.status === "cancelled")) return { disposition: "terminal-noop" };
+      const encrypted = encryptJson(this.options.cipher, checkpoint.result);
+      if (existing) {
+        await transaction.updateTable("analysis_parts").set({ status: "completed", result_ciphertext: encrypted.ciphertext, result_nonce: encrypted.nonce, result_tag: encrypted.tag, result_key_version: encrypted.keyVersion, error_code: null, output_ref: null, updated_at: new Date() }).where("id", "=", existing.id).execute();
+      } else {
+        await transaction.insertInto("analysis_parts").values({ run_id: runId, position: checkpoint.position, kind: checkpoint.kind, status: "completed", input_signature: checkpoint.inputSignature, result_ciphertext: encrypted.ciphertext, result_nonce: encrypted.nonce, result_tag: encrypted.tag, result_key_version: encrypted.keyVersion, error_code: null, output_ref: null }).execute();
+      }
+      return { checkpoint, created: true };
+    });
+  }
+
   private commitPart(claim: ClaimedStep, runId: string, position: number, inputSignature: string, result: unknown): Promise<CompletionDisposition | null> {
     return this.options.database.transaction().execute(async (transaction) => {
       const invalid = await validateClaim(transaction, claim);
@@ -180,7 +311,7 @@ export class AnalysisExecutor {
       if (!part || part.kind !== "analysis-part" || part.input_signature !== inputSignature || part.status === "completed" || part.status === "cancelled") return "terminal-noop";
       const encrypted = encryptJson(this.options.cipher, result);
       await transaction.updateTable("analysis_parts").set({ status: "completed", result_ciphertext: encrypted.ciphertext, result_nonce: encrypted.nonce, result_tag: encrypted.tag, result_key_version: encrypted.keyVersion, error_code: null, output_ref: null, updated_at: new Date() }).where("id", "=", part.id).execute();
-      const count = Number((await transaction.selectFrom("analysis_parts").select(({ fn }) => fn.count("id").as("count")).where("run_id", "=", runId).where("status", "=", "completed").executeTakeFirstOrThrow()).count);
+      const count = Number((await transaction.selectFrom("analysis_parts").select(({ fn }) => fn.count("id").as("count")).where("run_id", "=", runId).where("kind", "=", "analysis-part").where("status", "=", "completed").executeTakeFirstOrThrow()).count);
       await transaction.updateTable("analysis_runs").set({ status: "running", completed_parts: count, updated_at: new Date() }).where("id", "=", runId).execute();
       return null;
     });
@@ -200,7 +331,7 @@ export class AnalysisExecutor {
     });
   }
 
-  private complete(claim: ClaimedStep, runId: string, snapshot: AdvancedAnalysisExecutionSnapshot, result: unknown): Promise<ExecutionResult> {
+  private complete(claim: ClaimedStep, runId: string, snapshot: AdvancedAnalysisExecutionSnapshot, outputSchema: unknown, finalCheckpoint: CompletedCheckpoint): Promise<ExecutionResult> {
     return this.options.database.transaction().execute(async (transaction) => {
       const invalid = await validateClaim(transaction, claim);
       if (invalid) return { disposition: invalid };
@@ -208,6 +339,10 @@ export class AnalysisExecutor {
         const part = await transaction.selectFrom("analysis_parts").select(["status", "kind", "input_signature"]).where("run_id", "=", runId).where("position", "=", chapter.position).executeTakeFirst();
         if (!part || part.status !== "completed" || part.kind !== "analysis-part" || part.input_signature !== expectedPartSignature(snapshot, chapter)) return { disposition: "terminal-noop" };
       }
+      const final = await transaction.selectFrom("analysis_parts").selectAll().where("run_id", "=", runId).where("position", "=", finalCheckpoint.position).where("kind", "=", "analysis-final").where("input_signature", "=", finalCheckpoint.inputSignature).where("status", "=", "completed").forUpdate().executeTakeFirst();
+      if (!final?.result_ciphertext || !final.result_nonce || !final.result_tag || !final.result_key_version) return { disposition: "terminal-noop" };
+      let result: unknown;
+      try { result = validateFinalValue(decryptJson(this.options.cipher, { ciphertext: final.result_ciphertext, nonce: final.result_nonce, tag: final.result_tag, keyVersion: final.result_key_version }, JsonSchema), outputSchema); } catch { return { disposition: "terminal-noop" }; }
       const encrypted = encryptJson(this.options.cipher, result);
       await transaction.updateTable("analysis_runs").set({ status: "completed", completed_parts: snapshot.chapters.length, result_ciphertext: encrypted.ciphertext, result_nonce: encrypted.nonce, result_tag: encrypted.tag, result_key_version: encrypted.keyVersion, error_code: null, updated_at: new Date() }).where("id", "=", runId).execute();
       await transaction.updateTable("job_steps").set({ status: "completed", output_ref: { runId, status: "completed" }, lease_owner: null, lease_expires_at: null, updated_at: new Date() }).where("id", "=", claim.stepId).execute();

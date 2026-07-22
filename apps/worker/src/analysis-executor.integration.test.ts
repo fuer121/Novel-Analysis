@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "kysely";
 
 import { createAnalysisRepository, createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../packages/database/src/testing/postgres.js";
@@ -7,6 +8,7 @@ import { DifyAdapterError, FakeDifyAdapter } from "@novel-analysis/dify";
 import { AnalysisJobService, JobControls, PostgresStepLeaseService } from "@novel-analysis/jobs";
 
 import { AnalysisExecutor } from "./analysis-executor.js";
+import { BACKGROUND_WAKE_QUEUE, JobWorker, type WorkerBoss } from "./worker.js";
 
 const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 31) } });
 const executionConfig = { model: "analysis-model", reasoningEffort: "high", executorVersion: "analysis-executor-v1" };
@@ -55,6 +57,7 @@ describe("analysis executor", () => {
     const dify = new FakeDifyAdapter([
       { target: "analysis-summary", invocationKey: `${run.id}:part:1`, output: { text: "PART_SENTINEL_1" } },
       { target: "analysis-summary", invocationKey: `${run.id}:part:2`, output: { text: "PART_SENTINEL_2" } },
+      { target: "analysis-summary", invocationKey: `${run.id}:hierarchical:0`, output: { text: "HIERARCHICAL_SENTINEL" } },
       { target: "analysis-summary", invocationKey: `${run.id}:final`, output: { text: JSON.stringify({ answer: "FINAL_SENTINEL" }) } },
     ]);
 
@@ -62,7 +65,11 @@ describe("analysis executor", () => {
 
     const detail = await createAnalysisRepository(postgres.db, cipher).getRunResult({ runId: run.id, actor: { id: ownerId, role: "member" } });
     expect(detail).toEqual({ answer: "FINAL_SENTINEL" });
-    expect(await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", run.id).where("status", "=", "completed").execute()).toHaveLength(2);
+    expect(await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", run.id).where("kind", "=", "analysis-part").where("status", "=", "completed").execute()).toHaveLength(2);
+    expect(await postgres.db.selectFrom("analysis_parts").select(["kind", "position", "status"]).where("run_id", "=", run.id).where("kind", "in", ["analysis-hierarchical-summary", "analysis-final"]).orderBy("position").execute()).toEqual([
+      { kind: "analysis-hierarchical-summary", position: 3, status: "completed" },
+      { kind: "analysis-final", position: 4, status: "completed" },
+    ]);
     const ordinary = JSON.stringify({
       run: await postgres.db.selectFrom("analysis_runs").selectAll().where("id", "=", run.id).executeTakeFirstOrThrow(),
       parts: await postgres.db.selectFrom("analysis_parts").selectAll().where("run_id", "=", run.id).execute(),
@@ -72,7 +79,7 @@ describe("analysis executor", () => {
       events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", claim.jobId).execute(),
       outbox: await postgres.db.selectFrom("job_outbox").selectAll().where("job_id", "=", claim.jobId).execute(),
     });
-    expect(ordinary).not.toMatch(/SENTINEL_(PROMPT|CHAPTER)|PART_SENTINEL|FINAL_SENTINEL/);
+    expect(ordinary).not.toMatch(/SENTINEL_(PROMPT|CHAPTER)|PART_SENTINEL|HIERARCHICAL_SENTINEL|FINAL_SENTINEL/);
   });
 
   it("keeps completed parts reusable after a sanitized provider failure", async () => {
@@ -93,6 +100,7 @@ describe("analysis executor", () => {
     const dify = new FakeDifyAdapter([
       { target: "analysis-summary", invocationKey: `${invalid.run.id}:part:1`, output: { text: "one" } },
       { target: "analysis-summary", invocationKey: `${invalid.run.id}:part:2`, output: { text: "two" } },
+      { target: "analysis-summary", invocationKey: `${invalid.run.id}:hierarchical:0`, output: { text: "hierarchical" } },
       { target: "analysis-summary", invocationKey: `${invalid.run.id}:final`, output: { text: JSON.stringify({ wrong: true }) } },
     ]);
     await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(invalid.claim)).resolves.toEqual({ disposition: "failed" });
@@ -146,21 +154,25 @@ describe("analysis executor", () => {
   });
 
   it("reuses a committed part after lease expiry and rejects the superseded attempt", async () => {
-    const created = await createClaim("lease-recovery", "worker-a", 35);
+    const created = await createClaim("lease-recovery", "worker-a", 5_000);
     const callsA: string[] = [];
+    let partTwoStarted!: () => void;
+    const partTwo = new Promise<void>((resolve) => { partTwoStarted = resolve; });
     const difyA = {
       async runAnalysisSummary(input: { invocationKey: string }) {
         callsA.push(input.invocationKey);
-        if (input.invocationKey.endsWith(":part:2")) await new Promise((resolve) => setTimeout(resolve, 80));
+        if (input.invocationKey.endsWith(":part:2")) { partTwoStarted(); await new Promise((resolve) => setTimeout(resolve, 80)); }
         return { text: input.invocationKey.endsWith(":part:1") ? "REUSABLE" : "LATE_PART" };
       },
       async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
     };
     const runningA = new AnalysisExecutor({ database: postgres.db, cipher, dify: difyA, executionConfig }).execute(created.claim);
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await partTwo;
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
     const claimB = (await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs: 1_000 }).claimNext(created.job.id, "worker-b", new Date()))!;
     const difyB = new FakeDifyAdapter([
       { target: "analysis-summary", invocationKey: `${created.run.id}:part:2`, output: { text: "AUTHORITATIVE_PART" } },
+      { target: "analysis-summary", invocationKey: `${created.run.id}:hierarchical:0`, output: { text: "AUTHORITATIVE_HIERARCHICAL" } },
       { target: "analysis-summary", invocationKey: `${created.run.id}:final`, output: { text: JSON.stringify({ answer: "AUTHORITATIVE_FINAL" }) } },
     ]);
 
@@ -202,5 +214,104 @@ describe("analysis executor", () => {
     expect(contexts.join("\n")).toContain("OLD_ROUTE_1");
     expect(contexts.join("\n")).toContain("OLD_FACT_2");
     expect(contexts.join("\n")).not.toMatch(/NEW_ROUTE|NEW_FACT|SENTINEL_CHAPTER/);
+  });
+
+  it.each(["hierarchical", "final"] as const)("reuses a committed %s checkpoint after crash and lease expiry", async (crashAfter) => {
+    const created = await createClaim(`checkpoint-${crashAfter}`, "checkpoint-a", 5_000);
+    const calls: string[] = [];
+    const dify = {
+      async runAnalysisSummary(input: { invocationKey: string }) {
+        calls.push(input.invocationKey);
+        if (input.invocationKey.endsWith(":final")) return { text: JSON.stringify({ answer: "CHECKPOINT_FINAL" }) };
+        return { text: input.invocationKey.includes(":hierarchical:") ? "HIERARCHICAL_CHECKPOINT" : `CHAPTER_${input.invocationKey.at(-1)}` };
+      },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    const first = new AnalysisExecutor({
+      database: postgres.db, cipher, dify, executionConfig,
+      checkpointBarrier: { async afterCheckpointCommitted(kind) { if (kind === crashAfter) throw new Error(`crash-after-${kind}`); } },
+    }).execute(created.claim);
+    await expect(first).rejects.toThrow(`crash-after-${crashAfter}`);
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    const claimB = (await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs: 1_000 }).claimNext(created.job.id, "checkpoint-b", new Date()))!;
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(claimB)).resolves.toEqual({ disposition: "completed" });
+    expect(calls.filter((key) => key.includes(":hierarchical:"))).toHaveLength(1);
+    expect(calls.filter((key) => key.endsWith(":final"))).toHaveLength(1);
+    expect(await postgres.db.selectFrom("analysis_parts").select(["kind", "position", "status"]).where("run_id", "=", created.run.id).where("kind", "in", ["analysis-hierarchical-summary", "analysis-final"]).orderBy("position").execute()).toEqual([
+      { kind: "analysis-hierarchical-summary", position: 3, status: "completed" },
+      { kind: "analysis-final", position: 4, status: "completed" },
+    ]);
+    expect((await postgres.db.selectFrom("analysis_runs").select(["completed_parts", "total_parts", "status"]).where("id", "=", created.run.id).executeTakeFirstOrThrow())).toEqual({ completed_parts: 2, total_parts: 2, status: "completed" });
+  });
+
+  it("completes once under concurrent repeated wake and exact outbox replay after final checkpoint crash", async () => {
+    const created = await createClaim("outbox-final-checkpoint", "outbox-a", 5_000);
+    const providerCalls: string[] = [];
+    const provider = {
+      async runAnalysisSummary(input: { invocationKey: string }) { providerCalls.push(input.invocationKey); return { text: input.invocationKey.endsWith(":final") ? JSON.stringify({ answer: "OUTBOX_FINAL" }) : "checkpoint" }; },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify: provider, executionConfig, checkpointBarrier: { async afterCheckpointCommitted(kind) { if (kind === "final") throw new Error("crash-after-final"); } } }).execute(created.claim)).rejects.toThrow("crash-after-final");
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    const handlers = new Map<string, (jobs: Array<{ data: { jobId: string; outboxId: string } }>) => Promise<unknown>>();
+    const boss: WorkerBoss = {
+      async start() {}, async stop() {}, async createQueue() {}, async offWork() {}, async send() { return "id"; },
+      async work(name, _options, handler) { handlers.set(name, handler as never); return "id"; },
+    };
+    const worker = new JobWorker({ database: postgres.db, workerId: "outbox-b", boss, executor: new AnalysisExecutor({ database: postgres.db, cipher, dify: new FakeDifyAdapter([]), executionConfig }), pollIntervalMs: 60_000 });
+    const outboxId = (await postgres.db.selectFrom("job_outbox").select("id").where("job_id", "=", created.job.id).executeTakeFirstOrThrow()).id;
+    try {
+      await worker.start();
+      const replay = handlers.get(BACKGROUND_WAKE_QUEUE)!;
+      const payload = [{ data: { jobId: created.job.id, outboxId } }];
+      await Promise.all([replay(payload), replay(payload), replay([{ data: { jobId: created.job.id, outboxId: "duplicate" } }])]);
+    } finally {
+      await worker.stop();
+    }
+    expect(providerCalls.filter((key) => key.endsWith(":final"))).toHaveLength(1);
+    expect(await postgres.db.selectFrom("job_events").select("id").where("job_id", "=", created.job.id).where("type", "=", "completed").execute()).toHaveLength(1);
+    expect(await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", created.run.id).where("kind", "=", "analysis-final").execute()).toHaveLength(1);
+    expect(await createAnalysisRepository(postgres.db, cipher).getRunResult({ runId: created.run.id, actor: { id: ownerId, role: "member" } })).toEqual({ answer: "OUTBOX_FINAL" });
+  });
+
+  it("rolls back a rejected hierarchical checkpoint commit without leaking ciphertext", async () => {
+    const created = await createClaim("checkpoint-rollback");
+    await sql`create function reject_analysis_checkpoint() returns trigger language plpgsql as $$ begin if new.kind = 'analysis-hierarchical-summary' then raise exception 'forced checkpoint rollback'; end if; return new; end $$`.execute(postgres.db);
+    await sql`create trigger reject_analysis_checkpoint before insert on analysis_parts for each row execute function reject_analysis_checkpoint()`.execute(postgres.db);
+    const provider = {
+      async runAnalysisSummary(input: { invocationKey: string }) { return { text: input.invocationKey.includes(":hierarchical:") ? "ROLLBACK_CHECKPOINT_SENTINEL" : "chapter" }; },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify: provider, executionConfig }).execute(created.claim)).rejects.toThrow("forced checkpoint rollback");
+    expect(await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", created.run.id).where("kind", "=", "analysis-hierarchical-summary").execute()).toEqual([]);
+    expect(JSON.stringify(await postgres.db.selectFrom("analysis_parts").selectAll().where("run_id", "=", created.run.id).execute())).not.toContain("ROLLBACK_CHECKPOINT_SENTINEL");
+  });
+
+  it("keeps controlled provider errors out of captured Worker logs and audit surfaces", async () => {
+    const created = await createClaim("provider-error-scan");
+    await postgres.db.updateTable("job_steps").set({ lease_expires_at: new Date(0) }).where("id", "=", created.claim.stepId).execute();
+    const captured: string[] = [];
+    const original = console.error;
+    console.error = (...values: unknown[]) => { captured.push(values.map(String).join(" ")); };
+    const provider = {
+      async runAnalysisSummary(): Promise<never> { throw new Error("RAW_PROVIDER_ERROR_SENTINEL"); },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    try {
+      const worker = new JobWorker({ database: postgres.db, workerId: "provider-error-worker", executor: new AnalysisExecutor({ database: postgres.db, cipher, dify: provider, executionConfig }) });
+      await expect(worker.processJob(created.job.id)).resolves.toBeUndefined();
+    } finally {
+      console.error = original;
+    }
+    const ordinary = JSON.stringify({
+      logs: captured,
+      audit: await postgres.db.selectFrom("audit_logs").selectAll().execute(),
+      attempts: await postgres.db.selectFrom("job_attempts").select(["error_code", "error_message"]).where("step_id", "=", created.claim.stepId).execute(),
+      events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", created.job.id).execute(),
+    });
+    expect(ordinary).not.toContain("RAW_PROVIDER_ERROR_SENTINEL");
+    expect(ordinary).toContain("provider_invalid_response");
   });
 });
