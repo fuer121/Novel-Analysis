@@ -127,7 +127,7 @@ export class AnalysisJobService {
       }
       await transaction.insertInto("job_steps").values({ job_id: job.id, position: 1, kind: "advanced-analysis", status: "queued", input_signature: selection.scopeHash, idempotency_key: `${job.id}:advanced-analysis`, output_ref: { runId: runRow.id }, lease_owner: null, lease_expires_at: null }).execute();
       await transaction.insertInto("job_events").values({ job_id: job.id, type: "created", dedupe_key: "created", payload: { status: "queued" } }).execute();
-      await transaction.insertInto("job_outbox").values({ job_id: job.id, topic: "jobs.advanced-analysis.wake", payload: { jobId: job.id }, claimed_by: null, claim_expires_at: null, delivered_at: null }).execute();
+      await transaction.insertInto("job_outbox").values({ job_id: job.id, topic: "jobs.wake", payload: { jobId: job.id }, claimed_by: null, claim_expires_at: null, delivered_at: null }).execute();
       await transaction.insertInto("audit_logs").values({ actor_user_id: input.actor.id, action: "advanced_analysis.created", target_type: "analysis_run", target_id: runRow.id, metadata: { requestId: input.requestId, requestFingerprint: fingerprint, jobId: job.id, bookId: input.bookId } }).execute();
       return { run: runToPublic(runRow), job };
     });

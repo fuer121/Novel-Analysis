@@ -72,6 +72,50 @@ describe("analysis executor", () => {
     expect(ordinary).not.toMatch(/SENTINEL_(PROMPT|CHAPTER)/);
   });
 
+  it("dispatches the created analysis outbox row through the registered production background handler", async () => {
+    const created = await createRun("production-outbox-wiring");
+    const handlers = new Map<string, (jobs: Array<{ data: { jobId: string; outboxId: string } }>) => Promise<unknown>>();
+    const sent: Array<{ topic: string; data: { jobId: string; outboxId: string }; singletonKey: string }> = [];
+    let notifyEntered!: () => void;
+    const entered = new Promise<void>((resolve) => { notifyEntered = resolve; });
+    const boss: WorkerBoss = {
+      async start() {}, async stop() {}, async createQueue() {}, async offWork() {},
+      async work(name, _options, handler) { handlers.set(name, handler as never); return `worker-${name}`; },
+      async send(topic, data, options) {
+        sent.push({ topic, data, singletonKey: options.singletonKey });
+        await handlers.get(topic)?.([{ data }]);
+        return "queue-id";
+      },
+    };
+    const worker = new JobWorker({
+      database: postgres.db,
+      workerId: "production-wiring-worker",
+      boss,
+      pollIntervalMs: 60_000,
+      executor: {
+        async execute(claim) {
+          expect(claim).toMatchObject({ jobId: created.job.id, kind: "advanced-analysis" });
+          notifyEntered();
+          return { disposition: "paused-boundary" };
+        },
+      },
+    });
+
+    try {
+      await worker.start();
+      await expect(Promise.race([
+        entered,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error("advanced analysis wake was not consumed")), 500)),
+      ])).resolves.toBeUndefined();
+      await expect.poll(async () => (await postgres.db.selectFrom("job_outbox").select("delivered_at").where("job_id", "=", created.job.id).executeTakeFirstOrThrow()).delivered_at).toBeInstanceOf(Date);
+      const outbox = await postgres.db.selectFrom("job_outbox").select(["id", "topic", "delivered_at"]).where("job_id", "=", created.job.id).executeTakeFirstOrThrow();
+      expect(sent).toEqual([{ topic: BACKGROUND_WAKE_QUEUE, data: { jobId: created.job.id, outboxId: outbox.id }, singletonKey: `outbox:${outbox.id}` }]);
+      expect(outbox).toMatchObject({ topic: BACKGROUND_WAKE_QUEUE, delivered_at: expect.any(Date) });
+    } finally {
+      await worker.stop();
+    }
+  });
+
   it.each(["completed", "failed"] as const)("does not overwrite a %s analysis run when its Job is cancelled", async (terminalStatus) => {
     const created = await createRun(`terminal-run-${terminalStatus}`);
     const encrypted = cipher.encrypt(JSON.stringify({ answer: "TERMINAL_RESULT" }));
