@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 439599b8078cf6aeb895b02669269880e886982b
 baseline_status: current
-updated_at: 2026-07-22T14:06:17+08:00
+updated_at: 2026-07-22T15:45:10+08:00
 updated_by: controller-agent
 current_phase: phase-4-implementation
-last_checkpoint: CP-20260722-PHASE4-TASK5-MERGED-TASK6-STARTED
+last_checkpoint: CP-20260722-PHASE4-TASK6-CONTRACT-CORRECTION
 next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -35,13 +35,13 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 | Phase 1 | merged | [Phase 1 merged](checkpoints/CP-20260719-PHASE1-MERGED.md) |
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 4 | implementing-task-6 | Task 5 merged，Task 6 contract 已接受 |
+| Phase 4 | correcting-task-6 | Task 6 规格审查要求修正，最小 Job/run pause-resume 同步已获用户授权 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE4-TASK6 | phase-4 | Book-scoped advanced analysis workspace | implementation-agent | codex/phase4-task6-analysis-workspace | 439599b8078cf6aeb895b02669269880e886982b | none | ready | CP-20260722-PHASE4-TASK5-ACCEPTED | CP-20260722-PHASE4-TASK5-MERGED-TASK6-STARTED | implement Web workflow with TDD after governance merge |
+| PHASE4-TASK6 | phase-4 | Book-scoped advanced analysis workspace plus narrow Job/run control coordination | implementation-agent | codex/phase4-task6-analysis-workspace | 0f2d2e0e9bf2d57bc2005a3999939123554dfcf4 | e488f913b35c3e22717b122c44c2eebdf2b4d6ca | review | CP-20260722-PHASE4-TASK5-MERGED-TASK6-STARTED | CP-20260722-PHASE4-TASK6-CONTRACT-CORRECTION | merge correction，then fix five specification findings with RED/GREEN |
 
 ## Phase Ledgers
 
@@ -87,7 +87,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无待处理反馈，PHASE4-TASK6 可按 accepted contract 与 Subagent-Driven 顺序推进
+Task 6 specification review reported five findings，including Job/run pause-resume divergence；the user approved the minimum correction and implementation remains unaccepted
 
 ## Next Gate
 
@@ -95,6 +95,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 4 Task 6 contract correction](checkpoints/CP-20260722-PHASE4-TASK6-CONTRACT-CORRECTION.md)
 - [Phase 4 Task 5 merged and Task 6 started](checkpoints/CP-20260722-PHASE4-TASK5-MERGED-TASK6-STARTED.md)
 - [Phase 4 Task 5 accepted](checkpoints/CP-20260722-PHASE4-TASK5-ACCEPTED.md)
 - [Phase 4 Task 4 merged and Task 5 started](checkpoints/CP-20260722-PHASE4-TASK4-MERGED-TASK5-STARTED.md)
