@@ -1,6 +1,7 @@
 import express, { type ErrorRequestHandler, type Express } from "express";
 
 import type { ContentCipher, DatabaseConnection } from "@novel-analysis/database";
+import type { AdvancedAnalysisExecutionConfig } from "@novel-analysis/contracts";
 
 import { assertCookieConfig, type ApiConfig } from "./config.js";
 import type { FeishuOAuthAdapter } from "./auth/feishu-adapter.js";
@@ -20,6 +21,7 @@ export interface CreateAppOptions {
   feishu: FeishuOAuthAdapter;
   contentCipher?: ContentCipher;
   queryHmacKey?: Buffer;
+  advancedAnalysisExecutionConfig?: AdvancedAnalysisExecutionConfig;
   logger?: AuthRouteLogger;
 }
 
@@ -38,7 +40,7 @@ export function createApp(options: CreateAppOptions): Express {
   app.use("/api/books", createBooksRouter(options.database, options.config));
   app.use("/api/books", createIndexGroupsRouter(options.database, options.config, options.contentCipher));
   if (options.contentCipher && options.queryHmacKey) app.use("/api/books", createQuerySessionsRouter(options.database, options.config, options.contentCipher, options.queryHmacKey));
-  if (options.contentCipher) app.use("/api/books", createAdvancedAnalysisRouter(options.database, options.config, options.contentCipher));
+  if (options.contentCipher && options.advancedAnalysisExecutionConfig) app.use("/api/books", createAdvancedAnalysisRouter(options.database, options.config, options.contentCipher, options.advancedAnalysisExecutionConfig));
   app.use((_request, response) => response.status(404).json({ error: "not_found" }));
 
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {

@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 
-import { AnalysisRunCreateInputSchema, AnalysisRunDetailSchema, AnalysisRunSummarySchema, AnalysisScopePreviewInputSchema, AnalysisScopePreviewSchema, AnalysisTemplateCreateInputSchema, AnalysisTemplateDetailSchema, AnalysisTemplateSummarySchema, AnalysisTemplateUpdateInputSchema } from "@novel-analysis/contracts";
+import { AnalysisRunCreateInputSchema, AnalysisRunDetailSchema, AnalysisRunSummarySchema, AnalysisScopePreviewInputSchema, AnalysisScopePreviewSchema, AnalysisTemplateCreateInputSchema, AnalysisTemplateDetailSchema, AnalysisTemplateSummarySchema, AnalysisTemplateUpdateInputSchema, type AdvancedAnalysisExecutionConfig } from "@novel-analysis/contracts";
 import { createAnalysisRepository, type ContentCipher, type DatabaseConnection } from "@novel-analysis/database";
 import { AnalysisIdempotencyConflictError, AnalysisInvalidRequestError, AnalysisInvalidStateError, AnalysisJobService, AnalysisNotFoundError, AnalysisScopeChangedError } from "@novel-analysis/jobs";
 
@@ -26,8 +26,8 @@ function handle(error: unknown, response: import("express").Response, next: (err
   next(new Error("Advanced analysis request failed"));
 }
 
-export function createAdvancedAnalysisRouter(database: DatabaseConnection, config: ApiConfig, cipher: ContentCipher): Router {
-  const router = Router(); const session = requireSession(database, config); const csrf = requireCsrf(database, config); const jobs = new AnalysisJobService(database, cipher);
+export function createAdvancedAnalysisRouter(database: DatabaseConnection, config: ApiConfig, cipher: ContentCipher, executionConfig: AdvancedAnalysisExecutionConfig): Router {
+  const router = Router(); const session = requireSession(database, config); const csrf = requireCsrf(database, config); const jobs = new AnalysisJobService(database, cipher, executionConfig);
 
   router.get("/:bookId/analysis-templates", session, async (request: AuthenticatedRequest, response, next) => {
     const params = paramsSchema.safeParse(request.params); if (!params.success) { response.status(400).json({ error: "invalid_request" }); return; }

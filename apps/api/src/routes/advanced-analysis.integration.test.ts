@@ -12,6 +12,7 @@ import { FakeFeishuOAuthAdapter } from "../auth/feishu-fake.js";
 import type { ApiConfig } from "../config.js";
 
 const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 21) } });
+const executionConfig = { model: "api-test-model", reasoningEffort: "medium", executorVersion: "api-test-v1" };
 const config: ApiConfig = { appOrigin: "http://analysis.test", oauthRedirectUri: "http://analysis.test/api/auth/callback", sessionCookieName: "analysis_session", oauthCorrelationCookieName: "analysis_oauth", sessionCookieSecure: false, sessionTtlMs: 60_000 };
 
 describe("advanced analysis routes", () => {
@@ -31,7 +32,7 @@ describe("advanced analysis routes", () => {
     for (let chapterIndex = 1; chapterIndex <= 2; chapterIndex += 1) await library.insertChapter({ bookId, chapterIndex, title: `C${chapterIndex}`, plaintext: `SENTINEL_CHAPTER_${chapterIndex}`, contentHmac: `h-${chapterIndex}`, sourceVersion: "source" });
   });
   afterEach(async () => postgres.destroy());
-  const app = () => createApp({ database: postgres.db, config, feishu: new FakeFeishuOAuthAdapter(), contentCipher: cipher });
+  const app = () => createApp({ database: postgres.db, config, feishu: new FakeFeishuOAuthAdapter(), contentCipher: cipher, advancedAnalysisExecutionConfig: executionConfig });
   const auth = (name: string) => ({ Cookie: identities[name]!.cookie });
   const write = (name: string) => ({ ...auth(name), Origin: config.appOrigin, "X-CSRF-Token": identities[name]!.csrf });
 

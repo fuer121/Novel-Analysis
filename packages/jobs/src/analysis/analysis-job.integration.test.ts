@@ -2,12 +2,14 @@ import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 
+import { AdvancedAnalysisExecutionSnapshotSchema } from "@novel-analysis/contracts";
 import { createAnalysisRepository, createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../database/src/testing/postgres.js";
 
 import { AnalysisIdempotencyConflictError, AnalysisInvalidStateError, AnalysisJobService, AnalysisScopeChangedError } from "./analysis-job.js";
 
 const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 17) } });
+const executionConfig = { model: "test-model", reasoningEffort: "high", executorVersion: "analysis-test-v1" };
 
 describe("Analysis job service", () => {
   let postgres: DisposablePostgres;
@@ -35,15 +37,35 @@ describe("Analysis job service", () => {
 
   const input = () => ({ bookId, templateId, actor: { id: ownerId, role: "member" as const }, mode: "balanced" as const, startChapter: 1, endChapter: 3 });
 
+  it("fails closed without a strict execution config and binds config into scope", async () => {
+    expect(() => new AnalysisJobService(postgres.db, cipher)).toThrow();
+    expect(() => new AnalysisJobService(postgres.db, cipher, { ...executionConfig, model: "" })).toThrow();
+    const first = await new AnalysisJobService(postgres.db, cipher, executionConfig).preview(input());
+    const second = await new AnalysisJobService(postgres.db, cipher, { ...executionConfig, model: "other-model" }).preview(input());
+    expect(second.scopeHash).not.toBe(first.scopeHash);
+  });
+
+  it("invalidates preview scope for chapter, L1, L2 and workflow version changes", async () => {
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig); const hashes = [(await service.preview(input())).scopeHash];
+    await postgres.db.updateTable("chapters").set({ content_hmac: "chapter-hmac-changed", source_version: "source-v2" }).where("id", "=", chapterIds[0]!).execute(); hashes.push((await service.preview(input())).scopeHash);
+    const indexes = createIndexRepository(postgres.db, cipher);
+    const prompt = await indexes.createPromptVersion({ target: "l1-index", version: "l1-change", content: "l1-change", contentHash: createHash("sha256").update("l1-change").digest("hex") });
+    const workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-change", dslHash: "l1-change" });
+    await indexes.putL1Index({ chapterId: chapterIds[0]!, promptVersionId: prompt.id, workflowVersionId: workflow.id, inputSignature: "l1-changed", status: "fresh", route: {} }); hashes.push((await service.preview(input())).scopeHash);
+    await indexes.putL2ChapterStatus({ groupId, chapterId: chapterIds[0]!, inputSignature: "l2-changed", status: "fresh" }); hashes.push((await service.preview(input())).scopeHash);
+    await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "summary-v2", dslHash: "summary-dsl-v2" }); hashes.push((await service.preview(input())).scopeHash);
+    expect(new Set(hashes).size).toBe(hashes.length);
+  });
+
   it("previews authoritative scope without creating persistent rows", async () => {
-    const preview = await new AnalysisJobService(postgres.db, cipher).preview(input());
-    expect(preview).toMatchObject({ bookId, mode: "balanced", chapterCount: 3, reviewChapterCount: 3, readsL1: true, readsL2: true, readsOriginalChapters: true, scopeHash: expect.stringMatching(/^[a-f0-9]{64}$/), executionVersions: { workflow: { target: "analysis-summary", contractVersion: "summary-v1", dslHash: "summary-dsl-v1" }, model: "deepseek-chat", reasoningEffort: "workflow-default", executorVersion: "advanced-analysis-v1", l1SchemaVersion: "l1-route-v1", l2SchemaVersion: "l2-facts-v1", l2AdmissionVersion: "l2-admission-v1" }, sourceSummary: { indexGroupId: groupId, indexGroupConfigHash: "group-v1", chapterSourceVersions: ["source-v1"], l1: { selectedCount: 3, freshCount: 0 }, l2: { selectedCount: 3, freshCount: 0 }, reviewedChapterBoundary: { startChapter: 1, endChapter: 3, maximumChapterCount: 3 } } });
+    const preview = await new AnalysisJobService(postgres.db, cipher, executionConfig).preview(input());
+    expect(preview).toMatchObject({ bookId, mode: "balanced", chapterCount: 3, reviewChapterCount: 3, readsL1: true, readsL2: true, readsOriginalChapters: true, scopeHash: expect.stringMatching(/^[a-f0-9]{64}$/), executionVersions: { workflow: { target: "analysis-summary", contractVersion: "summary-v1", dslHash: "summary-dsl-v1" }, ...executionConfig, l1SchemaVersion: "l1-route-v1", l2SchemaVersion: "l2-facts-v1", l2AdmissionVersion: "l2-admission-v1" }, sourceSummary: { indexGroupId: groupId, indexGroupConfigHash: "group-v1", chapterSourceVersions: ["source-v1"], l1: { selectedCount: 3, freshCount: 0 }, l2: { selectedCount: 3, freshCount: 0 }, reviewedChapterBoundary: { startChapter: 1, endChapter: 3, maximumChapterCount: 3 } } });
     expect(await postgres.db.selectFrom("analysis_runs").select("id").execute()).toEqual([]);
     expect(await postgres.db.selectFrom("jobs").select("id").execute()).toEqual([]);
   });
 
   it("atomically creates exactly one encrypted run graph and safe ordinary JSON", async () => {
-    const service = new AnalysisJobService(postgres.db, cipher);
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
     const preview = await service.preview(input());
     const created = await service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "request-1" });
     expect(created.run).toMatchObject({ id: expect.any(String), jobId: created.job.id, totalParts: 3, status: "queued" });
@@ -54,12 +76,13 @@ describe("Analysis job service", () => {
     expect(await postgres.db.selectFrom("job_events").select("id").execute()).toHaveLength(1);
     expect(await postgres.db.selectFrom("job_outbox").select("id").execute()).toHaveLength(1);
     expect(await postgres.db.selectFrom("audit_logs").select("id").execute()).toHaveLength(1);
-    const snapshot = (await postgres.db.selectFrom("jobs").select("config_snapshot").where("id", "=", created.job.id).executeTakeFirstOrThrow()).config_snapshot;
-    expect(snapshot).toMatchObject({ operation: "create-analysis", executionSnapshot: { bookId, scopeHash: preview.scopeHash, template: { id: templateId, versionId: preview.templateVersionId }, mode: "balanced", range: { startChapter: 1, endChapter: 3 }, indexGroup: { id: groupId, configHash: "group-v1" }, executionVersions: preview.executionVersions, sourcePolicy: preview.sourceSummary, chapters: [
+    const snapshot = await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshot({ runId: created.run.id, actor: input().actor, schema: AdvancedAnalysisExecutionSnapshotSchema });
+    expect(snapshot).toMatchObject({ bookId, scopeHash: preview.scopeHash, template: { id: templateId, versionId: preview.templateVersionId }, mode: "balanced", range: { startChapter: 1, endChapter: 3 }, indexGroup: { id: groupId, configHash: "group-v1" }, executionVersions: preview.executionVersions, sourcePolicy: preview.sourceSummary, chapters: [
       { id: expect.any(String), position: 1, contentHmac: "chapter-hmac-1", sourceVersion: "source-v1", l1: null, l2: null },
       { id: expect.any(String), position: 2, contentHmac: "chapter-hmac-2", sourceVersion: "source-v1", l1: null, l2: null },
       { id: expect.any(String), position: 3, contentHmac: "chapter-hmac-3", sourceVersion: "source-v1", l1: null, l2: null },
-    ] } });
+    ] });
+    expect((await postgres.db.selectFrom("jobs").select("config_snapshot").where("id", "=", created.job.id).executeTakeFirstOrThrow()).config_snapshot).toEqual({ operation: "create-analysis", requestFingerprint: expect.any(String), scopeHash: preview.scopeHash, snapshotStored: true });
     const ordinary = JSON.stringify({ jobs: await postgres.db.selectFrom("jobs").selectAll().execute(), events: await postgres.db.selectFrom("job_events").selectAll().execute(), outbox: await postgres.db.selectFrom("job_outbox").selectAll().execute(), audit: await postgres.db.selectFrom("audit_logs").selectAll().execute() });
     expect(ordinary).not.toMatch(/SENTINEL_(PROMPT|SCHEMA|CHAPTER)/);
     const persisted = JSON.stringify({ templates: await postgres.db.selectFrom("analysis_templates").selectAll().execute(), versions: await postgres.db.selectFrom("analysis_template_versions").selectAll().execute(), runs: await postgres.db.selectFrom("analysis_runs").selectAll().execute(), parts: await postgres.db.selectFrom("analysis_parts").selectAll().execute(), chapters: await postgres.db.selectFrom("chapters").selectAll().execute() });
@@ -67,7 +90,7 @@ describe("Analysis job service", () => {
   });
 
   it("serializes concurrent identical requests and rejects conflicting replay", async () => {
-    const service = new AnalysisJobService(postgres.db, cipher);
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
     const preview = await service.preview(input());
     const createInput = { ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "same" };
     const [first, second] = await Promise.all([service.create(createInput), service.create(createInput)]);
@@ -80,7 +103,7 @@ describe("Analysis job service", () => {
   });
 
   it("rejects a stale scope hash and rolls back a forced graph failure", async () => {
-    const service = new AnalysisJobService(postgres.db, cipher);
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
     const preview = await service.preview(input());
     await expect(service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: "0".repeat(64), requestId: "stale" })).rejects.toBeInstanceOf(AnalysisScopeChangedError);
     await sql`create function reject_analysis_outbox_insert() returns trigger language plpgsql as $$ begin raise exception 'forced outbox failure'; end $$`.execute(postgres.db);
@@ -96,13 +119,15 @@ describe("Analysis job service", () => {
   });
 
   it("changes new scope when mutable source state changes without drifting the existing snapshot", async () => {
-    const service = new AnalysisJobService(postgres.db, cipher); const preview = await service.preview(input());
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig); const preview = await service.preview(input());
     const created = await service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "frozen" });
-    const before = (await postgres.db.selectFrom("jobs").select("config_snapshot").where("id", "=", created.job.id).executeTakeFirstOrThrow()).config_snapshot;
+    const before = await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshot({ runId: created.run.id, actor: input().actor, schema: AdvancedAnalysisExecutionSnapshotSchema });
+    const rawBefore = await postgres.db.selectFrom("analysis_runs").select(["execution_snapshot_ciphertext", "execution_snapshot_nonce", "execution_snapshot_auth_tag", "execution_snapshot_key_version"]).where("id", "=", created.run.id).executeTakeFirstOrThrow();
     await postgres.db.updateTable("index_groups").set({ config_hash: "group-v2" }).where("id", "=", groupId).execute();
     const changed = await service.preview(input());
     expect(changed.scopeHash).not.toBe(preview.scopeHash); expect(changed.sourceSummary.indexGroupConfigHash).toBe("group-v2");
-    expect((await postgres.db.selectFrom("jobs").select("config_snapshot").where("id", "=", created.job.id).executeTakeFirstOrThrow()).config_snapshot).toEqual(before);
+    expect(await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshot({ runId: created.run.id, actor: input().actor, schema: AdvancedAnalysisExecutionSnapshotSchema })).toEqual(before);
+    expect(await postgres.db.selectFrom("analysis_runs").select(["execution_snapshot_ciphertext", "execution_snapshot_nonce", "execution_snapshot_auth_tag", "execution_snapshot_key_version"]).where("id", "=", created.run.id).executeTakeFirstOrThrow()).toEqual(rawBefore);
   });
 
   it("freezes selected non-empty L1 and L2 input versions for deterministic recovery", async () => {
@@ -111,15 +136,25 @@ describe("Analysis job service", () => {
     const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-contract-v1", dslHash: "l1-dsl-v1" });
     const l1 = await indexes.putL1Index({ chapterId: chapterIds[0]!, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-input-v1", status: "fresh", route: {} });
     await indexes.putL2ChapterStatus({ groupId, chapterId: chapterIds[0]!, inputSignature: "l2-input-v1", status: "fresh" });
-    const service = new AnalysisJobService(postgres.db, cipher); const preview = await service.preview(input());
+    await indexes.registerSubject({ groupId, subjectKey: "hero", displayName: "Hero", aliases: [] });
+    const originalFact = await indexes.addFact({ groupId, chapterId: chapterIds[0]!, subjectKey: "hero", factType: "event", plaintext: "L2_FACT_PAYLOAD_SENTINEL", metadata: { category: "event", confidence: 0.9 } });
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig); const preview = await service.preview(input());
     expect(preview.sourceSummary).toMatchObject({ l1: { selectedCount: 3, freshCount: 1 }, l2: { selectedCount: 3, freshCount: 1 } });
     const created = await service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "source-versions" });
-    const snapshot = (await postgres.db.selectFrom("jobs").select("config_snapshot").where("id", "=", created.job.id).executeTakeFirstOrThrow()).config_snapshot as { executionSnapshot: { chapters: Array<Record<string, unknown>> } };
-    expect(snapshot.executionSnapshot.chapters[0]).toMatchObject({ id: chapterIds[0], position: 1, l1: { id: l1.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-input-v1", status: "fresh" }, l2: { inputSignature: "l2-input-v1", status: "fresh" } });
+    const snapshot = await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshot({ runId: created.run.id, actor: input().actor, schema: AdvancedAnalysisExecutionSnapshotSchema });
+    expect(snapshot!.chapters[0]).toMatchObject({ id: chapterIds[0], position: 1, l1: { id: l1.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: "l1-input-v1", status: "fresh" }, l2: { inputSignature: "l2-input-v1", status: "fresh", facts: [{ id: originalFact.id, subjectKey: "hero", factType: "event", payload: "L2_FACT_PAYLOAD_SENTINEL", metadata: { category: "event", confidence: 0.9 } }] } });
+    await postgres.db.transaction().execute(async (transaction) => createIndexRepository(transaction, cipher).replaceL2ChapterResult({ groupId, chapterId: chapterIds[0]!, inputSignature: "l2-input-v2", acceptedCount: 1, candidateCount: 0, rejectedCount: 0, facts: [{ subjectKey: "hero", displayName: "Hero", aliases: [], factType: "event", plaintext: "REBUILT_FACT_PAYLOAD", metadata: { category: "event" } }] }));
+    expect(await postgres.db.selectFrom("l2_facts").select("id").where("id", "=", originalFact.id).execute()).toEqual([]);
+    const recovered = await createAnalysisRepository(postgres.db, cipher).getRunExecutionSnapshotForExecutor({ runId: created.run.id, schema: AdvancedAnalysisExecutionSnapshotSchema });
+    expect(recovered!.chapters[0]!.l2!.facts[0]).toMatchObject({ id: originalFact.id, payload: "L2_FACT_PAYLOAD_SENTINEL" });
+    expect(JSON.stringify(await postgres.db.selectFrom("analysis_runs").selectAll().where("id", "=", created.run.id).executeTakeFirstOrThrow())).not.toContain("L2_FACT_PAYLOAD_SENTINEL");
+    const ordinary = JSON.stringify({ job: await postgres.db.selectFrom("jobs").selectAll().where("id", "=", created.job.id).execute(), events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", created.job.id).execute(), outbox: await postgres.db.selectFrom("job_outbox").selectAll().where("job_id", "=", created.job.id).execute(), audits: await postgres.db.selectFrom("audit_logs").selectAll().where("target_id", "=", created.run.id).execute() });
+    expect(ordinary).not.toMatch(/L2_FACT_PAYLOAD_SENTINEL|REBUILT_FACT_PAYLOAD/);
+    expect((await service.preview(input())).scopeHash).not.toBe(preview.scopeHash);
   });
 
   it("hard deletes only an owner's terminal run and retains safe audit", async () => {
-    const service = new AnalysisJobService(postgres.db, cipher);
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
     const preview = await service.preview(input());
     const created = await service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "delete" });
     await expect(service.hardDelete({ runId: created.run.id, actor: { id: ownerId, role: "member" } })).rejects.toBeInstanceOf(AnalysisInvalidStateError);
@@ -135,7 +170,7 @@ describe("Analysis job service", () => {
   });
 
   it("rolls back hard deletion when retained audit fails", async () => {
-    const service = new AnalysisJobService(postgres.db, cipher);
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
     const preview = await service.preview(input());
     const created = await service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "audit-rollback" });
     await postgres.db.updateTable("jobs").set({ status: "failed" }).where("id", "=", created.job.id).execute();
@@ -148,7 +183,7 @@ describe("Analysis job service", () => {
   });
 
   it("rechecks terminal state after waiting for run and job locks", async () => {
-    const service = new AnalysisJobService(postgres.db, cipher); const preview = await service.preview(input());
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig); const preview = await service.preview(input());
     const created = await service.create({ ...input(), templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "delete-race" });
     await postgres.db.updateTable("jobs").set({ status: "cancelled" }).where("id", "=", created.job.id).execute();
     await postgres.db.updateTable("analysis_runs").set({ status: "cancelled" }).where("id", "=", created.run.id).execute();

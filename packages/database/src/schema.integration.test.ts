@@ -259,6 +259,10 @@ describe("phase 1 PostgreSQL schema", () => {
     expect(await tableExists(postgres.db, "analysis_runs")).toBe(true);
     expect(await tableExists(postgres.db, "analysis_parts")).toBe(true);
     expect(await tableExists(postgres.db, "legacy_analysis_runs")).toBe(false);
+    for (const column of ["execution_snapshot_ciphertext", "execution_snapshot_nonce", "execution_snapshot_auth_tag", "execution_snapshot_key_version"]) expect(await columnExists(postgres.db, "analysis_runs", column)).toBe(true);
+    await migrateDown(postgres.db);
+    expect(await tableExists(postgres.db, "analysis_runs")).toBe(true);
+    for (const column of ["execution_snapshot_ciphertext", "execution_snapshot_nonce", "execution_snapshot_auth_tag", "execution_snapshot_key_version"]) expect(await columnExists(postgres.db, "analysis_runs", column)).toBe(false);
     await migrateDown(postgres.db);
     expect(await tableExists(postgres.db, "analysis_templates")).toBe(false);
     expect(await tableExists(postgres.db, "analysis_template_versions")).toBe(false);
@@ -308,7 +312,20 @@ describe("phase 1 PostgreSQL schema", () => {
     expect(await tableExists(postgres.db, "analysis_template_versions")).toBe(true);
     expect(await tableExists(postgres.db, "analysis_runs")).toBe(true);
     expect(await tableExists(postgres.db, "analysis_parts")).toBe(true);
+    expect(await columnExists(postgres.db, "analysis_runs", "execution_snapshot_ciphertext")).toBe(true);
     expect(await tableExists(postgres.db, "legacy_analysis_runs")).toBe(false);
+  });
+
+  test("enforces the analysis execution snapshot all-or-none tuple", async () => {
+    const ownerId = (await postgres.db.insertInto("users").values({ display_name: "Snapshot owner", role: "member", status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+    const bookId = (await postgres.db.insertInto("books").values({ title: "Snapshot book", created_by: ownerId, status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+    const templateId = (await postgres.db.insertInto("analysis_templates").values({ book_id: bookId, created_by: ownerId, name: "Snapshot", current_version_id: null, index_group_id: null }).returning("id").executeTakeFirstOrThrow()).id;
+    const bytes = Buffer.alloc(16, 1);
+    const versionId = (await postgres.db.insertInto("analysis_template_versions").values({ template_id: templateId, version: 1, prompt_ciphertext: bytes, prompt_nonce: bytes, prompt_tag: bytes, prompt_key_version: "v1", schema_ciphertext: bytes, schema_nonce: bytes, schema_tag: bytes, schema_key_version: "v1", content_hash: "a".repeat(64) }).returning("id").executeTakeFirstOrThrow()).id;
+    await postgres.db.updateTable("analysis_templates").set({ current_version_id: versionId }).where("id", "=", templateId).execute();
+    const jobId = (await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: ownerId, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow()).id;
+    const runId = (await postgres.db.insertInto("analysis_runs").values({ book_id: bookId, created_by: ownerId, template_version_id: versionId, job_id: jobId, mode: "balanced", start_chapter: 1, end_chapter: 1, status: "queued", execution_signature: "scope", total_parts: 1, diagnostics: {} }).returning("id").executeTakeFirstOrThrow()).id;
+    await expectConstraintViolation(postgres.db.updateTable("analysis_runs").set({ execution_snapshot_ciphertext: Buffer.from("partial") }).where("id", "=", runId).execute(), "analysis_runs_execution_snapshot_tuple_check");
   });
 
   test("extends workflow versions to the approved analysis summary target", async () => {

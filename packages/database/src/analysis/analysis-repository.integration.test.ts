@@ -228,4 +228,21 @@ describe("private analysis repository", () => {
     expect(decryptJson(cipher, encryptJson(cipher, { count: 2 }), schema)).toEqual({ count: 2 });
     expect(() => decryptJson(cipher, encryptJson(cipher, { count: "bad" }), schema)).toThrow(z.ZodError);
   });
+
+  test("encrypts strict execution snapshots and exposes only owner and executor read boundaries", async () => {
+    const repository = createAnalysisRepository(postgres.db, cipher);
+    const template = await repository.createTemplate({ bookId, createdBy: owner.id, name: "Snapshot", prompt: "SNAPSHOT_PROMPT_SENTINEL", outputSchema: {}, contentHash: "a".repeat(64), indexGroupId: null });
+    const job = await postgres.db.insertInto("jobs").values({ type: "advanced-analysis", status: "queued", requested_by: owner.id, request_id: randomUUID(), scope: {}, config_snapshot: {}, progress: {} }).returning("id").executeTakeFirstOrThrow();
+    const schema = z.strictObject({ version: z.literal("v1"), factPayload: z.string() });
+    const snapshot = { version: "v1" as const, factPayload: "L2_FACT_PAYLOAD_SENTINEL" };
+    const run = await repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "b".repeat(64), totalParts: 1, executionSnapshot: snapshot, executionSnapshotSchema: schema });
+    expect(await repository.getRunExecutionSnapshot({ runId: run.id, actor: owner, schema })).toEqual(snapshot);
+    await expect(repository.getRunExecutionSnapshot({ runId: run.id, actor: member, schema })).rejects.toThrow("Analysis access denied");
+    await expect(repository.getRunExecutionSnapshot({ runId: run.id, actor: admin, schema })).rejects.toThrow("Analysis access denied");
+    expect(await repository.getRunExecutionSnapshotForExecutor({ runId: run.id, schema })).toEqual(snapshot);
+    const raw = await postgres.db.selectFrom("analysis_runs").selectAll().where("id", "=", run.id).executeTakeFirstOrThrow();
+    expect(raw.execution_snapshot_ciphertext).not.toBeNull(); expect(raw.execution_snapshot_nonce).not.toBeNull(); expect(raw.execution_snapshot_auth_tag).not.toBeNull(); expect(raw.execution_snapshot_key_version).toBe("analysis-v1");
+    expect(JSON.stringify(raw)).not.toContain("L2_FACT_PAYLOAD_SENTINEL");
+    await expect(repository.createRun({ bookId, createdBy: owner.id, templateVersionId: template.currentVersionId, jobId: job.id, mode: "balanced", startChapter: 1, endChapter: 1, status: "queued", executionSignature: "c".repeat(64), totalParts: 1, executionSnapshot: { ...snapshot, extra: true }, executionSnapshotSchema: schema })).rejects.toThrow(z.ZodError);
+  });
 });

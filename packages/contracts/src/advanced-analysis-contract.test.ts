@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   AdminAnalysisRunMetadataSchema,
+  AdvancedAnalysisExecutionConfigSchema,
+  AdvancedAnalysisExecutionSnapshotSchema,
   AnalysisModeSchema,
   AnalysisPartSummarySchema,
   AnalysisRunCreateInputSchema,
@@ -30,6 +32,20 @@ const ids = {
 const now = "2026-07-21T12:00:00.000Z";
 
 describe("advanced analysis contracts", () => {
+  it("strictly validates explicit execution config and encrypted snapshot payload", () => {
+    const config = { model: "deepseek-chat", reasoningEffort: "high", executorVersion: "analysis-v1" };
+    expect(AdvancedAnalysisExecutionConfigSchema.parse(config)).toEqual(config);
+    expect(AdvancedAnalysisExecutionConfigSchema.safeParse({ ...config, extra: true }).success).toBe(false);
+    const snapshot = {
+      bookId: ids.book, scopeHash: "a".repeat(64), template: { id: ids.template, versionId: ids.version, contentHash: "b".repeat(64) }, mode: "balanced",
+      range: { startChapter: 1, endChapter: 1 }, indexGroup: { id: ids.group, key: "people", name: "People", categoryScope: "general", configHash: "group-v1", promptVersionId: ids.version },
+      executionVersions: { workflow: { target: "analysis-summary", id: ids.job, contractVersion: "v1", dslHash: "dsl" }, ...config, l1SchemaVersion: "l1-v1", l2SchemaVersion: "l2-v1", l2AdmissionVersion: "admission-v1" },
+      sourcePolicy: { indexGroupId: ids.group, indexGroupConfigHash: "group-v1", chapterSourceVersions: ["source-v1"], l1: { selectedCount: 1, freshCount: 1 }, l2: { selectedCount: 1, freshCount: 1 }, readsL1: true, readsL2: true, readsOriginalChapters: true, reviewedChapterBoundary: { startChapter: 1, endChapter: 1, maximumChapterCount: 1 } },
+      chapters: [{ id: ids.part, position: 1, contentHmac: "chapter-hmac", sourceVersion: "source-v1", l1: { id: ids.analysis, promptVersionId: ids.version, workflowVersionId: ids.job, inputSignature: "l1-signature", status: "fresh" }, l2: { inputSignature: "l2-signature", status: "fresh", facts: [{ id: ids.analysis, subjectKey: "hero", factType: "event", payload: "FACT_PAYLOAD_SENTINEL", metadata: { category: "event" } }] } }],
+    };
+    expect(AdvancedAnalysisExecutionSnapshotSchema.parse(snapshot)).toEqual(snapshot);
+    expect(AdvancedAnalysisExecutionSnapshotSchema.safeParse({ ...snapshot, plaintextChapter: "forbidden" }).success).toBe(false);
+  });
   it("accepts exactly the four compatible modes", () => {
     expect(AnalysisModeSchema.options).toEqual([
       "fast_index", "balanced", "precision", "full_text",
