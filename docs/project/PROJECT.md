@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 93f1e635be9f122e589f894c5eda2db984c66d88
 baseline_status: current
-updated_at: 2026-07-22T01:00:27+08:00
+updated_at: 2026-07-22T08:33:23+08:00
 updated_by: controller-agent
 current_phase: phase-4-implementation
-last_checkpoint: CP-20260722-PHASE4-TASK2-MERGED-TASK3-STARTED
+last_checkpoint: CP-20260722-PHASE4-TASK3-CONTRACT-CORRECTION
 next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 ---
 
@@ -41,7 +41,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE4-TASK3 | phase-4 | Private template API, transactional run creation and terminal hard delete | implementation-agent | codex/phase4-task3-analysis-api | 93f1e635be9f122e589f894c5eda2db984c66d88 | none | ready | CP-20260722-PHASE4-TASK2-ACCEPTED | CP-20260722-PHASE4-TASK2-MERGED-TASK3-STARTED | implement with TDD after governance merge |
+| PHASE4-TASK3 | phase-4 | Private API, transactional run creation, encrypted execution snapshot and terminal hard delete | implementation-agent | codex/phase4-task3-analysis-api | 220a20ca1b1bfb3c9ee6b7bae0262a16a2655c97 | 231aee15033b7e16a4cfaf6a77a7cf9dee5f1699 | ready | CP-20260722-PHASE4-TASK2-MERGED-TASK3-STARTED | CP-20260722-PHASE4-TASK3-CONTRACT-CORRECTION | resume encrypted snapshot correction after governance merge |
 
 ## Phase Ledgers
 
@@ -67,6 +67,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 - [DEC-0013 Phase 3 Query Session Sharing](decisions/DEC-0013-phase3-query-session-sharing.md)
 - [DEC-0014 Query HMAC Key Policy](decisions/DEC-0014-query-hmac-key-policy.md)
 - [DEC-0015 Query Turn History And Trace Projection](decisions/DEC-0015-query-turn-history-and-trace-projection.md)
+- [DEC-0016 Encrypted Advanced Analysis Execution Snapshot](decisions/DEC-0016-phase4-encrypted-execution-snapshot.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -86,7 +87,7 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Pending Feedback
 
-无待处理反馈，PHASE4-TASK3 可按 accepted contract 与 Subagent-Driven 顺序推进
+用户已选择方案 A，PHASE4-TASK3 在 encrypted execution snapshot correction 合并后恢复 Subagent-Driven 实施
 
 ## Next Gate
 
@@ -94,6 +95,8 @@ next_gate: GATE-PHASE4-IMPLEMENTATION-ACCEPTED
 
 ## Evidence Index
 
+- [Phase 4 Task 3 contract correction](checkpoints/CP-20260722-PHASE4-TASK3-CONTRACT-CORRECTION.md)
+- [Encrypted advanced analysis execution snapshot decision](decisions/DEC-0016-phase4-encrypted-execution-snapshot.md)
 - [Phase 4 Task 2 merged and Task 3 started](checkpoints/CP-20260722-PHASE4-TASK2-MERGED-TASK3-STARTED.md)
 - [Phase 4 Task 2 accepted](checkpoints/CP-20260722-PHASE4-TASK2-ACCEPTED.md)
 - [Phase 4 Task 1 merged and Task 2 started](checkpoints/CP-20260721-PHASE4-TASK1-MERGED-TASK2-STARTED.md)
