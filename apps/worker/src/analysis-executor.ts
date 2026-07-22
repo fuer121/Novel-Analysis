@@ -68,6 +68,7 @@ async function validateClaim(transaction: Transaction<Database>, claim: ClaimedS
   if (!step) return "terminal-noop";
   if (step.status === "completed") return "already-completed";
   if (job.status === "cancelled") return "discarded-cancelled";
+  if (job.status === "paused") return "paused-boundary";
   if (["completed", "failed"].includes(job.status)) return "terminal-noop";
   const now = (await sql<{ now: Date }>`select clock_timestamp() as now`.execute(transaction)).rows[0]!.now;
   if (step.status !== "running" || step.lease_owner !== claim.workerId || step.attempt_count !== claim.attemptNo
