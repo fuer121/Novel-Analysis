@@ -32,6 +32,14 @@ import { ANALYSIS_MODE_GOLDEN } from "../fixtures/analysis-mode-golden.js";
 
 const CONTENT_KEY = Buffer.alloc(32, 41).toString("base64");
 const HMAC_KEY = Buffer.alloc(32, 42).toString("base64");
+export const PHASE4_RESULT_SENTINELS = {
+  itemLabel: "PHASE4_RESULT_ITEM_LABEL_SENTINEL_9C4A",
+  summary: "PHASE4_RESULT_SUMMARY_SENTINEL_7F3B",
+} as const;
+export const PHASE4_SUCCESS_RESULT = {
+  items: [{ label: `${PHASE4_RESULT_SENTINELS.itemLabel} & <verified> "quoted"` }],
+  summary: PHASE4_RESULT_SENTINELS.summary,
+} as const;
 const cipher = createContentCipher({
   activeKeyVersion: "phase4-test",
   keys: { "phase4-test": Buffer.from(CONTENT_KEY, "base64") },
@@ -172,7 +180,7 @@ async function startDifyFake(): Promise<{
           return;
         }
         const result = context.stage === "final"
-          ? JSON.stringify({ items: [{ label: "accepted & <verified> \"quoted\"" }], summary: "phase4-result" })
+          ? JSON.stringify(PHASE4_SUCCESS_RESULT)
           : `phase4-${context.stage ?? "unknown"}-${context.position ?? context.batchIndex ?? calls.length}`;
         response.writeHead(200, { "Content-Type": "application/json" });
         response.end(JSON.stringify({ data: { outputs: { result } } }));

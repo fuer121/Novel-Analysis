@@ -12,15 +12,12 @@ import {
 } from "../../apps/web/src/features/analysis/analysis-export.js";
 
 import {
+  PHASE4_RESULT_SENTINELS,
+  PHASE4_SUCCESS_RESULT,
   startPhase4ProcessHarness,
   type Phase4ProcessHarness,
 } from "./helpers/phase4-harness.js";
 import { ANALYSIS_MODE_GOLDEN } from "./fixtures/analysis-mode-golden.js";
-
-const finalResult = {
-  items: [{ label: "accepted & <verified> \"quoted\"" }],
-  summary: "phase4-result",
-};
 
 describe("Phase 4 independent process harness", () => {
   let harness: Phase4ProcessHarness | undefined;
@@ -125,7 +122,7 @@ describe("Phase 4 independent process harness", () => {
         status: "completed",
         completedParts: 100,
         totalParts: 100,
-        result: finalResult,
+        result: PHASE4_SUCCESS_RESULT,
       });
 
       const partContexts = fixture.difyCallsSince(callIndex).flatMap((call) => {
@@ -172,19 +169,20 @@ describe("Phase 4 independent process harness", () => {
       expect(persisted.execution_snapshot_ciphertext).toBeInstanceOf(Buffer);
       expect(persisted.result_ciphertext).toBeInstanceOf(Buffer);
       expect(persisted.execution_snapshot_ciphertext!.toString("utf8")).not.toContain("PHASE4_CHAPTER_PLAINTEXT");
-      expect(persisted.result_ciphertext!.toString("utf8")).not.toContain("phase4-result");
+      expect(persisted.result_ciphertext!.toString("utf8")).not.toContain(PHASE4_RESULT_SENTINELS.summary);
+      expect(persisted.result_ciphertext!.toString("utf8")).not.toContain(PHASE4_RESULT_SENTINELS.itemLabel);
       const exported = buildAnalysisExport(`${mode}-result`, detail.result);
       expect(tableViewsFromJson(detail.result)).toEqual([
         {
           key: "items",
           title: "分析条目",
-          rows: finalResult.items,
+          rows: PHASE4_SUCCESS_RESULT.items,
           columns: [{ key: "label", label: "label" }],
         },
         {
           key: "summary_fields",
           title: "结果字段",
-          rows: [{ field: "summary", value: "phase4-result" }],
+          rows: [{ field: "summary", value: PHASE4_SUCCESS_RESULT.summary }],
           columns: [{ key: "field", label: "字段" }, { key: "value", label: "值" }],
         },
       ]);
@@ -194,10 +192,10 @@ describe("Phase 4 independent process harness", () => {
       });
       expect(exported.content).toContain(`<DocumentProperties xmlns="urn:schemas-microsoft-com:office:office"><Title>${mode}-result</Title></DocumentProperties>`);
       expect(exported.content).toContain("<Worksheet ss:Name=\"分析条目\"><Table><Row><Cell><Data ss:Type=\"String\">label</Data></Cell></Row>");
-      expect(exported.content).toContain("accepted &amp; &lt;verified&gt; &quot;quoted&quot;");
+      expect(exported.content).toContain("PHASE4_RESULT_ITEM_LABEL_SENTINEL_9C4A &amp; &lt;verified&gt; &quot;quoted&quot;");
       expect(exported.content).toContain("<Worksheet ss:Name=\"结果字段\"><Table><Row><Cell><Data ss:Type=\"String\">字段</Data></Cell><Cell><Data ss:Type=\"String\">值</Data></Cell></Row>");
-      expect(exported.content).toContain("<Cell><Data ss:Type=\"String\">summary</Data></Cell><Cell><Data ss:Type=\"String\">phase4-result</Data></Cell>");
-      expect(exported.content).not.toContain(finalResult.items[0].label);
+      expect(exported.content).toContain(`<Cell><Data ss:Type="String">summary</Data></Cell><Cell><Data ss:Type="String">${PHASE4_SUCCESS_RESULT.summary}</Data></Cell>`);
+      expect(exported.content).not.toContain(PHASE4_SUCCESS_RESULT.items[0].label);
     }
 
     const coverage = await harness.captureWorkerCoverage();

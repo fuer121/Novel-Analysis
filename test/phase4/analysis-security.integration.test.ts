@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { LEGACY_ANALYSIS_GOLDEN } from "./fixtures/legacy-analysis-golden.js";
 import {
+  PHASE4_RESULT_SENTINELS,
+  PHASE4_SUCCESS_RESULT,
   startPhase4ProcessHarness,
   type Phase4ProcessHarness,
 } from "./helpers/phase4-harness.js";
@@ -165,12 +167,15 @@ describe("Phase 4 privacy, deletion, legacy, and sentinel evidence", () => {
     const created = await createdResponse.json() as { run: { id: string }; job: { id: string } };
     expect(await fixture.waitForRun(created.run.id)).toMatchObject({
       status: "completed",
-      result: { summary: "phase4-result" },
+      result: PHASE4_SUCCESS_RESULT,
     });
 
     const ownerDetail = await fixture.requestAs("owner", `/books/${fixture.bookId}/advanced-analysis/${created.run.id}`);
     expect(ownerDetail.status).toBe(200);
-    expect(await ownerDetail.json()).toMatchObject({ run: { status: "completed", result: { summary: "phase4-result" } } });
+    const ownerDetailBody = await ownerDetail.json();
+    expect(ownerDetailBody).toMatchObject({ run: { status: "completed", result: PHASE4_SUCCESS_RESULT } });
+    const resultSentinels = [PHASE4_RESULT_SENTINELS.summary, PHASE4_RESULT_SENTINELS.itemLabel];
+    for (const sentinel of resultSentinels) expect(JSON.stringify(ownerDetailBody)).toContain(sentinel);
     for (const actor of ["member", "admin"] as const) {
       const denied = await fixture.requestAs(actor, `/books/${fixture.bookId}/advanced-analysis/${created.run.id}`);
       expect(denied.status).toBe(404);
@@ -200,7 +205,7 @@ describe("Phase 4 privacy, deletion, legacy, and sentinel evidence", () => {
       "audit_logs",
     ]));
     const persistedAndMetadata = successfulRows.rows.map((row) => `${row.table_name}:${row.row_json}`).join("\n");
-    expect(persistedAndMetadata).not.toContain("phase4-result");
+    for (const sentinel of resultSentinels) expect(persistedAndMetadata).not.toContain(sentinel);
     const ordinaryJobResponses = await Promise.all((["owner", "member", "admin"] as const).map(async (actor) => {
       const response = await fixture.requestAs(actor, `/jobs/${created.job.id}`);
       expect(response.status).toBe(200);
@@ -213,18 +218,24 @@ describe("Phase 4 privacy, deletion, legacy, and sentinel evidence", () => {
       expect(response.status).toBe(200);
       return response.text();
     })));
-    expect([...ordinaryJobResponses, ...ordinaryAnalysisResponses].join("\n")).not.toContain("phase4-result");
-    expect([...harness.api.logs, ...harness.worker.logs].join("\n")).not.toContain("phase4-result");
+    const ordinarySuccessfulSurfaces = [...ordinaryJobResponses, ...ordinaryAnalysisResponses].join("\n");
+    const successfulLogs = [...harness.api.logs, ...harness.worker.logs].join("\n");
+    for (const sentinel of resultSentinels) {
+      expect(ordinarySuccessfulSurfaces).not.toContain(sentinel);
+      expect(successfulLogs).not.toContain(sentinel);
+    }
   });
 
   it("keeps plaintext, credentials, and controlled provider errors out of persisted and ordinary surfaces", async () => {
     harness = await startPhase4ProcessHarness();
     const fixture = await harness.prepareGoldenFixtures();
+    const chapterSentinel = "PHASE4_CHAPTER_PLAINTEXT_7";
+    const factSentinel = "PHASE4_FACT_PLAINTEXT_7";
     const sentinels = [
       "PHASE4_PROMPT_PLAINTEXT",
       "PHASE4_SCHEMA_PLAINTEXT",
-      "PHASE4_CHAPTER_PLAINTEXT_1",
-      "PHASE4_FACT_PLAINTEXT_1",
+      chapterSentinel,
+      factSentinel,
       "PHASE4_RAW_PROVIDER_ERROR",
       "phase4-chapter-key",
       "phase4-l1-key",
@@ -253,15 +264,27 @@ describe("Phase 4 privacy, deletion, legacy, and sentinel evidence", () => {
     });
     const template = (await templateResponse.json() as { template: { id: string } }).template;
     const previewResponse = await fixture.requestAs("owner", `/books/${fixture.bookId}/advanced-analysis/preview`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookId: fixture.bookId, templateId: template.id, mode: "full_text", startChapter: 1, endChapter: 1 }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookId: fixture.bookId, templateId: template.id, mode: "balanced", startChapter: 7, endChapter: 7 }),
     });
     const preview = await previewResponse.json() as { templateVersionId: string; scopeHash: string };
     const createdResponse = await fixture.requestAs("owner", `/books/${fixture.bookId}/advanced-analysis`, {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookId: fixture.bookId, templateId: template.id, templateVersionId: preview.templateVersionId, mode: "full_text", startChapter: 1, endChapter: 1, scopeHash: preview.scopeHash, idempotencyKey: "phase4-sentinel" }),
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ bookId: fixture.bookId, templateId: template.id, templateVersionId: preview.templateVersionId, mode: "balanced", startChapter: 7, endChapter: 7, scopeHash: preview.scopeHash, idempotencyKey: "phase4-sentinel" }),
     });
     const created = await createdResponse.json() as { run: { id: string }; job: { id: string } };
     expect(await fixture.waitForRun(created.run.id)).toMatchObject({ status: "failed" });
     expect(fixture.controlledProviderErrors()).toEqual([rawProviderError, rawProviderError, rawProviderError]);
+    const failedPartContexts = fixture.difyCallsSince(0).map((call) => JSON.parse(String(call.inputs.context_json)) as {
+      stage?: string;
+      chapter?: string | null;
+      l2?: { facts?: Array<{ payload?: string }> } | null;
+    }).filter((context) => context.stage === "part");
+    expect(failedPartContexts).toHaveLength(3);
+    for (const context of failedPartContexts) {
+      expect(context.chapter).toBe(chapterSentinel);
+      expect(context.l2?.facts?.[0]?.payload).toBe(factSentinel);
+      expect(JSON.stringify(context)).toContain(chapterSentinel);
+      expect(JSON.stringify(context)).toContain(factSentinel);
+    }
 
     const rows = await sql<{ table_name: string; row_json: string }>`
       select table_name, row_json::text from (
