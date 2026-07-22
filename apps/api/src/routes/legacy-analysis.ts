@@ -25,8 +25,12 @@ export function createLegacyAnalysisRouter(database: DatabaseConnection, config:
     if (!params.success) { response.status(400).json({ error: "invalid_request" }); return; }
     try {
       if (!await ownsBook(database, request, params.data.bookId)) { response.status(404).json({ error: "not_found" }); return; }
-      const analyses = await reader.list({ bookId: params.data.bookId, actorId: request.auth!.userId });
-      response.json({ analyses: analyses.map((analysis) => LegacyAnalysisSummarySchema.parse(analysis)) });
+      const analyses = (await reader.list({ bookId: params.data.bookId, actorId: request.auth!.userId })).map((analysis) => {
+        const parsed = LegacyAnalysisSummarySchema.parse(analysis);
+        if (parsed.bookId !== params.data.bookId) throw new Error("Legacy analysis reader returned a mismatched book");
+        return parsed;
+      });
+      response.json({ analyses });
     } catch { next(new Error("Legacy analysis list failed")); }
   });
 
