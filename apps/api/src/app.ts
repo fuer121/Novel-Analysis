@@ -14,6 +14,8 @@ import { createIndexGroupsRouter } from "./routes/index-groups.js";
 import { createQuerySessionsRouter } from "./routes/query-sessions.js";
 import { createAdvancedAnalysisRouter } from "./routes/advanced-analysis.js";
 import { createAdminAnalysisJobsRouter } from "./routes/admin-analysis-jobs.js";
+import { createLegacyAnalysisRouter } from "./routes/legacy-analysis.js";
+import { EMPTY_LEGACY_ANALYSIS_READER, type LegacyAnalysisReader } from "./legacy-analysis.js";
 
 export interface CreateAppOptions {
   database: DatabaseConnection;
@@ -22,6 +24,7 @@ export interface CreateAppOptions {
   contentCipher?: ContentCipher;
   queryHmacKey?: Buffer;
   advancedAnalysisExecutionConfig?: AdvancedAnalysisExecutionConfig;
+  legacyAnalysisReader?: LegacyAnalysisReader;
   logger?: AuthRouteLogger;
 }
 
@@ -41,6 +44,7 @@ export function createApp(options: CreateAppOptions): Express {
   app.use("/api/books", createIndexGroupsRouter(options.database, options.config, options.contentCipher));
   if (options.contentCipher && options.queryHmacKey) app.use("/api/books", createQuerySessionsRouter(options.database, options.config, options.contentCipher, options.queryHmacKey));
   if (options.contentCipher && options.advancedAnalysisExecutionConfig) app.use("/api/books", createAdvancedAnalysisRouter(options.database, options.config, options.contentCipher, options.advancedAnalysisExecutionConfig));
+  app.use("/api/books", createLegacyAnalysisRouter(options.database, options.config, options.legacyAnalysisReader ?? EMPTY_LEGACY_ANALYSIS_READER));
   app.use((_request, response) => response.status(404).json({ error: "not_found" }));
 
   const errorHandler: ErrorRequestHandler = (error, _request, response, _next) => {
