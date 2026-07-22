@@ -19,6 +19,11 @@ import { FakeFeishuOAuthAdapter } from "../auth/feishu-fake.js";
 import { writeSseChunk } from "./job-events.js";
 
 const APP_ORIGIN = "http://app.test";
+const ADVANCED_ANALYSIS_ENV = {
+  ADVANCED_ANALYSIS_MODEL: "test-analysis-model",
+  ADVANCED_ANALYSIS_REASONING_EFFORT: "high",
+  ADVANCED_ANALYSIS_EXECUTOR_VERSION: "test-analysis-v1",
+};
 const config: ApiConfig = {
   appOrigin: APP_ORIGIN,
   oauthRedirectUri: `${APP_ORIGIN}/api/auth/callback`,
@@ -435,6 +440,7 @@ describe("job event stream", () => {
       detached: true,
       env: {
         ...process.env,
+        ...ADVANCED_ANALYSIS_ENV,
         APP_ORIGIN: "https://app.test",
         DATABASE_URL: postgres.databaseUrl,
         FEISHU_APP_ID: "test-app-id",
@@ -483,6 +489,7 @@ describe("job event stream", () => {
       detached: true,
       env: {
         ...process.env,
+        ...ADVANCED_ANALYSIS_ENV,
         APP_ORIGIN: "https://app.test",
         DATABASE_URL: postgres.databaseUrl,
         FEISHU_APP_ID: "test-app-id",
@@ -525,6 +532,7 @@ describe("job event stream", () => {
       cwd: process.cwd(),
       env: {
         ...process.env,
+        ...ADVANCED_ANALYSIS_ENV,
         APP_ORIGIN: "https://app.test",
         DATABASE_URL: postgres.databaseUrl,
         FEISHU_APP_ID: "test-app-id",
@@ -552,6 +560,7 @@ describe("job event stream", () => {
       cwd: process.cwd(), detached: true,
       env: {
         ...process.env,
+        ...ADVANCED_ANALYSIS_ENV,
         APP_ORIGIN: "https://app.test",
         DATABASE_URL: postgres.databaseUrl,
         FEISHU_APP_ID: "test-app-id",
@@ -577,5 +586,31 @@ describe("job event stream", () => {
     expect(startupError).toBeInstanceOf(Error);
     expect((startupError as Error).message).toContain("CONTENT_HMAC_KEY");
     expect((startupError as Error).message).not.toContain(hmacKey.toString("base64"));
+  });
+
+  it("rejects missing production analysis config without leaking configured values", async () => {
+    const child = spawn("npm", ["start", "-w", "apps/api"], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        ...ADVANCED_ANALYSIS_ENV,
+        ADVANCED_ANALYSIS_MODEL: "",
+        ADVANCED_ANALYSIS_REASONING_EFFORT: "ANALYSIS_REASONING_SENTINEL",
+        ADVANCED_ANALYSIS_EXECUTOR_VERSION: "ANALYSIS_EXECUTOR_SENTINEL",
+        APP_ORIGIN: "https://app.test",
+        DATABASE_URL: postgres.databaseUrl,
+        FEISHU_APP_ID: "test-app-id",
+        FEISHU_APP_SECRET: "test-app-secret",
+        FEISHU_REDIRECT_URI: "https://app.test/api/auth/callback",
+        CONTENT_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+        CONTENT_ENCRYPTION_KEY_VERSION: "test-v1",
+        CONTENT_HMAC_KEY: Buffer.alloc(32, 8).toString("base64"),
+        PORT: "3001",
+      },
+    });
+    let stderr = ""; child.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
+    await expect(expectExit(waitForExit(child))).resolves.toMatchObject({ code: 1 });
+    expect(stderr).toContain("Advanced analysis execution configuration is required");
+    expect(stderr).not.toMatch(/ANALYSIS_(REASONING|EXECUTOR)_SENTINEL/);
   });
 });
