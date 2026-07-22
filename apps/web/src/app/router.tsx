@@ -8,6 +8,7 @@ import {
 } from "react-router-dom";
 
 import { AdminMembersPage } from "../features/admin/AdminMembersPage.js";
+import { AdvancedAnalysisPage } from "../features/analysis/AdvancedAnalysisPage.js";
 import { AuthCompletePage } from "../features/auth/AuthCompletePage.js";
 import { LoginPage } from "../features/auth/LoginPage.js";
 import { TaskCenterPage } from "../features/task-center/TaskCenterPage.js";
@@ -35,6 +36,7 @@ const routes: RouteObject[] = [
         { path: "l1", element: <L1Panel /> },
         { path: "l2", element: <L2Panel /> },
         { path: "query", element: <QueryWorkspacePage /> },
+        { path: "analysis", element: <AdvancedAnalysisPage /> },
       ] },
       { path: "/tasks", element: <TaskCenterPage /> },
       { path: "/tasks/:id", element: <TaskDetailPage /> },
