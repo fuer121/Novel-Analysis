@@ -1,0 +1,206 @@
+import { createHash } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { createAnalysisRepository, createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
+import { createDisposablePostgres, type DisposablePostgres } from "../../../packages/database/src/testing/postgres.js";
+import { DifyAdapterError, FakeDifyAdapter } from "@novel-analysis/dify";
+import { AnalysisJobService, JobControls, PostgresStepLeaseService } from "@novel-analysis/jobs";
+
+import { AnalysisExecutor } from "./analysis-executor.js";
+
+const cipher = createContentCipher({ activeKeyVersion: "test", keys: { test: Buffer.alloc(32, 31) } });
+const executionConfig = { model: "analysis-model", reasoningEffort: "high", executorVersion: "analysis-executor-v1" };
+
+describe("analysis executor", () => {
+  let postgres: DisposablePostgres;
+  let ownerId: string;
+  let bookId: string;
+  let groupId: string;
+  let chapterIds: string[];
+  let templateId: string;
+
+  beforeEach(async () => {
+    postgres = await createDisposablePostgres();
+    ownerId = (await postgres.db.insertInto("users").values({ display_name: "Owner", role: "member", status: "active" }).returning("id").executeTakeFirstOrThrow()).id;
+    const library = createLibraryRepository(postgres.db, cipher);
+    const indexes = createIndexRepository(postgres.db, cipher);
+    bookId = (await library.createBook({ title: "Book", createdBy: ownerId })).id;
+    const groupPrompt = await indexes.createPromptVersion({ target: "l2-index", version: "l2-v1", content: "index", contentHash: createHash("sha256").update("index").digest("hex") });
+    groupId = (await indexes.createIndexGroup({ bookId, key: "people", name: "People", categoryScope: "general", promptVersionId: groupPrompt.id, configHash: "group-v1" })).id;
+    await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "summary-v1", dslHash: "summary-dsl-v1" });
+    chapterIds = [];
+    for (let position = 1; position <= 2; position += 1) {
+      chapterIds.push((await library.insertChapter({ bookId, chapterIndex: position, title: `Chapter ${position}`, plaintext: `SENTINEL_CHAPTER_${position}`, contentHmac: `hmac-${position}`, sourceVersion: "source-v1" })).id);
+    }
+    templateId = (await createAnalysisRepository(postgres.db, cipher).createTemplate({
+      bookId, createdBy: ownerId, name: "Private", prompt: "SENTINEL_PROMPT",
+      outputSchema: { type: "object", properties: { answer: { type: "string", minLength: 1 } }, required: ["answer"], additionalProperties: false },
+      contentHash: createHash("sha256").update("template").digest("hex"), indexGroupId: groupId,
+    })).id;
+  });
+
+  afterEach(async () => postgres.destroy());
+
+  async function createClaim(requestId: string, workerId = "worker-a", leaseDurationMs = 30_000) {
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
+    const input = { bookId, templateId, actor: { id: ownerId, role: "member" as const }, mode: "full_text" as const, startChapter: 1, endChapter: 2 };
+    const preview = await service.preview(input);
+    const created = await service.create({ ...input, templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId });
+    const claim = await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs }).claimNext(created.job.id, workerId, new Date());
+    return { ...created, claim: claim! };
+  }
+
+  it("commits encrypted parts and a schema-valid final result atomically", async () => {
+    const { run, claim } = await createClaim("complete");
+    const dify = new FakeDifyAdapter([
+      { target: "analysis-summary", invocationKey: `${run.id}:part:1`, output: { text: "PART_SENTINEL_1" } },
+      { target: "analysis-summary", invocationKey: `${run.id}:part:2`, output: { text: "PART_SENTINEL_2" } },
+      { target: "analysis-summary", invocationKey: `${run.id}:final`, output: { text: JSON.stringify({ answer: "FINAL_SENTINEL" }) } },
+    ]);
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(claim)).resolves.toEqual({ disposition: "completed" });
+
+    const detail = await createAnalysisRepository(postgres.db, cipher).getRunResult({ runId: run.id, actor: { id: ownerId, role: "member" } });
+    expect(detail).toEqual({ answer: "FINAL_SENTINEL" });
+    expect(await postgres.db.selectFrom("analysis_parts").select("id").where("run_id", "=", run.id).where("status", "=", "completed").execute()).toHaveLength(2);
+    const ordinary = JSON.stringify({
+      run: await postgres.db.selectFrom("analysis_runs").selectAll().where("id", "=", run.id).executeTakeFirstOrThrow(),
+      parts: await postgres.db.selectFrom("analysis_parts").selectAll().where("run_id", "=", run.id).execute(),
+      job: await postgres.db.selectFrom("jobs").selectAll().where("id", "=", claim.jobId).executeTakeFirstOrThrow(),
+      steps: await postgres.db.selectFrom("job_steps").selectAll().where("job_id", "=", claim.jobId).execute(),
+      attempts: await postgres.db.selectFrom("job_attempts").selectAll().where("step_id", "=", claim.stepId).execute(),
+      events: await postgres.db.selectFrom("job_events").selectAll().where("job_id", "=", claim.jobId).execute(),
+      outbox: await postgres.db.selectFrom("job_outbox").selectAll().where("job_id", "=", claim.jobId).execute(),
+    });
+    expect(ordinary).not.toMatch(/SENTINEL_(PROMPT|CHAPTER)|PART_SENTINEL|FINAL_SENTINEL/);
+  });
+
+  it("keeps completed parts reusable after a sanitized provider failure", async () => {
+    const { run, claim } = await createClaim("partial");
+    const first = new FakeDifyAdapter([
+      { target: "analysis-summary", invocationKey: `${run.id}:part:1`, output: { text: "REUSABLE_PART" } },
+      { target: "analysis-summary", invocationKey: `${run.id}:part:2`, error: new DifyAdapterError("provider_timeout") },
+    ]);
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify: first, executionConfig }).execute(claim)).resolves.toEqual({ disposition: "failed" });
+    expect((await postgres.db.selectFrom("analysis_parts").select(["status", "error_code"]).where("run_id", "=", run.id).orderBy("position").execute())).toEqual([
+      { status: "completed", error_code: null }, { status: "failed", error_code: "provider_timeout" },
+    ]);
+    expect(JSON.stringify(await postgres.db.selectFrom("job_attempts").select(["error_code", "error_message"]).where("id", "=", claim.attemptId).executeTakeFirstOrThrow())).not.toContain("Dify provider");
+  });
+
+  it("rejects invalid final JSON and runtime configuration mismatch", async () => {
+    const invalid = await createClaim("invalid-schema");
+    const dify = new FakeDifyAdapter([
+      { target: "analysis-summary", invocationKey: `${invalid.run.id}:part:1`, output: { text: "one" } },
+      { target: "analysis-summary", invocationKey: `${invalid.run.id}:part:2`, output: { text: "two" } },
+      { target: "analysis-summary", invocationKey: `${invalid.run.id}:final`, output: { text: JSON.stringify({ wrong: true }) } },
+    ]);
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(invalid.claim)).resolves.toEqual({ disposition: "failed" });
+    expect((await postgres.db.selectFrom("analysis_runs").select(["status", "result_ciphertext", "error_code"]).where("id", "=", invalid.run.id).executeTakeFirstOrThrow())).toEqual({ status: "failed", result_ciphertext: null, error_code: "invalid_output_schema" });
+
+    const mismatch = await createClaim("config-mismatch");
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify: new FakeDifyAdapter([]), executionConfig: { ...executionConfig, model: "other" } }).execute(mismatch.claim)).resolves.toEqual({ disposition: "failed" });
+    expect((await postgres.db.selectFrom("analysis_runs").select("error_code").where("id", "=", mismatch.run.id).executeTakeFirstOrThrow()).error_code).toBe("configuration_error");
+  });
+
+  it("pauses only after an atomic part boundary", async () => {
+    const created = await createClaim("pause");
+    const calls: string[] = [];
+    const dify = {
+      async runAnalysisSummary(input: { invocationKey: string }) {
+        calls.push(input.invocationKey);
+        await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "pause", requestId: "pause-boundary" });
+        return { text: "FIRST_PART" };
+      },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(created.claim)).resolves.toEqual({ disposition: "paused-boundary" });
+    expect(calls).toEqual([`${created.run.id}:part:1`]);
+    expect(await postgres.db.selectFrom("analysis_parts").select(["position", "status"]).where("run_id", "=", created.run.id).orderBy("position").execute()).toEqual([{ position: 1, status: "completed" }, { position: 2, status: "queued" }]);
+    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("paused");
+  });
+
+  it("cancels without persisting a late provider result", async () => {
+    const created = await createClaim("cancel");
+    const dify = {
+      async runAnalysisSummary() {
+        await new JobControls(postgres.db).control({ jobId: created.job.id, actor: { userId: ownerId, role: "member" }, action: "cancel", requestId: "cancel-provider" });
+        return { text: "LATE_CANCELLED_SENTINEL" };
+      },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(created.claim)).resolves.toEqual({ disposition: "discarded-cancelled" });
+    expect((await postgres.db.selectFrom("analysis_runs").select("status").where("id", "=", created.run.id).executeTakeFirstOrThrow()).status).toBe("cancelled");
+    expect(JSON.stringify(await postgres.db.selectFrom("analysis_parts").selectAll().where("run_id", "=", created.run.id).execute())).not.toContain("LATE_CANCELLED_SENTINEL");
+  });
+
+  it("rejects a part whose frozen input signature no longer matches", async () => {
+    const created = await createClaim("signature");
+    await postgres.db.updateTable("analysis_parts").set({ input_signature: "mismatch" }).where("run_id", "=", created.run.id).where("position", "=", 1).execute();
+    const dify = new FakeDifyAdapter([{ target: "analysis-summary", invocationKey: `${created.run.id}:part:1`, output: { text: "MUST_NOT_COMMIT" } }]);
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(created.claim)).resolves.toEqual({ disposition: "terminal-noop" });
+    expect((await postgres.db.selectFrom("analysis_parts").select(["status", "result_ciphertext"]).where("run_id", "=", created.run.id).where("position", "=", 1).executeTakeFirstOrThrow())).toEqual({ status: "queued", result_ciphertext: null });
+  });
+
+  it("reuses a committed part after lease expiry and rejects the superseded attempt", async () => {
+    const created = await createClaim("lease-recovery", "worker-a", 35);
+    const callsA: string[] = [];
+    const difyA = {
+      async runAnalysisSummary(input: { invocationKey: string }) {
+        callsA.push(input.invocationKey);
+        if (input.invocationKey.endsWith(":part:2")) await new Promise((resolve) => setTimeout(resolve, 80));
+        return { text: input.invocationKey.endsWith(":part:1") ? "REUSABLE" : "LATE_PART" };
+      },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+    const runningA = new AnalysisExecutor({ database: postgres.db, cipher, dify: difyA, executionConfig }).execute(created.claim);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const claimB = (await new PostgresStepLeaseService({ database: postgres.db, leaseDurationMs: 1_000 }).claimNext(created.job.id, "worker-b", new Date()))!;
+    const difyB = new FakeDifyAdapter([
+      { target: "analysis-summary", invocationKey: `${created.run.id}:part:2`, output: { text: "AUTHORITATIVE_PART" } },
+      { target: "analysis-summary", invocationKey: `${created.run.id}:final`, output: { text: JSON.stringify({ answer: "AUTHORITATIVE_FINAL" }) } },
+    ]);
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify: difyB, executionConfig }).execute(claimB)).resolves.toEqual({ disposition: "completed" });
+    await expect(runningA).resolves.toMatchObject({ disposition: expect.stringMatching(/already-completed|terminal-noop/) });
+    expect(callsA.filter((key) => key.endsWith(":part:1"))).toHaveLength(1);
+    expect(difyB.calls.map((call) => call.invocationKey)).not.toContain(`${created.run.id}:part:1`);
+    expect(await createAnalysisRepository(postgres.db, cipher).getRunResult({ runId: created.run.id, actor: { id: ownerId, role: "member" } })).toEqual({ answer: "AUTHORITATIVE_FINAL" });
+  });
+
+  it("uses frozen L1 and L2 after current indexes are rebuilt and decrypts no chapters in fast mode", async () => {
+    const indexes = createIndexRepository(postgres.db, cipher);
+    const l1Prompt = await indexes.createPromptVersion({ target: "l1-index", version: "l1-v1", content: "l1", contentHash: createHash("sha256").update("l1").digest("hex") });
+    const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-v1", dslHash: "l1-v1" });
+    for (let position = 1; position <= 2; position += 1) {
+      await indexes.putL1Index({ chapterId: chapterIds[position - 1]!, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: `old-l1-${position}`, status: "fresh", route: { route_schema_version: "l1-route-v1", route_entities: [], route_keywords: [`OLD_ROUTE_${position}`], signals: [], category_scores: {} } });
+      await indexes.putL2ChapterStatus({ groupId, chapterId: chapterIds[position - 1]!, inputSignature: `old-l2-${position}`, status: "fresh" });
+      await indexes.registerSubject({ groupId, subjectKey: `subject-${position}`, displayName: `Subject ${position}`, aliases: [] });
+      await indexes.addFact({ groupId, chapterId: chapterIds[position - 1]!, subjectKey: `subject-${position}`, factType: "event", plaintext: `OLD_FACT_${position}`, metadata: { importance: 1, confidence: 1 } });
+    }
+    const service = new AnalysisJobService(postgres.db, cipher, executionConfig);
+    const input = { bookId, templateId, actor: { id: ownerId, role: "member" as const }, mode: "fast_index" as const, startChapter: 1, endChapter: 2 };
+    const preview = await service.preview(input);
+    const created = await service.create({ ...input, templateVersionId: preview.templateVersionId, scopeHash: preview.scopeHash, requestId: "frozen-indexes" });
+    const claim = (await new PostgresStepLeaseService({ database: postgres.db }).claimNext(created.job.id, "snapshot-worker", new Date()))!;
+
+    await postgres.db.deleteFrom("l2_facts").where("group_id", "=", groupId).execute();
+    for (let position = 1; position <= 2; position += 1) {
+      await indexes.putL1Index({ chapterId: chapterIds[position - 1]!, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: `new-l1-${position}`, status: "fresh", route: { route_schema_version: "l1-route-v1", route_entities: [], route_keywords: [`NEW_ROUTE_${position}`], signals: [], category_scores: {} } });
+      await indexes.addFact({ groupId, chapterId: chapterIds[position - 1]!, subjectKey: `subject-${position}`, factType: "event", plaintext: `NEW_FACT_${position}`, metadata: { importance: 1, confidence: 1 } });
+    }
+    const contexts: string[] = [];
+    const dify = {
+      async runAnalysisSummary(providerInput: { invocationKey: string; contextJson: string }) { contexts.push(providerInput.contextJson); return { text: providerInput.invocationKey.endsWith(":final") ? JSON.stringify({ answer: "FROZEN" }) : "part" }; },
+      async runChapterImport(): Promise<never> { throw new Error("unexpected"); }, async runL1Index(): Promise<never> { throw new Error("unexpected"); }, async runL2Index(): Promise<never> { throw new Error("unexpected"); },
+    };
+
+    await expect(new AnalysisExecutor({ database: postgres.db, cipher, dify, executionConfig }).execute(claim)).resolves.toEqual({ disposition: "completed" });
+    expect(contexts.join("\n")).toContain("OLD_ROUTE_1");
+    expect(contexts.join("\n")).toContain("OLD_FACT_2");
+    expect(contexts.join("\n")).not.toMatch(/NEW_ROUTE|NEW_FACT|SENTINEL_CHAPTER/);
+  });
+});

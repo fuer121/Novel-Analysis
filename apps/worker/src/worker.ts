@@ -10,6 +10,7 @@ import {
   type StepExecutor,
 } from "@novel-analysis/jobs";
 import { failImportClaim, type LibraryImportExecutor } from "./library-executor.js";
+import type { AnalysisExecutor } from "./analysis-executor.js";
 import type { QueryExecutor } from "./query-executor.js";
 
 export const BACKGROUND_WAKE_QUEUE = "jobs.wake";
@@ -40,6 +41,14 @@ export function parseQueryRuntimeConfig(environment: Record<string, string | und
   if (!Number.isSafeInteger(queryConcurrency) || queryConcurrency < 1 || queryConcurrency > 20 || (value !== undefined && String(queryConcurrency) !== value)) throw new Error("Invalid QUERY_CONCURRENCY");
   const key = environment.DIFY_ANALYSIS_SUMMARY_KEY?.trim();
   return { queryConcurrency, analysisSummaryKey: key || undefined };
+}
+
+const ANALYSIS_CONFIG_FIELDS = ["ADVANCED_ANALYSIS_MODEL", "ADVANCED_ANALYSIS_REASONING_EFFORT", "ADVANCED_ANALYSIS_EXECUTOR_VERSION"] as const;
+
+export function parseAnalysisRuntimeConfig(environment: Record<string, string | undefined>): { model: string; reasoningEffort: string; executorVersion: string } {
+  const present = ANALYSIS_CONFIG_FIELDS.filter((field) => environment[field] !== undefined);
+  if (present.length !== ANALYSIS_CONFIG_FIELDS.length || ANALYSIS_CONFIG_FIELDS.some((field) => !environment[field]?.trim())) throw new Error("Invalid advanced analysis runtime configuration");
+  return { model: environment.ADVANCED_ANALYSIS_MODEL!, reasoningEffort: environment.ADVANCED_ANALYSIS_REASONING_EFFORT!, executorVersion: environment.ADVANCED_ANALYSIS_EXECUTOR_VERSION! };
 }
 
 export function installBossErrorShutdown(options: {
@@ -119,7 +128,7 @@ export function parseLibraryRuntimeConfig(environment: Record<string, string | u
   return { baseUrl: url!.toString().replace(/\/$/, ""), chapterImportKey: environment.DIFY_CHAPTER_IMPORT_KEY!, l1WorkflowKey: environment.DIFY_L1_WORKFLOW_API_KEY!, l2WorkflowKey: environment.DIFY_L2_WORKFLOW_API_KEY!, contentKey: contentKey!, contentKeyVersion: environment.CONTENT_ENCRYPTION_KEY_VERSION!, hmacKey: hmacKey! };
 }
 
-export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor; queryExecutor?: Pick<QueryExecutor, "execute"> }): StepExecutor {
+export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor; queryExecutor?: Pick<QueryExecutor, "execute">; analysisExecutor?: Pick<AnalysisExecutor, "execute"> }): StepExecutor {
   const example = new ExampleExecutor();
   return {
     execute(claim) {
@@ -131,6 +140,11 @@ export function createWorkerStepExecutor(options: { database: DatabaseConnection
       if (["l2-query", "query-summary-retry", "query-local-summary"].includes(claim.kind)) {
         return options.queryExecutor
           ? options.queryExecutor.execute(claim)
+          : failImportClaim(options.database, claim, "configuration_error");
+      }
+      if (claim.kind === "advanced-analysis") {
+        return options.analysisExecutor
+          ? options.analysisExecutor.execute(claim)
           : failImportClaim(options.database, claim, "configuration_error");
       }
       return example.execute(claim);

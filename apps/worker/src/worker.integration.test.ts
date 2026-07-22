@@ -137,7 +137,13 @@ describe("worker runtime", () => {
     const child = spawn("npm", ["start", "-w", "apps/worker"], {
       cwd: process.cwd(),
       detached: true,
-      env: { ...process.env, DATABASE_URL: postgres.databaseUrl },
+      env: {
+        ...process.env,
+        DATABASE_URL: postgres.databaseUrl,
+        ADVANCED_ANALYSIS_MODEL: "test-model",
+        ADVANCED_ANALYSIS_REASONING_EFFORT: "high",
+        ADVANCED_ANALYSIS_EXECUTOR_VERSION: "analysis-test-v1",
+      },
     });
     const exited = waitForExit(child);
     let workerPid: number | undefined;
