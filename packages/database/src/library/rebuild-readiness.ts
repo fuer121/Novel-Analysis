@@ -3,7 +3,7 @@ import { sql } from "kysely";
 import type { DatabaseExecutor } from "../db.js";
 import { selectCanonicalL1Freshness, selectCanonicalL2Freshness } from "./freshness-selector.js";
 
-const ACTIVE_JOB_STATUSES = new Set(["queued", "running", "retrying", "paused"]);
+const ACTIVE_JOB_STATUSES = ["queued", "running", "retrying", "paused"] as const;
 
 export interface BookAnalysisReadinessResult {
   state: "waiting" | "building_l1" | "building_l2" | "available" | "failed";
@@ -36,20 +36,35 @@ export async function getBookAnalysisReadiness(
     : 0;
   const progressPercent = chapterTotal === 0 ? 0 : Math.floor(((l1Fresh + l2Fresh) * 100) / (chapterTotal * 2));
 
-  const currentJob = (type: "l1-index" | "l2-index") => database.selectFrom("jobs")
+  const l1Jobs = () => database.selectFrom("jobs")
     .select("status")
-    .where("type", "=", type)
+    .where("type", "=", "l1-index")
+    .where(sql<boolean>`scope ->> 'bookId' = ${bookId}`);
+  const l2Jobs = () => database.selectFrom("jobs")
+    .select("status")
+    .where("type", "=", "l2-index")
     .where(sql<boolean>`scope ->> 'bookId' = ${bookId}`)
-    .orderBy("updated_at", "desc").orderBy("created_at", "desc").orderBy("id", "desc")
-    .executeTakeFirst();
-  const [currentL1Job, currentL2Job] = await Promise.all([currentJob("l1-index"), currentJob("l2-index")]);
+    .where(sql<boolean>`scope -> 'indexGroupKeys' @> ${JSON.stringify([baseGroup!.id])}::jsonb`);
+  const [activeL1Job, activeL2Job] = await Promise.all([
+    l1Jobs().where("status", "in", ACTIVE_JOB_STATUSES).executeTakeFirst(),
+    baseGroup ? l2Jobs().where("status", "in", ACTIVE_JOB_STATUSES).executeTakeFirst() : undefined,
+  ]);
 
-  if (currentL1Job && ACTIVE_JOB_STATUSES.has(currentL1Job.status)) {
+  if (activeL1Job) {
     return { state: "building_l1", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "l1_incomplete" };
   }
-  if (currentL2Job && ACTIVE_JOB_STATUSES.has(currentL2Job.status)) {
+  if (activeL2Job) {
     return { state: "building_l2", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "l2_incomplete" };
   }
+
+  const latestTerminal = <T extends ReturnType<typeof l1Jobs>>(query: T) => query
+    .where("status", "in", ["completed", "cancelled", "failed"])
+    .orderBy("updated_at", "desc").orderBy("created_at", "desc").orderBy("id", "desc")
+    .executeTakeFirst();
+  const [currentL1Job, currentL2Job] = await Promise.all([
+    latestTerminal(l1Jobs()),
+    baseGroup ? latestTerminal(l2Jobs()) : undefined,
+  ]);
   if (currentL1Job?.status === "failed" || currentL2Job?.status === "failed") {
     return { state: "failed", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "rebuild_failed" };
   }

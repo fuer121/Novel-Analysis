@@ -9,11 +9,14 @@ import { getBookAnalysisReadiness } from "./rebuild-readiness.js";
 import { createDisposablePostgres, type DisposablePostgres } from "../testing/postgres.js";
 
 describe("book analysis readiness", () => {
+  const ACTIVE_STATUSES = ["queued", "running", "retrying", "paused"] as const;
+  const TERMINAL_STATUSES = ["completed", "cancelled", "failed"] as const;
   const L1_SCHEMA = "l1-route-v1";
   const L2_SCHEMA = "l2-facts-v1";
   const L2_ADMISSION = "l2-admission-v1";
   let postgres: DisposablePostgres;
   const cipher = createContentCipher({ activeKeyVersion: "v1", keys: { v1: Buffer.alloc(32, 7) } });
+  let deterministicJobIdSequence = 0;
   let userId: string;
 
   beforeAll(async () => {
@@ -42,9 +45,17 @@ describe("book analysis readiness", () => {
     return { indexes, l1Prompt, l2Prompt, workflow, l2Workflow, group };
   }
 
-  async function job(bookId: string, type: "l1-index" | "l2-index", status: "running" | "failed" | "completed" | "cancelled", options: { id?: string; at?: Date } = {}) {
+  async function job(
+    bookId: string,
+    type: "l1-index" | "l2-index",
+    status: typeof ACTIVE_STATUSES[number] | typeof TERMINAL_STATUSES[number],
+    options: { id?: string; at?: Date; groupId?: string; startChapter?: number; endChapter?: number } = {},
+  ) {
+    const scope = type === "l2-index"
+      ? { bookId, startChapter: options.startChapter ?? 1, endChapter: options.endChapter ?? 2, indexGroupKeys: options.groupId ? [options.groupId] : [], mode: "all" }
+      : { bookId };
     return postgres.db.insertInto("jobs").values({
-      id: options.id, type, status, requested_by: userId, request_id: crypto.randomUUID(), scope: { bookId },
+      id: options.id, type, status, requested_by: userId, request_id: crypto.randomUUID(), scope,
       config_snapshot: {}, concurrency_key: null, progress: { total: 0, completed: 0, failed: 0, skipped: 0, current: "" },
       created_at: options.at, updated_at: options.at,
     }).returning("id").executeTakeFirstOrThrow();
@@ -78,12 +89,12 @@ describe("book analysis readiness", () => {
 
   test("returns building_l2 after L1 completes while an L2 job is active", async () => {
     const { bookId, chapters } = await fixture(2);
-    const { indexes, l1Prompt, workflow } = await indexSetup(bookId);
+    const { indexes, l1Prompt, workflow, group } = await indexSetup(bookId);
     for (const chapter of chapters) {
       const inputSignature = buildL1Signature({ sourceVersion: chapter.source_version, chapterHmac: `h${chapter.chapter_index}`, promptHash: l1Prompt.content_hash, workflowDslHash: workflow.dsl_hash, adapterContractVersion: workflow.contract_version, schemaVersion: L1_SCHEMA });
       await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: workflow.id, inputSignature, status: "fresh", route: {} });
     }
-    await job(bookId, "l2-index", "running");
+    await job(bookId, "l2-index", "running", { groupId: group.id });
     expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({ state: "building_l2", l1Fresh: 2, l2Fresh: 0, progressPercent: 50, blockingCode: "l2_incomplete" });
   });
 
@@ -110,8 +121,8 @@ describe("book analysis readiness", () => {
   });
 
   test("locks retained complete coverage while a new L2 job is active", async () => {
-    const { bookId } = await completeCoverage();
-    await job(bookId, "l2-index", "running");
+    const { bookId, group } = await completeCoverage();
+    await job(bookId, "l2-index", "running", { groupId: group.id });
     expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
       state: "building_l2", progressPercent: 100, analysisAvailable: false, blockingCode: "l2_incomplete",
     });
@@ -176,31 +187,114 @@ describe("book analysis readiness", () => {
   });
 
   test("active L1 is not hidden by a newer terminal L2 job", async () => {
-    const { bookId } = await completeCoverage();
+    const { bookId, group } = await completeCoverage();
     await job(bookId, "l1-index", "running", { at: new Date("2026-01-01T00:00:00Z") });
-    await job(bookId, "l2-index", "completed", { at: new Date("2026-01-02T00:00:00Z") });
+    await job(bookId, "l2-index", "completed", { at: new Date("2026-01-02T00:00:00Z"), groupId: group.id });
     expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({ state: "building_l1", analysisAvailable: false, blockingCode: "l1_incomplete" });
   });
 
   test("active L2 is not hidden by a newer terminal L1 job", async () => {
-    const { bookId } = await completeCoverage();
-    await job(bookId, "l2-index", "running", { at: new Date("2026-01-01T00:00:00Z") });
+    const { bookId, group } = await completeCoverage();
+    await job(bookId, "l2-index", "running", { at: new Date("2026-01-01T00:00:00Z"), groupId: group.id });
     await job(bookId, "l1-index", "completed", { at: new Date("2026-01-02T00:00:00Z") });
     expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({ state: "building_l2", analysisAvailable: false, blockingCode: "l2_incomplete" });
   });
 
-  test("uses id as the deterministic tie-breaker for each job type", async () => {
-    const { bookId } = await completeCoverage();
+  test.each(ACTIVE_STATUSES.flatMap((activeStatus) => TERMINAL_STATUSES.map((terminalStatus) => [activeStatus, terminalStatus] as const)))(
+    "active L1 %s is not hidden by newer L1 %s",
+    async (activeStatus, terminalStatus) => {
+      const { bookId } = await completeCoverage();
+      await job(bookId, "l1-index", activeStatus, { at: new Date("2026-01-01T00:00:00Z") });
+      await job(bookId, "l1-index", terminalStatus, { at: new Date("2026-01-02T00:00:00Z") });
+      expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+        state: "building_l1", analysisAvailable: false, blockingCode: "l1_incomplete",
+      });
+    },
+  );
+
+  test.each(ACTIVE_STATUSES.flatMap((activeStatus) => TERMINAL_STATUSES.map((terminalStatus) => [activeStatus, terminalStatus] as const)))(
+    "active base L2 %s is not hidden by newer base L2 %s",
+    async (activeStatus, terminalStatus) => {
+      const { bookId, group } = await completeCoverage();
+      await job(bookId, "l2-index", activeStatus, { at: new Date("2026-01-01T00:00:00Z"), groupId: group.id });
+      await job(bookId, "l2-index", terminalStatus, { at: new Date("2026-01-02T00:00:00Z"), groupId: group.id });
+      expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+        state: "building_l2", analysisAvailable: false, blockingCode: "l2_incomplete",
+      });
+    },
+  );
+
+  test("blocks for concurrent active base L2 ranges", async () => {
+    const { bookId, group } = await completeCoverage();
+    await job(bookId, "l2-index", "running", { groupId: group.id, startChapter: 1, endChapter: 1 });
+    await job(bookId, "l2-index", "paused", { groupId: group.id, startChapter: 2, endChapter: 2 });
+    await job(bookId, "l2-index", "completed", { at: new Date(Date.now() + 60_000), groupId: group.id });
+    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+      state: "building_l2", analysisAvailable: false, blockingCode: "l2_incomplete",
+    });
+  });
+
+  test("does not block base analysis for an active specialized L2 group", async () => {
+    const { bookId, indexes, l2Prompt } = await completeCoverage();
+    const specialized = await indexes.createIndexGroup({ bookId, key: "creatures", name: "灵兽", categoryScope: "magical_creature", promptVersionId: l2Prompt.id, configHash: "creatures" });
+    await job(bookId, "l2-index", "running", { groupId: specialized.id });
+    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+      state: "available", analysisAvailable: true, blockingCode: null,
+    });
+  });
+
+  test.each(["completed", "cancelled"] as const)(
+    "newer L1 %s supersedes an older L1 failure",
+    async (terminalStatus) => {
+      const { bookId } = await completeCoverage();
+      await job(bookId, "l1-index", "failed", { at: new Date("2026-01-01T00:00:00Z") });
+      await job(bookId, "l1-index", terminalStatus, { at: new Date("2026-01-02T00:00:00Z") });
+      expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({ state: "available", analysisAvailable: true });
+    },
+  );
+
+  test.each(["completed", "cancelled"] as const)(
+    "newer base L2 %s supersedes an older base L2 failure",
+    async (terminalStatus) => {
+      const { bookId, group } = await completeCoverage();
+      await job(bookId, "l2-index", "failed", { at: new Date("2026-01-01T00:00:00Z"), groupId: group.id });
+      await job(bookId, "l2-index", terminalStatus, { at: new Date("2026-01-02T00:00:00Z"), groupId: group.id });
+      expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({ state: "available", analysisAvailable: true });
+    },
+  );
+
+  test.each(["l1-index", "l2-index"] as const)("newer %s failure supersedes an older completed job", async (type) => {
+    const { bookId, group } = await completeCoverage();
+    const options = type === "l2-index" ? { groupId: group.id } : {};
+    await job(bookId, type, "completed", { ...options, at: new Date("2026-01-01T00:00:00Z") });
+    await job(bookId, type, "failed", { ...options, at: new Date("2026-01-02T00:00:00Z") });
+    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+      state: "failed", analysisAvailable: false, blockingCode: "rebuild_failed",
+    });
+  });
+
+  test.each([
+    ["l1-index", "failed", "completed", "available"],
+    ["l1-index", "completed", "failed", "failed"],
+    ["l2-index", "failed", "completed", "available"],
+    ["l2-index", "completed", "failed", "failed"],
+  ] as const)("uses id to break equal terminal timestamps for %s", async (type, firstStatus, secondStatus, expectedState) => {
+    const { bookId, group } = await completeCoverage();
     const at = new Date("2026-01-01T00:00:00Z");
-    await job(bookId, "l1-index", "failed", { id: "00000000-0000-4000-8000-000000000001", at });
-    await job(bookId, "l1-index", "running", { id: "00000000-0000-4000-8000-000000000002", at });
-    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({ state: "building_l1", analysisAvailable: false });
+    const options = type === "l2-index" ? { groupId: group.id } : {};
+    const prefix = (++deterministicJobIdSequence).toString(16).padStart(8, "0");
+    await job(bookId, type, firstStatus, { ...options, id: `${prefix}-0000-4000-8000-000000000001`, at });
+    await job(bookId, type, secondStatus, { ...options, id: `${prefix}-0000-4000-8000-000000000002`, at });
+    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+      state: expectedState,
+      analysisAvailable: expectedState === "available",
+    });
   });
 
   test("terminal completed and cancelled jobs do not block canonical coverage", async () => {
-    const { bookId } = await completeCoverage();
+    const { bookId, group } = await completeCoverage();
     await job(bookId, "l1-index", "completed");
-    await job(bookId, "l2-index", "cancelled");
+    await job(bookId, "l2-index", "cancelled", { groupId: group.id });
     expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({ state: "available", analysisAvailable: true, blockingCode: null });
   });
 
@@ -208,6 +302,14 @@ describe("book analysis readiness", () => {
     const ready = await completeCoverage();
     const other = await fixture(1);
     await job(other.bookId, "l1-index", "running");
+    expect(await getBookAnalysisReadiness(postgres.db, ready.bookId)).toMatchObject({ state: "available", analysisAvailable: true });
+  });
+
+  test("ignores active base L2 jobs belonging to another book", async () => {
+    const ready = await completeCoverage();
+    const other = await fixture(1);
+    const otherGroup = await ready.indexes.createIndexGroup({ bookId: other.bookId, key: "base", name: "基础事实", categoryScope: "general", promptVersionId: ready.l2Prompt.id, configHash: "other" });
+    await job(other.bookId, "l2-index", "running", { groupId: otherGroup.id });
     expect(await getBookAnalysisReadiness(postgres.db, ready.bookId)).toMatchObject({ state: "available", analysisAvailable: true });
   });
 
