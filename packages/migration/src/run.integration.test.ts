@@ -1,10 +1,18 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import { access, mkdtemp, readFile, stat } from "node:fs/promises";
+import {
+  access,
+  link,
+  mkdtemp,
+  readFile,
+  readdir,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterEach, describe, expect, test, vi } from "vitest";
-import { createContentCipher } from "@novel-analysis/database";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, test } from "vitest";
+import { createContentCipher, sql } from "@novel-analysis/database";
 import {
   createDisposablePostgres,
   type DisposablePostgres,
@@ -13,9 +21,12 @@ import {
   createTwoBookLegacySnapshot,
   SYNTHETIC_LEGACY_MASTER_KEY,
 } from "../../../test/phase5/fixtures/create-legacy-snapshot.js";
-import type { TargetWriter } from "./contracts.js";
 import { openLegacySnapshot } from "./legacy-reader.js";
-import { createMigrationRunner, runMigration } from "./run.js";
+import {
+  createManifestPublisher,
+  createMigrationRunner,
+  runMigration,
+} from "./run.js";
 import { createTargetWriter } from "./target-writer.js";
 import { MigrationHardFailure, validateMigration } from "./validate.js";
 
@@ -98,9 +109,6 @@ describe("migration orchestration", () => {
       const chapter = await postgres.db.selectFrom("chapters").select("id").orderBy("id").executeTakeFirstOrThrow();
       await postgres.db.deleteFrom("chapters").where("id", "=", chapter.id).execute();
     }],
-    ["content-digest", async (postgres: DisposablePostgres) => {
-      await postgres.db.updateTable("chapters").set({ source_version: "0".repeat(64) }).execute();
-    }],
     ["target-decrypt", async (postgres: DisposablePostgres) => {
       await postgres.db.updateTable("chapters").set({ content_tag: Buffer.alloc(16) }).execute();
     }],
@@ -133,12 +141,57 @@ describe("migration orchestration", () => {
         };
       },
       validate: validateMigration,
+      publishManifest: createManifestPublisher(),
     });
 
     const error = await runner(context.input).catch((caught: unknown) => caught);
 
     expect(error).toBeInstanceOf(MigrationHardFailure);
     expect((error as MigrationHardFailure).codes).toContain(expectedCode);
+    await expect(access(context.manifestPath)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("detects normalized target content drift while decrypt and HMAC remain valid", async () => {
+    const context = await setupRun();
+    const runner = createMigrationRunner({
+      openSource: openLegacySnapshot,
+      createWriter: async (input) => {
+        const writer = await createTargetWriter(input);
+        let completed = 0;
+        return {
+          async writeBook(book, chapters) {
+            const result = await writer.writeBook(book, chapters);
+            completed += 1;
+            if (completed === 2) {
+              const plaintext = "Different normalized target content\n";
+              const encrypted = context.targetCipher.encrypt(plaintext);
+              const chapter = await context.postgres.db
+                .selectFrom("chapters")
+                .select("id")
+                .orderBy("id")
+                .executeTakeFirstOrThrow();
+              await context.postgres.db.updateTable("chapters").set({
+                content_ciphertext: encrypted.ciphertext,
+                content_nonce: encrypted.nonce,
+                content_tag: encrypted.tag,
+                content_key_version: encrypted.keyVersion,
+                content_hmac: createHmac("sha256", context.targetHmacKey)
+                  .update(plaintext, "utf8")
+                  .digest("hex"),
+              }).where("id", "=", chapter.id).execute();
+            }
+            return result;
+          },
+        };
+      },
+      validate: validateMigration,
+      publishManifest: createManifestPublisher(),
+    });
+
+    const error = await runner(context.input).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(MigrationHardFailure);
+    expect((error as MigrationHardFailure).codes).toEqual(["content-digest"]);
     await expect(access(context.manifestPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -167,6 +220,7 @@ describe("migration orchestration", () => {
         };
       },
       validate: validateMigration,
+      publishManifest: createManifestPublisher(),
     });
 
     const error = await runner(context.input).catch((caught: unknown) => caught);
@@ -210,25 +264,60 @@ describe("migration orchestration", () => {
     expect(await readFile(context.manifestPath, "utf8")).toBe("existing");
   });
 
-  test("fails nonzero mid-book and does not publish a manifest", async () => {
+  test("does not overwrite a manifest created at the publication boundary", async () => {
     const context = await setupRun();
+    const sentinel = "user-created-manifest";
+    const publisher = createManifestPublisher({
+      async link(temporaryPath, manifestPath) {
+        await writeFile(manifestPath, sentinel, { mode: 0o600 });
+        return link(temporaryPath, manifestPath);
+      },
+    });
     const runner = createMigrationRunner({
       openSource: openLegacySnapshot,
-      createWriter: async (input) => {
-        const writer = await createTargetWriter(input);
-        let calls = 0;
-        return {
-          async writeBook(book, chapters) {
-            calls += 1;
-            if (calls === 2) throw new Error("forced_mid_book_failure");
-            return writer.writeBook(book, chapters);
-          },
-        } satisfies TargetWriter;
-      },
-      validate: vi.fn(validateMigration),
+      createWriter: createTargetWriter,
+      validate: validateMigration,
+      publishManifest: publisher,
     });
 
-    await expect(runner(context.input)).rejects.toThrow("forced_mid_book_failure");
+    await expect(runner(context.input)).rejects.toThrow("manifest_exists");
+    expect(await readFile(context.manifestPath, "utf8")).toBe(sentinel);
+    expect((await readdir(dirname(context.manifestPath)))
+      .filter((name) => name.endsWith(".tmp"))).toEqual([]);
+  });
+
+  test("rolls back a book when its second chapter insert fails inside the transaction", async () => {
+    const context = await setupRun();
+    try {
+      await sql.raw(`
+        CREATE FUNCTION phase5_fail_second_chapter() RETURNS trigger AS $$
+        BEGIN
+          IF NEW.chapter_index = 2
+            AND (SELECT title FROM books WHERE id = NEW.book_id) = 'Synthetic Book Two'
+          THEN
+            RAISE EXCEPTION 'forced_mid_book_failure';
+          END IF;
+          RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+        CREATE TRIGGER phase5_fail_second_chapter
+        BEFORE INSERT ON chapters
+        FOR EACH ROW EXECUTE FUNCTION phase5_fail_second_chapter()
+      `).execute(context.postgres.db);
+      await expect(runMigration(context.input)).rejects.toThrow("forced_mid_book_failure");
+    } finally {
+      await sql.raw(`
+        DROP TRIGGER IF EXISTS phase5_fail_second_chapter ON chapters;
+        DROP FUNCTION IF EXISTS phase5_fail_second_chapter()
+      `).execute(context.postgres.db);
+    }
+
+    expect(await context.postgres.db.selectFrom("books").select("title").execute())
+      .toEqual([{ title: "Synthetic Book" }]);
+    expect(await context.postgres.db.selectFrom("book_sources").selectAll().execute())
+      .toHaveLength(1);
+    expect(await context.postgres.db.selectFrom("chapters").selectAll().execute())
+      .toHaveLength(2);
     await expect(access(context.manifestPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
@@ -247,20 +336,23 @@ async function setupRun() {
     .executeTakeFirstOrThrow();
   const targetKey = createHash("sha256").update(randomUUID()).digest();
   const targetHmacKey = createHash("sha256").update(randomUUID()).digest();
+  const targetCipher = createContentCipher({
+    activeKeyVersion: "migration-v1",
+    keys: { "migration-v1": targetKey },
+  });
   return {
     postgres,
     ownerId: owner.id,
     sourcePath,
     manifestPath,
+    targetCipher,
+    targetHmacKey,
     input: {
       sourcePath,
       database: postgres.db,
       createdBy: owner.id,
       oldMasterKey: SYNTHETIC_LEGACY_MASTER_KEY,
-      targetCipher: createContentCipher({
-        activeKeyVersion: "migration-v1",
-        keys: { "migration-v1": targetKey },
-      }),
+      targetCipher,
       targetHmacKey,
       manifestPath,
       targetSchemaVersion: "phase5-test",
