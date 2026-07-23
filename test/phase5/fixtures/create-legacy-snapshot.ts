@@ -36,13 +36,14 @@ export const createLegacySnapshot = (filePath: string): void => {
     for (const chapterIndex of [2, 1]) {
       const plaintext = `Synthetic chapter ${chapterIndex}`;
       const iv = randomBytes(12);
-      const cipher = createCipheriv("aes-256-gcm", Buffer.alloc(32, 7), iv);
+      const cipher = createCipheriv("aes-256-gcm", SYNTHETIC_LEGACY_MASTER_KEY, iv);
+      cipher.setAAD(Buffer.from(`chapter:book-source-1:${chapterIndex}`));
       const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
       insert.run(
         "book-source-1",
         chapterIndex,
         `Chapter ${chapterIndex}`,
-        createHmac("sha256", Buffer.alloc(32, 9)).update(plaintext).digest("hex"),
+        createHmac("sha256", SYNTHETIC_LEGACY_MASTER_KEY).update(plaintext).digest("hex"),
         ciphertext.toString("base64"),
         iv.toString("base64"),
         cipher.getAuthTag().toString("base64"),
@@ -54,3 +55,5 @@ export const createLegacySnapshot = (filePath: string): void => {
     db.close();
   }
 };
+
+export const SYNTHETIC_LEGACY_MASTER_KEY = Buffer.alloc(32, 7);
