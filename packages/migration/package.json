@@ -7,8 +7,7 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run --root ../.. packages/migration/src",
-    "test:integration": "vitest run --root ../.. --config vitest.integration.config.ts packages/migration/src",
+    "test": "vitest run --root ../.. --config packages/migration/vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {

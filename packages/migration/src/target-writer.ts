@@ -4,6 +4,7 @@ import type {
   DatabaseConnection,
   EncryptedContent,
 } from "@novel-analysis/database";
+import { sql } from "@novel-analysis/database";
 import type {
   LegacyBook,
   LegacyChapter,
@@ -40,11 +41,8 @@ const assertKeys = (oldMasterKey: Buffer, targetHmacKey: Buffer): void => {
     throw new Error("invalid_old_master_key");
   }
   if (
-    targetHmacKey.length < 32
-    || (
-      targetHmacKey.length === oldMasterKey.length
-      && timingSafeEqual(targetHmacKey, oldMasterKey)
-    )
+    targetHmacKey.length !== 32
+    || timingSafeEqual(targetHmacKey, oldMasterKey)
   ) {
     throw new Error("invalid_target_hmac_key");
   }
@@ -89,8 +87,18 @@ const prepareChapters = (
 export async function createTargetWriter(
   input: CreateTargetWriterInput,
 ): Promise<TargetWriter> {
-  assertKeys(input.oldMasterKey, input.targetHmacKey);
-  const initial = await input.database
+  const oldMasterKey = Buffer.from(input.oldMasterKey);
+  const targetHmacKey = Buffer.from(input.targetHmacKey);
+  assertKeys(oldMasterKey, targetHmacKey);
+  const writerInput = Object.freeze({
+    database: input.database,
+    createdBy: input.createdBy,
+    sourceFingerprint: input.sourceFingerprint,
+    oldMasterKey,
+    targetCipher: input.targetCipher,
+    targetHmacKey,
+  });
+  const initial = await writerInput.database
     .selectFrom("books")
     .select(({ fn }) => fn.countAll<number>().as("count"))
     .executeTakeFirstOrThrow();
@@ -106,15 +114,18 @@ export async function createTargetWriter(
     ): Promise<MigrationBookManifest> {
       const startedAt = performance.now();
       const targetBookId = stableTargetId(
-        input.sourceFingerprint,
+        writerInput.sourceFingerprint,
         `book:${book.sourceId}`,
       );
-      const prepared = prepareChapters(book, chapters, input);
+      const prepared = prepareChapters(book, chapters, writerInput);
       const chapterIndexes = prepared.map((chapter) => chapter.chapterIndex);
 
-      await input.database.transaction()
+      await writerInput.database.transaction()
         .setIsolationLevel("serializable")
         .execute(async (transaction) => {
+          await sql.raw(
+            "lock table books in share row exclusive mode",
+          ).execute(transaction);
           const targetBooks = await transaction
             .selectFrom("books")
             .select("id")
@@ -130,7 +141,7 @@ export async function createTargetWriter(
             id: targetBookId,
             title: book.title,
             status: "active",
-            created_by: input.createdBy,
+            created_by: writerInput.createdBy,
             created_at: book.createdAt,
             updated_at: book.updatedAt,
           }).execute();

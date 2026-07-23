@@ -69,7 +69,13 @@ function encryptedChapter(
   };
 }
 
-async function setup(cipher: ContentCipher = targetCipher) {
+async function setup(
+  cipher: ContentCipher = targetCipher,
+  keys: Readonly<{
+    oldMasterKey: Buffer;
+    targetHmacKey: Buffer;
+  }> = { oldMasterKey, targetHmacKey },
+) {
   const postgres = await createDisposablePostgres();
   disposables.push(postgres);
   const owner = await postgres.db
@@ -81,9 +87,9 @@ async function setup(cipher: ContentCipher = targetCipher) {
     database: postgres.db,
     createdBy: owner.id,
     sourceFingerprint: SOURCE_FINGERPRINT,
-    oldMasterKey,
+    oldMasterKey: keys.oldMasterKey,
     targetCipher: cipher,
-    targetHmacKey,
+    targetHmacKey: keys.targetHmacKey,
   });
   return { postgres, owner, writer };
 }
@@ -269,6 +275,104 @@ describe("target writer", () => {
     ).rejects.toThrow("target_not_empty");
     expect(await postgres.db.selectFrom("chapters").select("id").where("book_id", "=", targetId).execute()).toEqual([]);
   });
+
+  test("serializes an uncommitted external insert before the global empty-target check", async () => {
+    const { postgres, owner, writer } = await setup();
+    let releaseExternal!: () => void;
+    const release = new Promise<void>((resolve) => {
+      releaseExternal = resolve;
+    });
+    let externalInserted!: () => void;
+    const inserted = new Promise<void>((resolve) => {
+      externalInserted = resolve;
+    });
+    const externalId = randomUUID();
+    const externalWrite = postgres.db.transaction().execute(async (transaction) => {
+      await transaction.insertInto("books").values({
+        id: externalId,
+        title: "External racing book",
+        created_by: owner.id,
+        status: "active",
+      }).execute();
+      externalInserted();
+      await release;
+    });
+    await inserted;
+
+    const migrationWrite = writer.writeBook(
+      book,
+      [encryptedChapter(1, PLAINTEXT_SENTINEL)],
+    );
+    const stateBeforeExternalCommit = await Promise.race([
+      migrationWrite.then(
+        () => "settled",
+        () => "settled",
+      ),
+      new Promise<"pending">((resolve) => {
+        setTimeout(() => resolve("pending"), 100);
+      }),
+    ]);
+    releaseExternal();
+    await externalWrite;
+
+    expect(stateBeforeExternalCommit).toBe("pending");
+    await expect(migrationWrite).rejects.toThrow("target_not_empty");
+    expect(await postgres.db.selectFrom("books").select("id").execute()).toEqual([
+      { id: externalId },
+    ]);
+    expect(await postgres.db.selectFrom("chapters").select("id").execute()).toEqual([]);
+  });
+
+  test("snapshots caller key buffers and preserves independent target HMAC behavior", async () => {
+    const mutableOldMasterKey = Buffer.from(oldMasterKey);
+    const mutableTargetHmacKey = Buffer.from(targetHmacKey);
+    const expectedTargetHmacKey = Buffer.from(mutableTargetHmacKey);
+    const { postgres, writer } = await setup(targetCipher, {
+      oldMasterKey: mutableOldMasterKey,
+      targetHmacKey: mutableTargetHmacKey,
+    });
+
+    mutableOldMasterKey.fill(0);
+    mutableTargetHmacKey.set(oldMasterKey);
+    await writer.writeBook(book, [encryptedChapter(1, PLAINTEXT_SENTINEL)]);
+
+    const row = await postgres.db
+      .selectFrom("chapters")
+      .select("content_hmac")
+      .executeTakeFirstOrThrow();
+    expect(row.content_hmac).toBe(
+      createHmac("sha256", expectedTargetHmacKey)
+        .update(PLAINTEXT_SENTINEL)
+        .digest("hex"),
+    );
+    expect(row.content_hmac).not.toBe(
+      createHmac("sha256", oldMasterKey)
+        .update(PLAINTEXT_SENTINEL)
+        .digest("hex"),
+    );
+  });
+
+  test.each([31, 33])(
+    "rejects a %i-byte target HMAC key",
+    async (length) => {
+      const postgres = await createDisposablePostgres();
+      disposables.push(postgres);
+      const owner = await postgres.db
+        .insertInto("users")
+        .values({ display_name: "Migration Owner", role: "admin", status: "active" })
+        .returning("id")
+        .executeTakeFirstOrThrow();
+
+      await expect(createTargetWriter({
+        database: postgres.db,
+        createdBy: owner.id,
+        sourceFingerprint: SOURCE_FINGERPRINT,
+        oldMasterKey,
+        targetCipher,
+        targetHmacKey: Buffer.alloc(length, 1),
+      })).rejects.toThrow("invalid_target_hmac_key");
+    },
+  );
 
   test("produces stable UUID mappings with distinct object identities", () => {
     const first = stableTargetId(SOURCE_FINGERPRINT, "book:legacy-book-1");
