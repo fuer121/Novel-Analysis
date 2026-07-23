@@ -106,6 +106,7 @@ export const createManifestPublisher = (
       `.${basename(manifestPath)}.${process.pid}.${randomBytes(8).toString("hex")}.tmp`,
     );
     let ownsTemporary = false;
+    let committed = false;
     try {
       const handle = await fileSystem.open(temporaryPath, "wx", 0o600);
       ownsTemporary = true;
@@ -123,13 +124,18 @@ export const createManifestPublisher = (
         }
         throw error;
       }
-      await fileSystem.unlink(temporaryPath);
-      ownsTemporary = false;
-      await syncDirectory(fileSystem, directoryPath);
+      committed = true;
+      await fileSystem.unlink(temporaryPath).then(
+        () => {
+          ownsTemporary = false;
+        },
+        () => undefined,
+      );
+      await syncDirectory(fileSystem, directoryPath).catch(() => undefined);
     } finally {
-      if (ownsTemporary) {
+      if (ownsTemporary && !committed) {
         await fileSystem.unlink(temporaryPath).catch(() => undefined);
-        await syncDirectory(fileSystem, directoryPath);
+        await syncDirectory(fileSystem, directoryPath).catch(() => undefined);
       }
     }
   };

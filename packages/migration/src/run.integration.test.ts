@@ -4,6 +4,7 @@ import {
   access,
   link,
   mkdtemp,
+  open,
   readFile,
   readdir,
   stat,
@@ -11,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { FileHandle } from "node:fs/promises";
 import { afterEach, describe, expect, test } from "vitest";
 import { createContentCipher, sql } from "@novel-analysis/database";
 import {
@@ -286,6 +288,72 @@ describe("migration orchestration", () => {
       .filter((name) => name.endsWith(".tmp"))).toEqual([]);
   });
 
+  test.each([
+    ["temp-unlink", (_context: Awaited<ReturnType<typeof setupRun>>) => ({
+      async unlink(path: string) {
+        if (path.endsWith(".tmp")) throw ioError("injected_temp_unlink_failure");
+        const { unlink } = await import("node:fs/promises");
+        return unlink(path);
+      },
+    }), 1],
+    ["directory-open", (context: Awaited<ReturnType<typeof setupRun>>) => ({
+      async open(path: string, flags: string, mode?: number) {
+        if (path === dirname(context.manifestPath)) {
+          throw ioError("injected_directory_open_failure");
+        }
+        return open(path, flags, mode);
+      },
+    }), 0],
+    ["directory-sync", (context: Awaited<ReturnType<typeof setupRun>>) => ({
+      async open(path: string, flags: string, mode?: number) {
+        const handle = await open(path, flags, mode);
+        if (path !== dirname(context.manifestPath)) return handle;
+        return {
+          sync: async () => { throw ioError("injected_directory_sync_failure"); },
+          close: () => handle.close(),
+        } as unknown as FileHandle;
+      },
+    }), 0],
+    ["directory-close", (context: Awaited<ReturnType<typeof setupRun>>) => ({
+      async open(path: string, flags: string, mode?: number) {
+        const handle = await open(path, flags, mode);
+        if (path !== dirname(context.manifestPath)) return handle;
+        return {
+          sync: () => handle.sync(),
+          close: async () => {
+            await handle.close();
+            throw ioError("injected_directory_close_failure");
+          },
+        } as unknown as FileHandle;
+      },
+    }), 0],
+  ] as const)(
+    "treats post-publication %s failure as passed",
+    async (_failure, overrides, expectedTemporaryFiles) => {
+      const context = await setupRun();
+      const userPath = join(dirname(context.manifestPath), "user-file.txt");
+      await writeFile(userPath, "user-owned", { mode: 0o600 });
+      const runner = createMigrationRunner({
+        openSource: openLegacySnapshot,
+        createWriter: createTargetWriter,
+        validate: validateMigration,
+        publishManifest: createManifestPublisher(overrides(context)),
+      });
+
+      const result = await runner(context.input);
+
+      expect(result.status).toBe("passed");
+      expect((await stat(context.manifestPath)).mode & 0o777).toBe(0o600);
+      expect(JSON.parse(await readFile(context.manifestPath, "utf8"))).toMatchObject({
+        manifestVersion: "phase5-v1",
+        books: [{ status: "completed" }, { status: "completed" }],
+      });
+      expect(await readFile(userPath, "utf8")).toBe("user-owned");
+      expect((await readdir(dirname(context.manifestPath)))
+        .filter((name) => name.endsWith(".tmp"))).toHaveLength(expectedTemporaryFiles);
+    },
+  );
+
   test("rolls back a book when its second chapter insert fails inside the transaction", async () => {
     const context = await setupRun();
     try {
@@ -321,6 +389,10 @@ describe("migration orchestration", () => {
     await expect(access(context.manifestPath)).rejects.toMatchObject({ code: "ENOENT" });
   });
 });
+
+function ioError(message: string): NodeJS.ErrnoException {
+  return Object.assign(new Error(message), { code: "EIO" });
+}
 
 async function setupRun() {
   const directory = await mkdtemp(join(tmpdir(), "phase5-migration-"));
