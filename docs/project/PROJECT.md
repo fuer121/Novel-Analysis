@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 0eaf4b5430cd56de01caa39f470c73ccb97782c5
 baseline_status: current
-updated_at: 2026-07-23T17:17:52+08:00
+updated_at: 2026-07-23T19:24:49+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK6-ISOLATION-CORRECTION
+last_checkpoint: CP-20260723-PHASE5-TASK6-CAPACITY-REVALIDATION-BLOCKED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | implementation-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | e7608c1d4e3c70756254e36d9d88ac37c987fc26 | in_progress | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-ISOLATION-CORRECTION | implement DEC-0020 single-instance fail-closed benchmark and re-review |
+| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | controller-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | cff6eed29bd829a18efdb3d33174ae49a0b1e33a | blocked | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-CAPACITY-REVALIDATION-BLOCKED | confirm idle-host reaudit or authorize performance root-cause investigation |
 
 ## Phase Ledgers
 
@@ -89,10 +89,11 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
 - Task 7 的 10 用户 p95 阈值是本地 fake-provider 验收证据，不代表生产容量承诺
 - Task 7 plaintext 与 credential sentinel 扫描必须覆盖持久化、普通 Query JSON、captured API/Worker logs 与受控 provider error
+- Task 6隔离修正后两次新鲜capacity run的browse p95为677.593ms与705.975ms，均超过500ms阈值；旧5/5通过证据不能覆盖本次冲突
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-5已合并并post-merge verified；Task 6采用DEC-0020专用空闲本地benchmark与single-instance fail-closed约束，正在增量修复；Task 7、Task 8与所有正式操作未解锁
+Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 isolation contract与signal race已修正且spec compliant，但新鲜capacity revalidation连续两次browse threshold失败，等待用户确认idle-host reaudit或性能根因调查；Task 7、Task 8与所有正式操作未解锁
 
 ## Next Gate
 
@@ -100,6 +101,7 @@ Phase 5 Tasks 1-5已合并并post-merge verified；Task 6采用DEC-0020专用空
 
 ## Evidence Index
 
+- [Phase 5 Task 6 capacity revalidation blocked](checkpoints/CP-20260723-PHASE5-TASK6-CAPACITY-REVALIDATION-BLOCKED.md)
 - [Phase 5 Task 6 isolation correction](checkpoints/CP-20260723-PHASE5-TASK6-ISOLATION-CORRECTION.md)
 - [Phase 5 Task 6 quality blocked](checkpoints/CP-20260723-PHASE5-TASK6-QUALITY-BLOCKED.md)
 - [Phase 5 Task 6 repeatability audit accepted](checkpoints/CP-20260723-PHASE5-TASK6-REPEATABILITY-AUDIT-ACCEPTED.md)
