@@ -4,6 +4,18 @@ import { pathToFileURL } from "node:url";
 
 const CALLBACK_PATH = "/api/auth/callback";
 const REQUIRED_SERVICES = ["caddy", "api", "worker", "postgres"];
+const EXPECTED_CADDY_PORTS = ["443:443", "443:443/udp"];
+const EXPECTED_HEALTH_TESTS = {
+  caddy: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile"],
+  api: [
+    "CMD",
+    "node",
+    "-e",
+    "const net=require('node:net');const socket=net.connect(3000,'127.0.0.1',()=>{socket.end();process.exit(0)});socket.on('error',()=>process.exit(1));setTimeout(()=>process.exit(1),2000)",
+  ],
+  worker: ["CMD-SHELL", "kill -0 1"],
+  postgres: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""],
+};
 
 function isCanonical32ByteBase64(value) {
   if (!/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) return false;
@@ -20,25 +32,47 @@ function isHttpsOrigin(url) {
     && url.hash === "";
 }
 
-function isPostgresInternal(compose, postgres) {
-  if (postgres?.network_mode === "host") return false;
-  if (postgres?.ports !== undefined
-    && (!Array.isArray(postgres.ports) || postgres.ports.length > 0)) return false;
-  const networkNames = Array.isArray(postgres?.networks)
-    ? postgres.networks
-    : Object.keys(postgres?.networks ?? {});
-  return networkNames.length > 0
-    && networkNames.every((name) => compose?.networks?.[name]?.internal === true);
+function networkNames(service) {
+  return Array.isArray(service?.networks)
+    ? service.networks
+    : Object.keys(service?.networks ?? {});
 }
 
-function hasHealthcheck(service) {
+function sameMembers(actual, expected) {
+  return actual.length === expected.length
+    && expected.every((value) => actual.includes(value));
+}
+
+function hasExpectedTopology(compose) {
+  const services = compose?.services ?? {};
+  if (!sameMembers(Object.keys(services), REQUIRED_SERVICES)) return false;
+
+  const caddy = services.caddy;
+  if (caddy?.network_mode !== undefined
+    || !Array.isArray(caddy?.ports)
+    || !sameMembers(caddy.ports, EXPECTED_CADDY_PORTS)
+    || !sameMembers(networkNames(caddy), ["edge", "internal"])
+    || !compose?.networks?.edge
+    || typeof compose.networks.edge !== "object"
+    || compose.networks.edge.internal === true
+    || compose?.networks?.internal?.internal !== true) return false;
+
+  return ["api", "worker", "postgres"].every((name) => {
+    const service = services[name];
+    const networks = networkNames(service);
+    return service?.ports === undefined
+      && service?.network_mode === undefined
+      && networks.length > 0
+      && networks.every((network) => compose?.networks?.[network]?.internal === true);
+  });
+}
+
+function hasExpectedHealthcheck(service, expectedTest) {
   const healthcheck = service?.healthcheck;
   if (!healthcheck || typeof healthcheck !== "object" || Array.isArray(healthcheck)
     || healthcheck.disable === true) return false;
-  const test = healthcheck.test;
-  if (typeof test === "string") return test.trim() !== "" && test.trim().toUpperCase() !== "NONE";
-  return Array.isArray(test) && test.some((part) => String(part).trim() !== "")
-    && String(test[0]).trim().toUpperCase() !== "NONE";
+  return Array.isArray(healthcheck.test)
+    && JSON.stringify(healthcheck.test) === JSON.stringify(expectedTest);
 }
 
 export function runPreflight(config, composeText) {
@@ -61,11 +95,12 @@ export function runPreflight(config, composeText) {
     return { ok: false, code: "database_exposed" };
   }
   const services = compose?.services ?? {};
-  if (!isPostgresInternal(compose, services.postgres)) {
+  if (!hasExpectedTopology(compose)) {
     return { ok: false, code: "database_exposed" };
   }
 
-  if (REQUIRED_SERVICES.some((service) => !hasHealthcheck(services[service]))) {
+  if (REQUIRED_SERVICES.some((service) =>
+    !hasExpectedHealthcheck(services[service], EXPECTED_HEALTH_TESTS[service]))) {
     return { ok: false, code: "healthcheck_missing" };
   }
 
@@ -78,7 +113,8 @@ export function runPreflight(config, composeText) {
     return { ok: false, code: "keys_not_distinct" };
   }
 
-  if (config.OPERATION_GATE !== "approved") {
+  if (config.OPERATION_MODE !== "preflight-dry-run"
+    || config.OPERATION_GATE !== "GATE-PHASE5-PREFLIGHT-LOCAL-ONLY") {
     return { ok: false, code: "gate_not_approved" };
   }
 
