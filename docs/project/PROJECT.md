@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 0eaf4b5430cd56de01caa39f470c73ccb97782c5
 baseline_status: current
-updated_at: 2026-07-23T19:24:49+08:00
+updated_at: 2026-07-23T19:33:51+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK6-CAPACITY-REVALIDATION-BLOCKED
+last_checkpoint: CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | controller-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | cff6eed29bd829a18efdb3d33174ae49a0b1e33a | blocked | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-CAPACITY-REVALIDATION-BLOCKED | confirm idle-host reaudit or authorize performance root-cause investigation |
+| PHASE5-TASK6 | phase-5 | Correctness、priority、isolation与indicative timing harness | controller-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | 01ff9ca0dcd36f14ddba7d7214f47efbd2e3c712 | in_progress | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED | re-review existing implementation against DEC-0021 |
+| PHASE5-TASK7 | phase-5 | Minimal single-server reference、basic preflight与operations checklist | unassigned | none | none | none | ready | CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED | CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED | create one implementation worktree after governance merge |
 
 ## Phase Ledgers
 
@@ -73,6 +74,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 - [DEC-0018 Phase 5 Shared Freshness Selector Ownership](decisions/DEC-0018-phase5-shared-freshness-selector.md)
 - [DEC-0019 Phase 5 Rebuild Reorder Temporary Positions](decisions/DEC-0019-phase5-rebuild-reorder-positive-temporary-positions.md)
 - [DEC-0020 Phase 5 Local Isolated Capacity Benchmark](decisions/DEC-0020-phase5-local-isolated-capacity-benchmark.md)
+- [DEC-0021 Phase 5 Lean Completion Boundary](decisions/DEC-0021-phase5-lean-completion-boundary.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -89,11 +91,11 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
 - Task 7 的 10 用户 p95 阈值是本地 fake-provider 验收证据，不代表生产容量承诺
 - Task 7 plaintext 与 credential sentinel 扫描必须覆盖持久化、普通 Query JSON、captured API/Worker logs 与受控 provider error
-- Task 6隔离修正后两次新鲜capacity run的browse p95为677.593ms与705.975ms，均超过500ms阈值；旧5/5通过证据不能覆盖本次冲突
+- Task 6开发机browse p95存在329.648ms至705.975ms波动，保留为indicative evidence；硬threshold由target-server isolated rehearsal Gate验证
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 isolation contract与signal race已修正且spec compliant，但新鲜capacity revalidation连续两次browse threshold失败，等待用户确认idle-host reaudit或性能根因调查；Task 7、Task 8与所有正式操作未解锁
+Phase 5 Tasks 1-5已合并并post-merge verified；DEC-0021已收敛Tasks 6–8，Task 6进入corrected contract review，Task 7可独立启动最小实现，Task 8等待两者accepted；所有正式操作仍未解锁
 
 ## Next Gate
 
@@ -101,6 +103,8 @@ Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 isolation contract与s
 
 ## Evidence Index
 
+- [Phase 5 lean completion approved](checkpoints/CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED.md)
+- [Phase 5 lean completion plan](../superpowers/plans/2026-07-23-phase-5-lean-completion-plan.md)
 - [Phase 5 Task 6 capacity revalidation blocked](checkpoints/CP-20260723-PHASE5-TASK6-CAPACITY-REVALIDATION-BLOCKED.md)
 - [Phase 5 Task 6 isolation correction](checkpoints/CP-20260723-PHASE5-TASK6-ISOLATION-CORRECTION.md)
 - [Phase 5 Task 6 quality blocked](checkpoints/CP-20260723-PHASE5-TASK6-QUALITY-BLOCKED.md)
