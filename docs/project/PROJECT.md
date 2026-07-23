@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: 0eaf4b5430cd56de01caa39f470c73ccb97782c5
+baseline_commit: 94e4934a0715bcd43516726ebf7a5a0d2332fd8b
 baseline_status: current
-updated_at: 2026-07-23T19:42:32+08:00
+updated_at: 2026-07-23T20:22:30+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK6-ACCEPTED
+last_checkpoint: CP-20260723-PHASE5-TASK7-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `0eaf4b5430cd56de01caa39f470c73ccb97782c5` |
-| Latest merged implementation | PR #146 `https://github.com/fuer121/Novel-Analysis/pull/146` |
+| Accepted implementation baseline | `94e4934a0715bcd43516726ebf7a5a0d2332fd8b` |
+| Latest merged implementation | PR #148 `https://github.com/fuer121/Novel-Analysis/pull/148` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -42,8 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK6 | phase-5 | Correctness、priority、isolation与indicative timing harness | controller-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | b64ce4b22659ec5a269c45afd69e6aa3c6516916 | accepted | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-ACCEPTED | create PR and merge after CI |
-| PHASE5-TASK7 | phase-5 | Minimal single-server reference、basic preflight与operations checklist | unassigned | none | none | none | ready | CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED | CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED | create one implementation worktree after governance merge |
+| PHASE5-TASK7 | phase-5 | Minimal single-server reference、basic preflight与operations checklist | controller-agent | codex/phase5-task7 | 94e4934a0715bcd43516726ebf7a5a0d2332fd8b | 2ac45d9feb6e85878f79f815973018b99c4459ab | accepted | CP-20260723-PHASE5-TASK6-MERGED-TASK7-STARTED | CP-20260723-PHASE5-TASK7-ACCEPTED | create PR and merge after CI |
 
 ## Phase Ledgers
 
@@ -95,7 +94,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 corrected contract、spec、quality与controller verification已accepted，等待PR与CI；Task 7 ready，Task 8等待Tasks 6与7 accepted；所有正式操作仍未解锁
+Phase 5 Tasks 1-6已合并并post-merge verified；Task 7 lean contract、spec、quality与controller verification已accepted，等待PR与CI；Task 8等待Task 7 merged；所有正式操作仍未解锁
 
 ## Next Gate
 
@@ -103,6 +102,8 @@ Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 corrected contract、s
 
 ## Evidence Index
 
+- [Phase 5 Task 7 accepted](checkpoints/CP-20260723-PHASE5-TASK7-ACCEPTED.md)
+- [Phase 5 Task 6 merged and Task 7 started](checkpoints/CP-20260723-PHASE5-TASK6-MERGED-TASK7-STARTED.md)
 - [Phase 5 Task 6 accepted](checkpoints/CP-20260723-PHASE5-TASK6-ACCEPTED.md)
 - [Phase 5 lean completion approved](checkpoints/CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED.md)
 - [Phase 5 lean completion plan](../superpowers/plans/2026-07-23-phase-5-lean-completion-plan.md)
