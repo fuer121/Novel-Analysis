@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 0eaf4b5430cd56de01caa39f470c73ccb97782c5
 baseline_status: current
-updated_at: 2026-07-23T16:00:23+08:00
+updated_at: 2026-07-23T19:42:32+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED
+last_checkpoint: CP-20260723-PHASE5-TASK6-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | unassigned | none | 0eaf4b5430cd56de01caa39f470c73ccb97782c5 | 0eaf4b5430cd56de01caa39f470c73ccb97782c5 | ready | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | merge contract, create unique worktree and dispatch fresh implementer；local synthetic load only |
+| PHASE5-TASK6 | phase-5 | Correctness、priority、isolation与indicative timing harness | controller-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | b64ce4b22659ec5a269c45afd69e6aa3c6516916 | accepted | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-ACCEPTED | create PR and merge after CI |
+| PHASE5-TASK7 | phase-5 | Minimal single-server reference、basic preflight与operations checklist | unassigned | none | none | none | ready | CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED | CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED | create one implementation worktree after governance merge |
 
 ## Phase Ledgers
 
@@ -72,6 +73,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 - [DEC-0017 Phase 5 Selective Migration And No Entry Rollback](decisions/DEC-0017-phase5-selective-migration-and-no-entry-rollback.md)
 - [DEC-0018 Phase 5 Shared Freshness Selector Ownership](decisions/DEC-0018-phase5-shared-freshness-selector.md)
 - [DEC-0019 Phase 5 Rebuild Reorder Temporary Positions](decisions/DEC-0019-phase5-rebuild-reorder-positive-temporary-positions.md)
+- [DEC-0020 Phase 5 Local Isolated Capacity Benchmark](decisions/DEC-0020-phase5-local-isolated-capacity-benchmark.md)
+- [DEC-0021 Phase 5 Lean Completion Boundary](decisions/DEC-0021-phase5-lean-completion-boundary.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -88,10 +91,11 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 - Query API 运行环境必须提供独立的 canonical-base64 32-byte `CONTENT_HMAC_KEY`，且不得与内容加密 key 相同
 - Task 7 的 10 用户 p95 阈值是本地 fake-provider 验收证据，不代表生产容量承诺
 - Task 7 plaintext 与 credential sentinel 扫描必须覆盖持久化、普通 Query JSON、captured API/Worker logs 与受控 provider error
+- Task 6开发机browse p95存在329.648ms至705.975ms波动，保留为indicative evidence；硬threshold由target-server isolated rehearsal Gate验证
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 capacity harness contract已接受，等待治理PR合并与fresh implementer；Task 7、Task 8与所有正式操作未解锁
+Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 corrected contract、spec、quality与controller verification已accepted，等待PR与CI；Task 7 ready，Task 8等待Tasks 6与7 accepted；所有正式操作仍未解锁
 
 ## Next Gate
 
@@ -99,6 +103,15 @@ Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 capacity harness contr
 
 ## Evidence Index
 
+- [Phase 5 Task 6 accepted](checkpoints/CP-20260723-PHASE5-TASK6-ACCEPTED.md)
+- [Phase 5 lean completion approved](checkpoints/CP-20260723-PHASE5-LEAN-COMPLETION-APPROVED.md)
+- [Phase 5 lean completion plan](../superpowers/plans/2026-07-23-phase-5-lean-completion-plan.md)
+- [Phase 5 Task 6 capacity revalidation blocked](checkpoints/CP-20260723-PHASE5-TASK6-CAPACITY-REVALIDATION-BLOCKED.md)
+- [Phase 5 Task 6 isolation correction](checkpoints/CP-20260723-PHASE5-TASK6-ISOLATION-CORRECTION.md)
+- [Phase 5 Task 6 quality blocked](checkpoints/CP-20260723-PHASE5-TASK6-QUALITY-BLOCKED.md)
+- [Phase 5 Task 6 repeatability audit accepted](checkpoints/CP-20260723-PHASE5-TASK6-REPEATABILITY-AUDIT-ACCEPTED.md)
+- [Phase 5 Task 6 repeatability audit authorized](checkpoints/CP-20260723-PHASE5-TASK6-REPEATABILITY-AUDIT-AUTHORIZED.md)
+- [Phase 5 Task 6 blocked](checkpoints/CP-20260723-PHASE5-TASK6-BLOCKED.md)
 - [Phase 5 Task 5 merged and Task 6 started](checkpoints/CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED.md)
 - [Phase 5 Task 5 accepted](checkpoints/CP-20260723-PHASE5-TASK5-ACCEPTED.md)
 - [Phase 5 Task 5 reorder correction](checkpoints/CP-20260723-PHASE5-TASK5-REORDER-CORRECTION.md)
