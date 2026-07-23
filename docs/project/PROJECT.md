@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 6484b202959ce2fb93c2f133f45fc839a1b9913f
 baseline_status: current
-updated_at: 2026-07-23T11:49:04+08:00
+updated_at: 2026-07-23T12:28:21+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK2-MERGED-TASK3-STARTED
+last_checkpoint: CP-20260723-PHASE5-TASK3-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK3 | phase-5 | Fail-closed migration CLI, hard validation and atomic manifest publication | unassigned | none | 6484b202959ce2fb93c2f133f45fc839a1b9913f | 6484b202959ce2fb93c2f133f45fc839a1b9913f | ready | CP-20260723-PHASE5-TASK2-ACCEPTED | CP-20260723-PHASE5-TASK2-MERGED-TASK3-STARTED | merge contract, create one implementation worktree, then dispatch fresh implementer；synthetic data only |
+| PHASE5-TASK3 | phase-5 | Fail-closed migration CLI, hard validation and atomic manifest publication | implementer-agent | codex/phase5-task3 | 94d17771f1f655943b0bf276c5d0e76a4967279c | d8bdfdc9113c8c708a427e1f0c878e1b0ef863e7 | accepted | CP-20260723-PHASE5-TASK2-ACCEPTED | CP-20260723-PHASE5-TASK3-ACCEPTED | create implementation PR, wait for CI, merge, then create merged checkpoint and Task 4 Started Contract；synthetic data only |
 
 ## Phase Ledgers
 
@@ -89,7 +89,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-2 已合并并完成 post-merge verification；Task 3 contract 已接受，等待治理 PR 合并后从最新 main 创建唯一实现 worktree；Task 4 与所有正式操作未解锁
+Phase 5 Tasks 1-2 已合并；Task 3 已通过实现、最终规格与质量验收，等待 implementation PR、CI 与合并；Task 4 与所有正式操作未解锁
 
 ## Next Gate
 
@@ -97,6 +97,7 @@ Phase 5 Tasks 1-2 已合并并完成 post-merge verification；Task 3 contract �
 
 ## Evidence Index
 
+- [Phase 5 Task 3 accepted](checkpoints/CP-20260723-PHASE5-TASK3-ACCEPTED.md)
 - [Phase 5 Task 2 merged and Task 3 started](checkpoints/CP-20260723-PHASE5-TASK2-MERGED-TASK3-STARTED.md)
 - [Phase 5 Task 2 accepted](checkpoints/CP-20260723-PHASE5-TASK2-ACCEPTED.md)
 - [Phase 5 Task 1 merged and Task 2 started](checkpoints/CP-20260723-PHASE5-TASK1-MERGED-TASK2-STARTED.md)
