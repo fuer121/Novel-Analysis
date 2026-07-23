@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: 6484b202959ce2fb93c2f133f45fc839a1b9913f
+baseline_commit: 78421b32d812f281480bca0e2af403484f6a1062
 baseline_status: current
-updated_at: 2026-07-23T12:28:21+08:00
+updated_at: 2026-07-23T12:32:53+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK3-ACCEPTED
+last_checkpoint: CP-20260723-PHASE5-TASK3-MERGED-TASK4-STARTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `6484b202959ce2fb93c2f133f45fc839a1b9913f` |
-| Latest merged implementation | PR #137 `https://github.com/fuer121/Novel-Analysis/pull/137` |
+| Accepted implementation baseline | `78421b32d812f281480bca0e2af403484f6a1062` |
+| Latest merged implementation | PR #139 `https://github.com/fuer121/Novel-Analysis/pull/139` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK3 | phase-5 | Fail-closed migration CLI, hard validation and atomic manifest publication | implementer-agent | codex/phase5-task3 | 94d17771f1f655943b0bf276c5d0e76a4967279c | d8bdfdc9113c8c708a427e1f0c878e1b0ef863e7 | accepted | CP-20260723-PHASE5-TASK2-ACCEPTED | CP-20260723-PHASE5-TASK3-ACCEPTED | create implementation PR, wait for CI, merge, then create merged checkpoint and Task 4 Started Contract；synthetic data only |
+| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | unassigned | none | 78421b32d812f281480bca0e2af403484f6a1062 | 78421b32d812f281480bca0e2af403484f6a1062 | ready | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK3-MERGED-TASK4-STARTED | merge contract, create one implementation worktree, then dispatch fresh implementer；no scheduler or formal rebuild |
 
 ## Phase Ledgers
 
@@ -89,7 +89,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-2 已合并；Task 3 已通过实现、最终规格与质量验收，等待 implementation PR、CI 与合并；Task 4 与所有正式操作未解锁
+Phase 5 Tasks 1-3 已合并并完成 post-merge verification；Task 4 contract 已接受，等待治理 PR 合并后从最新 main 创建唯一实现 worktree；Task 5 与所有正式操作未解锁
 
 ## Next Gate
 
@@ -97,6 +97,7 @@ Phase 5 Tasks 1-2 已合并；Task 3 已通过实现、最终规格与质量验�
 
 ## Evidence Index
 
+- [Phase 5 Task 3 merged and Task 4 started](checkpoints/CP-20260723-PHASE5-TASK3-MERGED-TASK4-STARTED.md)
 - [Phase 5 Task 3 accepted](checkpoints/CP-20260723-PHASE5-TASK3-ACCEPTED.md)
 - [Phase 5 Task 2 merged and Task 3 started](checkpoints/CP-20260723-PHASE5-TASK2-MERGED-TASK3-STARTED.md)
 - [Phase 5 Task 2 accepted](checkpoints/CP-20260723-PHASE5-TASK2-ACCEPTED.md)
