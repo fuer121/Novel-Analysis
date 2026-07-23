@@ -23,3 +23,28 @@ export interface LegacySnapshotReader {
   chapters(bookSourceId: string): readonly LegacyChapter[];
   close(): void;
 }
+
+export type MigrationBookManifest = Readonly<{
+  sourceIdHash: string;
+  targetId: string;
+  chapterCount: number;
+  contentDigest: string;
+  durationMs: number;
+  status: "completed";
+}>;
+
+export type MigrationManifest = Readonly<{
+  manifestVersion: "phase5-v1";
+  sourceFingerprint: string;
+  targetSchemaVersion: string;
+  startedAt: string;
+  completedAt: string;
+  books: readonly MigrationBookManifest[];
+}>;
+
+export interface TargetWriter {
+  writeBook(
+    book: LegacyBook,
+    chapters: readonly LegacyChapter[],
+  ): Promise<MigrationBookManifest>;
+}

@@ -7,7 +7,10 @@
     ".": "./src/index.ts"
   },
   "scripts": {
-    "test": "vitest run --root ../.. packages/migration/src",
+    "test": "vitest run --root ../.. --config vitest.integration.config.ts packages/migration/src",
     "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@novel-analysis/database": "*"
   }
 }
