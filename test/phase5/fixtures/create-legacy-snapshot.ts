@@ -62,3 +62,37 @@ const createSnapshot = (filePath: string, emptyChapter: boolean): void => {
 export const createLegacySnapshot = (filePath: string): void => createSnapshot(filePath, false);
 
 export const createEmptyLegacySnapshot = (filePath: string): void => createSnapshot(filePath, true);
+
+export const createTwoBookLegacySnapshot = (filePath: string): void => {
+  createLegacySnapshot(filePath);
+  const db = new DatabaseSync(filePath);
+  try {
+    db.prepare("INSERT INTO books VALUES (?, ?, ?, ?)").run(
+      "book-source-2",
+      "Synthetic Book Two",
+      "2026-02-01T00:00:00.000Z",
+      "2026-02-03T00:00:00.000Z",
+    );
+    const insert = db.prepare("INSERT INTO chapters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    for (const chapterIndex of [1, 2]) {
+      const plaintext = `Second book chapter ${chapterIndex}`;
+      const iv = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", SYNTHETIC_LEGACY_MASTER_KEY, iv);
+      cipher.setAAD(Buffer.from(`chapter:book-source-2:${chapterIndex}`));
+      const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+      insert.run(
+        "book-source-2",
+        chapterIndex,
+        `Second Chapter ${chapterIndex}`,
+        createHmac("sha256", SYNTHETIC_LEGACY_MASTER_KEY).update(plaintext).digest("hex"),
+        ciphertext.toString("base64"),
+        iv.toString("base64"),
+        cipher.getAuthTag().toString("base64"),
+        "aes-256-gcm",
+        `2026-02-0${chapterIndex + 1}T00:00:00.000Z`,
+      );
+    }
+  } finally {
+    db.close();
+  }
+};
