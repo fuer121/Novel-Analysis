@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: e78bf399369eba932213e0026a275f2900584a04
 baseline_status: current
-updated_at: 2026-07-23T11:07:58+08:00
+updated_at: 2026-07-23T11:44:04+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK1-MERGED-TASK2-STARTED
+last_checkpoint: CP-20260723-PHASE5-TASK2-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK2 | phase-5 | In-process re-encryption, per-book transaction and secret-free manifest | unassigned | none | e78bf399369eba932213e0026a275f2900584a04 | e78bf399369eba932213e0026a275f2900584a04 | ready | CP-20260723-PHASE5-TASK1-ACCEPTED | CP-20260723-PHASE5-TASK1-MERGED-TASK2-STARTED | merge contract, create one implementation worktree, then dispatch fresh implementer；synthetic data only |
+| PHASE5-TASK2 | phase-5 | In-process re-encryption, per-book transaction and secret-free manifest | implementer-agent | codex/phase5-task2 | 3395aede518d1ba9b62e276b066ea12fbd5b1131 | b389c3974fbca38b0206e749b57a752dfda3bea0 | accepted | CP-20260723-PHASE5-TASK1-ACCEPTED | CP-20260723-PHASE5-TASK2-ACCEPTED | create implementation PR, wait for CI, merge, then create merged checkpoint and Task 3 Started Contract；synthetic data only |
 
 ## Phase Ledgers
 
@@ -89,7 +89,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Task 1 已合并并完成 post-merge verification；Task 2 contract 已接受，等待治理 PR 合并后从最新 main 创建唯一实现 worktree；Task 3 与所有正式操作未解锁
+Phase 5 Task 1 已合并；Task 2 已通过实现、最终规格与质量验收，等待 implementation PR、CI 与合并；Task 3 与所有正式操作未解锁
 
 ## Next Gate
 
@@ -97,6 +97,7 @@ Phase 5 Task 1 已合并并完成 post-merge verification；Task 2 contract 已�
 
 ## Evidence Index
 
+- [Phase 5 Task 2 accepted](checkpoints/CP-20260723-PHASE5-TASK2-ACCEPTED.md)
 - [Phase 5 Task 1 merged and Task 2 started](checkpoints/CP-20260723-PHASE5-TASK1-MERGED-TASK2-STARTED.md)
 - [Phase 5 Task 1 accepted](checkpoints/CP-20260723-PHASE5-TASK1-ACCEPTED.md)
 - [Phase 5 Task 1 started](checkpoints/CP-20260723-PHASE5-TASK1-STARTED.md)

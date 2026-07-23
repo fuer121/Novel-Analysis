@@ -13,6 +13,7 @@ export {
   type AnalysisRunStatus,
   type AnalysisPartStatus,
 } from "./db.js";
+export { sql } from "kysely";
 export { migrateDown, migrateToLatest, runMigrations } from "./migrate.js";
 export { createContentCipher, type ContentCipher, type EncryptedContent } from "./library/content-encryption.js";
 export { createLibraryRepository } from "./library/library-repository.js";
