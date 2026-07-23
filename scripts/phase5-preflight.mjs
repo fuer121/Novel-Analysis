@@ -11,6 +11,36 @@ function isCanonical32ByteBase64(value) {
   return decoded.length === 32 && decoded.toString("base64") === value;
 }
 
+function isHttpsOrigin(url) {
+  return url.protocol === "https:"
+    && url.username === ""
+    && url.password === ""
+    && url.pathname === "/"
+    && url.search === ""
+    && url.hash === "";
+}
+
+function isPostgresInternal(compose, postgres) {
+  if (postgres?.network_mode === "host") return false;
+  if (postgres?.ports !== undefined
+    && (!Array.isArray(postgres.ports) || postgres.ports.length > 0)) return false;
+  const networkNames = Array.isArray(postgres?.networks)
+    ? postgres.networks
+    : Object.keys(postgres?.networks ?? {});
+  return networkNames.length > 0
+    && networkNames.every((name) => compose?.networks?.[name]?.internal === true);
+}
+
+function hasHealthcheck(service) {
+  const healthcheck = service?.healthcheck;
+  if (!healthcheck || typeof healthcheck !== "object" || Array.isArray(healthcheck)
+    || healthcheck.disable === true) return false;
+  const test = healthcheck.test;
+  if (typeof test === "string") return test.trim() !== "" && test.trim().toUpperCase() !== "NONE";
+  return Array.isArray(test) && test.some((part) => String(part).trim() !== "")
+    && String(test[0]).trim().toUpperCase() !== "NONE";
+}
+
 export function runPreflight(config, composeText) {
   let origin;
   try {
@@ -18,9 +48,9 @@ export function runPreflight(config, composeText) {
   } catch {
     return { ok: false, code: "origin_not_https" };
   }
-  if (origin.protocol !== "https:") return { ok: false, code: "origin_not_https" };
+  if (!isHttpsOrigin(origin)) return { ok: false, code: "origin_not_https" };
 
-  if (config.FEISHU_REDIRECT_URI !== new URL(CALLBACK_PATH, origin).href) {
+  if (config.FEISHU_REDIRECT_URI !== `${origin.origin}${CALLBACK_PATH}`) {
     return { ok: false, code: "callback_mismatch" };
   }
 
@@ -31,11 +61,11 @@ export function runPreflight(config, composeText) {
     return { ok: false, code: "database_exposed" };
   }
   const services = compose?.services ?? {};
-  if (Array.isArray(services.postgres?.ports) && services.postgres.ports.length > 0) {
+  if (!isPostgresInternal(compose, services.postgres)) {
     return { ok: false, code: "database_exposed" };
   }
 
-  if (REQUIRED_SERVICES.some((service) => services[service]?.healthcheck === undefined)) {
+  if (REQUIRED_SERVICES.some((service) => !hasHealthcheck(services[service]))) {
     return { ok: false, code: "healthcheck_missing" };
   }
 
