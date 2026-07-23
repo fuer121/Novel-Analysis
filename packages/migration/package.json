@@ -7,6 +7,8 @@
     ".": "./src/index.ts"
   },
   "scripts": {
+    "build": "vite build --config vite.cli.config.ts",
+    "migration": "npm run build && node dist/cli.js",
     "test": "vitest run --root ../.. --config packages/migration/vitest.config.ts",
     "typecheck": "tsc -p tsconfig.json"
   },
