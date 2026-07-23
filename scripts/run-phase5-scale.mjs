@@ -82,6 +82,14 @@ export function acquirePhase5ScaleLock(cwd = process.cwd()) {
   throw new Error("Unable to acquire Phase 5 scale benchmark isolation lock");
 }
 
+export function stopPhase5ScaleRun(child, signal, release) {
+  if (child) {
+    if (!child.killed) child.kill(signal);
+    return;
+  }
+  release();
+}
+
 async function main() {
   const cwd = process.cwd();
   const lock = acquirePhase5ScaleLock(cwd);
@@ -95,11 +103,7 @@ async function main() {
   };
   const stop = (signal) => {
     stoppingSignal = signal;
-    if (child && !child.killed) {
-      child.kill(signal);
-      return;
-    }
-    release();
+    stopPhase5ScaleRun(child, signal, release);
     process.exitCode = signal === "SIGINT" ? 130 : 143;
   };
   process.once("exit", release);

@@ -7,6 +7,7 @@ import test from "node:test";
 import {
   acquirePhase5ScaleLock,
   phase5ScaleLockPath,
+  stopPhase5ScaleRun,
 } from "../../scripts/run-phase5-scale.mjs";
 
 test("Phase 5 scale lock has a repository-stable path and fails closed", () => {
@@ -68,4 +69,22 @@ test("Phase 5 scale lock recovers a dead owner", () => {
 
   const lock = acquirePhase5ScaleLock(repository);
   lock.release();
+});
+
+test("repeated signals do not release the lock before child exit", () => {
+  let releases = 0;
+  const child = {
+    killed: false,
+    signals: [],
+    kill(signal) {
+      this.killed = true;
+      this.signals.push(signal);
+    },
+  };
+
+  stopPhase5ScaleRun(child, "SIGTERM", () => { releases += 1; });
+  stopPhase5ScaleRun(child, "SIGTERM", () => { releases += 1; });
+
+  assert.deepEqual(child.signals, ["SIGTERM"]);
+  assert.equal(releases, 0);
 });
