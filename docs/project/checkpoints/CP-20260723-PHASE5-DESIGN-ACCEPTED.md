@@ -32,4 +32,3 @@ supersedes: none
 Phase 5 设计已接受，可使用 `writing-plans` 形成 6 至 8 项独立实施任务
 
 实施计划仍需 `GATE-PHASE5-PLAN-APPROVED` 明确通过后才能编码，所有正式数据与外部操作继续需要独立 Gate
-
