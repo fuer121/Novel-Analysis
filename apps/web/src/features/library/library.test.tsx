@@ -77,6 +77,37 @@ describe("book workspace", () => {
     expect(JSON.parse(reorderedBody)).toEqual({ orderedStepIds: [secondId, firstId] });
     expect((await screen.findAllByText(/本$/))[0]?.textContent).toContain("第二本");
     expect(screen.queryByRole("button", { name: /跳过校验/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /全库重建/ })).toBeNull();
+  });
+
+  it("lets admins start a new rebuild after the latest batch reaches a terminal status", async () => {
+    const completed = {
+      job: {
+        id: "00000000-0000-4000-8000-000000000060",
+        type: "library-rebuild",
+        status: "completed",
+        requestedBy: admin.id,
+        scope: { target: "all" },
+        progress: { total: 2, completed: 2, failed: 0, skipped: 0, current: "" },
+        createdAt: book.createdAt,
+        updatedAt: book.createdAt,
+      },
+      steps: [],
+    };
+    let created = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/books") return json({ books: [] });
+      if (url === "/api/admin/library-rebuilds/current") return json({ detail: completed });
+      if (url === "/api/admin/library-rebuilds" && init?.method === "POST") {
+        created = true;
+        return json({ detail: { ...completed, job: { ...completed.job, status: "queued" } } }, 201);
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath("/books", admin);
+    await userEvent.click(await screen.findByRole("button", { name: "重新发起全库重建" }));
+    await waitFor(() => expect(created).toBe(true));
   });
 
   it("keeps analysis entries visible but blocks them until readiness refetch unlocks", async () => {

@@ -4,6 +4,7 @@ import type { PublicJob } from "@novel-analysis/contracts";
 import {
   L1_ROUTE_SCHEMA_VERSION,
   selectCanonicalL1Freshness,
+  type CanonicalVersionSelection,
   type DatabaseConnection,
   type DatabaseExecutor,
 } from "@novel-analysis/database";
@@ -50,8 +51,12 @@ function requestId(bookId: string, value: string): string {
   return `l1:${bookId}:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-async function selectL1Scope(database: DatabaseExecutor, bookId: string): Promise<L1Selection> {
-  const canonical = await selectCanonicalL1Freshness(database, bookId);
+async function selectL1Scope(
+  database: DatabaseExecutor,
+  bookId: string,
+  versions?: CanonicalVersionSelection,
+): Promise<L1Selection> {
+  const canonical = await selectCanonicalL1Freshness(database, bookId, versions);
   if (canonical.kind === "book_not_found") throw new L1BookNotFoundError();
   if (canonical.kind === "configuration_error") throw new L1PromptConfigurationError();
 
@@ -143,12 +148,13 @@ function isLegacyHandoff(row: StoredL1Job, input: { bookId: string; requestId: s
     && Number(row.progress.failed ?? -1) === 0 && Number(row.progress.skipped ?? -1) === 0 && row.progress.current === "";
 }
 
-async function createL1JobInTransaction(database: DatabaseExecutor, input: {
+export async function createL1Job(database: DatabaseExecutor, input: {
   bookId: string;
   requestedBy: string;
   requestId: string;
   scopeHash?: string;
   handoffFromImportJobId?: string;
+  versions?: CanonicalVersionSelection;
 }): Promise<PublicJob> {
   const locked = await database.selectFrom("books").select("id").where("id", "=", input.bookId).forUpdate().executeTakeFirst();
   if (!locked) throw new L1BookNotFoundError();
@@ -171,7 +177,7 @@ async function createL1JobInTransaction(database: DatabaseExecutor, input: {
     ]);
     if (Number(stepCount.count) !== 0 || Number(outboxCount.count) !== 0) throw new L1IdempotencyConflictError();
   }
-  const selection = await selectL1Scope(database, input.bookId);
+  const selection = await selectL1Scope(database, input.bookId, input.versions);
   if (input.scopeHash !== undefined && selection.scopeHash !== input.scopeHash) throw new L1ScopeChangedError();
   if (legacy) {
     const configSnapshot = { scopeHash: selection.scopeHash, prompt: selection.prompt, workflow: selection.workflow, schemaVersion: L1_ROUTE_SCHEMA_VERSION, chapters: selection.chapters, handoffFromImportJobId: input.handoffFromImportJobId! };
@@ -231,17 +237,24 @@ async function createL1JobInTransaction(database: DatabaseExecutor, input: {
 }
 
 export async function createImportL1Job(database: DatabaseExecutor, input: { importJobId: string; bookId: string; requestedBy: string }): Promise<PublicJob> {
-  return createL1JobInTransaction(database, { ...input, requestId: `import-handoff:${input.importJobId}`, handoffFromImportJobId: input.importJobId });
+  return createL1Job(database, { ...input, requestId: `import-handoff:${input.importJobId}`, handoffFromImportJobId: input.importJobId });
+}
+
+export async function previewL1Job(
+  database: DatabaseExecutor,
+  input: { bookId: string; versions?: CanonicalVersionSelection },
+): Promise<L1ScopePreview> {
+  return preview(await selectL1Scope(database, input.bookId, input.versions));
 }
 
 export class L1JobService {
   constructor(private readonly database: DatabaseConnection) {}
 
-  async preview(input: { bookId: string }): Promise<L1ScopePreview> {
-    return preview(await selectL1Scope(this.database, input.bookId));
+  async preview(input: { bookId: string; versions?: CanonicalVersionSelection }): Promise<L1ScopePreview> {
+    return previewL1Job(this.database, input);
   }
 
-  async create(input: { bookId: string; requestedBy: string; requestId: string; scopeHash: string }): Promise<PublicJob> {
-    return this.database.transaction().execute((transaction) => createL1JobInTransaction(transaction, input));
+  async create(input: { bookId: string; requestedBy: string; requestId: string; scopeHash: string; versions?: CanonicalVersionSelection }): Promise<PublicJob> {
+    return this.database.transaction().execute((transaction) => createL1Job(transaction, input));
   }
 }

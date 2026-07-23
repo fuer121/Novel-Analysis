@@ -56,6 +56,8 @@ export function RebuildQueuePanel() {
     onSuccess: (result) => client.setQueryData(key, result),
   });
   const detail = current.data?.detail ?? null;
+  const canCreate = !detail
+    || ["completed", "failed", "cancelled"].includes(detail.job.status);
 
   function move(index: number, offset: -1 | 1): void {
     if (!detail) return;
@@ -77,9 +79,9 @@ export function RebuildQueuePanel() {
         <h2 id="rebuild-queue-title">索引重建队列</h2>
         <p>按书籍持续恢复 L1、L2 与可用性校验</p>
       </div>
-      {!detail && !current.isPending
+      {canCreate && !current.isPending
         ? <button className="secondary-button icon-command" type="button" disabled={create.isPending} onClick={() => create.mutate()}>
-            <RefreshCw size={16} />开始全库重建
+            <RefreshCw size={16} />{detail ? "重新发起全库重建" : "开始全库重建"}
           </button>
         : null}
     </div>

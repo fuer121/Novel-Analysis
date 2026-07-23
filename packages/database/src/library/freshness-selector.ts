@@ -24,6 +24,11 @@ export type CanonicalWorkflow = {
   adapterContractVersion: string;
 };
 
+export type CanonicalVersionSelection = {
+  promptVersionId: string;
+  workflowVersionId: string;
+};
+
 export type CanonicalL1Chapter = {
   chapterId: string;
   chapterIndex: number;
@@ -85,13 +90,25 @@ function validPrompt(content: string, contentHash: string): boolean {
 export async function selectCanonicalL1Freshness(
   database: DatabaseExecutor,
   bookId: string,
+  versions?: CanonicalVersionSelection,
 ): Promise<CanonicalL1Selection | CanonicalSelectionFailure> {
   const book = await database.selectFrom("books").select("id").where("id", "=", bookId).where("status", "=", "active").executeTakeFirst();
   if (!book) return { kind: "book_not_found", chapterTotal: 0 };
 
+  let promptQuery = database.selectFrom("prompt_versions").selectAll()
+    .where("target", "=", "l1-index");
+  let workflowQuery = database.selectFrom("workflow_versions").selectAll()
+    .where("target", "=", "l1-index").where("enabled", "=", true);
+  if (versions) {
+    promptQuery = promptQuery.where("id", "=", versions.promptVersionId);
+    workflowQuery = workflowQuery.where("id", "=", versions.workflowVersionId);
+  } else {
+    promptQuery = promptQuery.orderBy("created_at", "desc").orderBy("id", "desc");
+    workflowQuery = workflowQuery.orderBy("created_at", "desc").orderBy("id", "desc");
+  }
   const [prompt, workflow] = await Promise.all([
-    database.selectFrom("prompt_versions").selectAll().where("target", "=", "l1-index").orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst(),
-    database.selectFrom("workflow_versions").selectAll().where("target", "=", "l1-index").where("enabled", "=", true).orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst(),
+    promptQuery.executeTakeFirst(),
+    workflowQuery.executeTakeFirst(),
   ]);
   if (!prompt || !workflow || !validPrompt(prompt.content, prompt.content_hash)) {
     const count = await database.selectFrom("chapters").select(({ fn }) => fn.countAll<number>().as("count"))
@@ -131,24 +148,34 @@ export async function selectCanonicalL1Freshness(
 
 export async function selectCanonicalL2Freshness(
   database: DatabaseExecutor,
-  input: { bookId: string; groupId: string },
+  input: { bookId: string; groupId: string; versions?: CanonicalVersionSelection },
 ): Promise<CanonicalL2Selection | CanonicalL2SelectionFailure> {
   const book = await database.selectFrom("books").select("id").where("id", "=", input.bookId).where("status", "=", "active").executeTakeFirst();
   if (!book) return { kind: "book_not_found", chapterTotal: 0 };
 
-  const group = await database.selectFrom("index_groups as g")
+  let groupQuery = database.selectFrom("index_groups as g")
     .innerJoin("prompt_versions as p", "p.id", "g.prompt_version_id")
     .select(["g.id", "g.key", "g.name", "g.category_scope", "g.config_hash", "p.id as prompt_id", "p.version as prompt_version", "p.content as prompt_content", "p.content_hash as prompt_hash"])
-    .where("g.id", "=", input.groupId).where("g.book_id", "=", input.bookId).where("g.status", "=", "active").where("p.target", "=", "l2-index").executeTakeFirst();
+    .where("g.id", "=", input.groupId).where("g.book_id", "=", input.bookId)
+    .where("g.status", "=", "active").where("p.target", "=", "l2-index");
+  if (input.versions) {
+    groupQuery = groupQuery.where("p.id", "=", input.versions.promptVersionId);
+  }
+  const group = await groupQuery.executeTakeFirst();
   if (!group) {
     const count = await database.selectFrom("chapters").select(({ fn }) => fn.countAll<number>().as("count"))
       .where("book_id", "=", input.bookId).executeTakeFirstOrThrow();
     return { kind: "index_group_not_found", chapterTotal: Number(count.count) };
   }
 
-  const workflow = await database.selectFrom("workflow_versions").selectAll()
-    .where("target", "=", "l2-index").where("enabled", "=", true)
-    .orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst();
+  let workflowQuery = database.selectFrom("workflow_versions").selectAll()
+    .where("target", "=", "l2-index").where("enabled", "=", true);
+  if (input.versions) {
+    workflowQuery = workflowQuery.where("id", "=", input.versions.workflowVersionId);
+  } else {
+    workflowQuery = workflowQuery.orderBy("created_at", "desc").orderBy("id", "desc");
+  }
+  const workflow = await workflowQuery.executeTakeFirst();
   if (!workflow || !validPrompt(group.prompt_content, group.prompt_hash)) {
     const count = await database.selectFrom("chapters").select(({ fn }) => fn.countAll<number>().as("count"))
       .where("book_id", "=", input.bookId).executeTakeFirstOrThrow();

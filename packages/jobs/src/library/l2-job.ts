@@ -5,6 +5,7 @@ import {
   L2_ADMISSION_VERSION,
   L2_FACT_SCHEMA_VERSION,
   selectCanonicalL2Freshness,
+  type CanonicalVersionSelection,
   type DatabaseConnection,
   type DatabaseExecutor,
 } from "@novel-analysis/database";
@@ -20,13 +21,14 @@ export class L2ConfigurationError extends Error {}
 export class L2ScopeChangedError extends Error {}
 export class L2IdempotencyConflictError extends Error {}
 
-type ScopeInput = {
+export type L2ScopeInput = {
   bookId: string;
   groupId: string;
   startChapter: number;
   endChapter: number;
   mode: L2ScopeMode;
   force: boolean;
+  versions?: CanonicalVersionSelection;
 };
 
 type ChapterSnapshot = {
@@ -63,7 +65,7 @@ function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
 
-function storedRequestId(input: ScopeInput, requestId: string): string {
+function storedRequestId(input: L2ScopeInput, requestId: string): string {
   return `l2:${input.bookId}:${input.groupId}:${hash(requestId)}`;
 }
 
@@ -72,7 +74,7 @@ function preview(selection: Selection): L2ScopePreview {
   return { total, fresh, missing, failed, stale, executable, skipped, scopeHash };
 }
 
-async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promise<Selection> {
+async function selectScope(database: DatabaseExecutor, input: L2ScopeInput): Promise<Selection> {
   const canonical = await selectCanonicalL2Freshness(database, input);
   if (canonical.kind === "book_not_found") throw new L2BookNotFoundError();
   if (canonical.kind === "index_group_not_found") throw new L2IndexGroupNotFoundError();
@@ -126,14 +128,14 @@ async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promi
   };
 }
 
-function replayMatches(row: { type: string; scope: Record<string, unknown>; config_snapshot: Record<string, unknown> }, input: ScopeInput & { scopeHash: string }): boolean {
+function replayMatches(row: { type: string; scope: Record<string, unknown>; config_snapshot: Record<string, unknown> }, input: L2ScopeInput & { scopeHash: string }): boolean {
   return row.type === "l2-index" && row.scope.bookId === input.bookId
     && Array.isArray(row.scope.indexGroupKeys) && row.scope.indexGroupKeys.length === 1 && row.scope.indexGroupKeys[0] === input.groupId
     && row.scope.startChapter === input.startChapter && row.scope.endChapter === input.endChapter && row.scope.mode === input.mode
     && row.config_snapshot.force === input.force && row.config_snapshot.scopeHash === input.scopeHash;
 }
 
-async function createInTransaction(database: DatabaseExecutor, input: ScopeInput & { requestedBy: string; requestId: string; scopeHash: string }): Promise<PublicJob> {
+export async function createL2Job(database: DatabaseExecutor, input: L2ScopeInput & { requestedBy: string; requestId: string; scopeHash: string }): Promise<PublicJob> {
   const locked = await database.selectFrom("index_groups").select("id").where("id", "=", input.groupId).where("book_id", "=", input.bookId).forUpdate().executeTakeFirst();
   if (!locked) throw new L2IndexGroupNotFoundError();
   const requestId = storedRequestId(input, input.requestId);
@@ -179,11 +181,18 @@ export class L2JobService {
     return { total: selection.total, fresh: selection.fresh, missing: selection.missing, failed: selection.failed, stale: selection.stale };
   }
 
-  async preview(input: ScopeInput): Promise<L2ScopePreview> {
-    return preview(await selectScope(this.database, input));
+  async preview(input: L2ScopeInput): Promise<L2ScopePreview> {
+    return previewL2Job(this.database, input);
   }
 
-  async create(input: ScopeInput & { requestedBy: string; requestId: string; scopeHash: string }): Promise<PublicJob> {
-    return this.database.transaction().execute((transaction) => createInTransaction(transaction, input));
+  async create(input: L2ScopeInput & { requestedBy: string; requestId: string; scopeHash: string }): Promise<PublicJob> {
+    return this.database.transaction().execute((transaction) => createL2Job(transaction, input));
   }
+}
+
+export async function previewL2Job(
+  database: DatabaseExecutor,
+  input: L2ScopeInput,
+): Promise<L2ScopePreview> {
+  return preview(await selectScope(database, input));
 }

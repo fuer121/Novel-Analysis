@@ -3,13 +3,18 @@ import {
   getBookAnalysisReadiness,
   sql,
   type DatabaseConnection,
+  type DatabaseExecutor,
 } from "@novel-analysis/database";
 import {
+  createL1Job,
+  createL2Job,
   ensureBaselineBaseGroup,
-  L1JobService,
-  L2JobService,
   loadApprovedIndexingBaseline,
   PostgresStepLeaseService,
+  previewL1Job,
+  previewL2Job,
+  seedIndexingBaseline,
+  type ApprovedIndexingBaseline,
   type ClaimedStep,
 } from "@novel-analysis/jobs";
 
@@ -49,30 +54,31 @@ export class RebuildExecutor {
     const baseline = await loadApprovedIndexingBaseline();
 
     if (ref.stage === "waiting") {
-      const next = await this.createL1(ref, stored.requested_by, claim.stepId);
-      return this.defer(claim, next);
+      return this.deferWithEffect(claim, (database) =>
+        this.createL1(database, ref, stored.requested_by, claim.stepId, baseline));
     }
     if (ref.stage === "l1") {
       const current = ref.l1JobId
         ? await this.childStatus(ref.l1JobId, "l1-index")
         : null;
-      if (!current) return this.defer(claim, await this.createL1(ref, stored.requested_by, claim.stepId));
+      if (!current) {
+        return this.deferWithEffect(claim, (database) =>
+          this.createL1(database, ref, stored.requested_by, claim.stepId, baseline));
+      }
       if (current === "failed" || current === "cancelled") {
         return failImportClaim(this.options.database, claim, "rebuild_l1_failed");
       }
       if (current !== "completed") return this.defer(claim, ref);
-      const baseGroupId = await this.options.database.transaction().execute((transaction) =>
-        ensureBaselineBaseGroup(transaction, { bookId: ref.bookId, baseline }));
-      const l2 = await this.createL2({ ...ref, baseGroupId }, stored.requested_by, claim.stepId);
-      return this.defer(claim, l2);
+      return this.deferWithEffect(claim, (database) =>
+        this.createL2(database, ref, stored.requested_by, claim.stepId, baseline));
     }
     if (ref.stage === "l2") {
       const current = ref.l2JobId
         ? await this.childStatus(ref.l2JobId, "l2-index")
         : null;
       if (!current) {
-        const recovered = await this.createL2(ref, stored.requested_by, claim.stepId);
-        return this.defer(claim, recovered);
+        return this.deferWithEffect(claim, (database) =>
+          this.createL2(database, ref, stored.requested_by, claim.stepId, baseline));
       }
       if (current === "failed" || current === "cancelled") {
         return failImportClaim(this.options.database, claim, "rebuild_l2_failed");
@@ -111,6 +117,17 @@ export class RebuildExecutor {
     return this.leases.deferStep(claim, ref, this.options.deferDelayMs ?? 1_000);
   }
 
+  private deferWithEffect(
+    claim: ClaimedStep,
+    effect: (database: DatabaseExecutor) => Promise<RebuildStepRef>,
+  ) {
+    return this.leases.deferStepWithEffect(
+      claim,
+      effect,
+      this.options.deferDelayMs ?? 1_000,
+    );
+  }
+
   private async childStatus(jobId: string, type: "l1-index" | "l2-index") {
     const child = await this.options.database.selectFrom("jobs").select(["type", "status"])
       .where("id", "=", jobId).executeTakeFirst();
@@ -118,33 +135,48 @@ export class RebuildExecutor {
   }
 
   private async createL1(
+    database: DatabaseExecutor,
     ref: RebuildStepRef,
     requestedBy: string,
     parentStepId: string,
+    baseline: ApprovedIndexingBaseline,
   ): Promise<RebuildStepRef> {
-    const service = new L1JobService(this.options.database);
-    const preview = await service.preview({ bookId: ref.bookId });
-    const child = await service.create({
+    const seeded = await seedIndexingBaseline(database, baseline);
+    const versions = {
+      promptVersionId: seeded.l1PromptId,
+      workflowVersionId: seeded.l1WorkflowId,
+    };
+    const preview = await previewL1Job(database, { bookId: ref.bookId, versions });
+    const child = await createL1Job(database, {
       bookId: ref.bookId,
       requestedBy,
       requestId: `library-rebuild:${parentStepId}:l1`,
       scopeHash: preview.scopeHash,
+      versions,
     });
     return { ...ref, stage: "l1", l1JobId: child.id };
   }
 
   private async createL2(
+    database: DatabaseExecutor,
     ref: RebuildStepRef,
     requestedBy: string,
     parentStepId: string,
+    baseline: ApprovedIndexingBaseline,
   ): Promise<RebuildStepRef> {
-    const baseline = await loadApprovedIndexingBaseline();
-    const baseGroupId = ref.baseGroupId ?? await this.options.database.transaction()
-      .execute((transaction) => ensureBaselineBaseGroup(transaction, {
-        bookId: ref.bookId,
-        baseline,
-      }));
-    const last = await this.options.database.selectFrom("chapters").select("chapter_index")
+    const seeded = await seedIndexingBaseline(database, baseline);
+    const versions = {
+      promptVersionId: seeded.l2PromptId,
+      workflowVersionId: seeded.l2WorkflowId,
+    };
+    const baseGroupId = await ensureBaselineBaseGroup(database, {
+      bookId: ref.bookId,
+      baseline,
+    });
+    if (ref.baseGroupId && ref.baseGroupId !== baseGroupId) {
+      throw new Error("Stored rebuild base group conflicts with approved baseline");
+    }
+    const last = await database.selectFrom("chapters").select("chapter_index")
       .where("book_id", "=", ref.bookId).orderBy("chapter_index", "desc").executeTakeFirst();
     const scope = {
       bookId: ref.bookId,
@@ -154,13 +186,13 @@ export class RebuildExecutor {
       mode: "missing" as const,
       force: false,
     };
-    const service = new L2JobService(this.options.database);
-    const preview = await service.preview(scope);
-    const child = await service.create({
+    const preview = await previewL2Job(database, { ...scope, versions });
+    const child = await createL2Job(database, {
       ...scope,
       requestedBy,
       requestId: `library-rebuild:${parentStepId}:l2`,
       scopeHash: preview.scopeHash,
+      versions,
     });
     return {
       ...ref,

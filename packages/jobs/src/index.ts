@@ -5,6 +5,7 @@ export * from "./job-repository.js";
 export * from "./outbox-dispatcher.js";
 export * from "./step-leases.js";
 export * from "./library/import-job.js";
+export { createL1Job, previewL1Job } from "./library/l1-job.js";
 export * from "./library/l2-job.js";
 export * from "./library/rebuild-job.js";
 export * from "./query/query-job.js";

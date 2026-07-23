@@ -28,6 +28,7 @@ export {
   type CanonicalL1Selection,
   type CanonicalL2Chapter,
   type CanonicalL2Selection,
+  type CanonicalVersionSelection,
 } from "./library/freshness-selector.js";
 export { getBookAnalysisReadiness, type BookAnalysisReadinessResult } from "./library/rebuild-readiness.js";
 export { createQueryRepository, type QueryActor, type QuerySession, type QueryTurn, type QueryTurnDetail, type QueryTurnEvidence, type QueryTurnPage, type CreateQuerySessionInput, type ManageQuerySessionInput, type CreateQueryTurnInput, type CommitTurnEvidenceInput, type CompleteTurnInput } from "./query/query-repository.js";

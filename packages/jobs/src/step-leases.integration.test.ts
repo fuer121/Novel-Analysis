@@ -68,4 +68,36 @@ describe("deferred step transition", () => {
     expect(after).toEqual(original);
     expect(after.lease_owner).toBe(current.workerId);
   });
+
+  it("rolls back callback effects when the lease expires inside the fenced transaction", async () => {
+    const claimed = (await leases.claimNext(jobId, "worker-a", new Date()))!;
+    const lease = await postgres.db.updateTable("job_steps").set({
+      lease_expires_at: sql<Date>`clock_timestamp() + interval '200 milliseconds'`,
+    }).where("id", "=", claimed.stepId).returning("lease_expires_at").executeTakeFirstOrThrow();
+    const claim = { ...claimed, leaseExpiresAt: lease.lease_expires_at! };
+    const bookId = (await postgres.db.selectFrom("books").select("id")
+      .executeTakeFirstOrThrow()).id;
+
+    await expect(leases.deferStepWithEffect(claim, async (transaction) => {
+      await transaction.insertInto("job_events").values({
+        job_id: jobId,
+        type: "progress",
+        dedupe_key: "fenced-effect",
+        payload: { shouldRollback: true },
+      }).execute();
+      await sql`select pg_sleep(0.4)`.execute(transaction);
+      return { bookId, stage: "l1", l1JobId: crypto.randomUUID() };
+    }, 0)).resolves.toEqual({ disposition: "terminal-noop" });
+
+    expect(await postgres.db.selectFrom("job_events").select("id")
+      .where("job_id", "=", jobId).where("dedupe_key", "=", "fenced-effect").execute())
+      .toEqual([]);
+    expect(await postgres.db.selectFrom("job_steps").select(["status", "output_ref"])
+      .where("id", "=", claim.stepId).executeTakeFirstOrThrow()).toMatchObject({
+      status: "running",
+      output_ref: { bookId, stage: "waiting" },
+    });
+    expect((await postgres.db.selectFrom("job_attempts").select("status")
+      .where("id", "=", claim.attemptId).executeTakeFirstOrThrow()).status).toBe("running");
+  });
 });

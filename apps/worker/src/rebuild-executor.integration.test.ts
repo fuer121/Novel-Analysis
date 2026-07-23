@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { sql } from "kysely";
 
@@ -130,5 +131,83 @@ describe("recoverable library rebuild executor", () => {
       .where("type", "=", "l1-index").execute()).toEqual([]);
     expect((await postgres.db.selectFrom("job_steps").select("status")
       .where("id", "=", stale.stepId).executeTakeFirstOrThrow()).status).toBe("running");
+  });
+
+  it("binds L1 and L2 children to the approved baseline when newer configuration exists", async () => {
+    const driftContent = "newer unapproved prompt";
+    await postgres.db.insertInto("prompt_versions").values({
+      target: "l1-index",
+      version: "unapproved-l1",
+      content: driftContent,
+      content_hash: createHash("sha256").update(driftContent).digest("hex"),
+    }).execute();
+    await postgres.db.insertInto("workflow_versions").values([
+      { target: "l1-index", contract_version: "unapproved-l1", dsl_hash: "unapproved-l1-dsl" },
+      { target: "l2-index", contract_version: "unapproved-l2", dsl_hash: "unapproved-l2-dsl" },
+    ]).execute();
+
+    await runParent();
+    let parent = await new LibraryRebuildJobService(postgres.db).get(parentJobId);
+    const l1JobId = parent!.steps[0]!.ref.l1JobId!;
+    const l1Snapshot = (await postgres.db.selectFrom("jobs").select("config_snapshot")
+      .where("id", "=", l1JobId).executeTakeFirstOrThrow()).config_snapshot;
+    expect(l1Snapshot).toMatchObject({
+      prompt: { version: "phase5-l1-v1" },
+      workflow: {
+        contractVersion: "l1-route-v1",
+        dslHash: "ebd3d3b403e9dd10bc6f5f0a2a16e94c7cfe94dc5c83ed766b34ba9f00190bf9",
+      },
+    });
+
+    await runChild(l1JobId, "l1-index");
+    await runParent();
+    parent = await new LibraryRebuildJobService(postgres.db).get(parentJobId);
+    const l2Snapshot = (await postgres.db.selectFrom("jobs").select("config_snapshot")
+      .where("id", "=", parent!.steps[0]!.ref.l2JobId!).executeTakeFirstOrThrow()).config_snapshot;
+    expect(l2Snapshot).toMatchObject({
+      prompt: { version: "phase5-l2-v1" },
+      workflow: {
+        contractVersion: "l2-fact-v1",
+        dslHash: "b8003c60302c80d017eb00eac16ed18b0d4dba6df6073c6eb1735a2139ae4894",
+      },
+    });
+  });
+
+  it("leaves no base group or L2 child when authority is reclaimed after the entry check", async () => {
+    await runParent();
+    const l1JobId = (await new LibraryRebuildJobService(postgres.db)
+      .get(parentJobId))!.steps[0]!.ref.l1JobId!;
+    await runChild(l1JobId, "l1-index");
+    const stale = (await parentLeases().claimNext(parentJobId, "stale-after-check", new Date()))!;
+    const executor = new RebuildExecutor({ database: postgres.db, deferDelayMs: 0 });
+    const internal = executor as unknown as {
+      isCurrent(claim: typeof stale): Promise<boolean>;
+    };
+    const originalIsCurrent = internal.isCurrent.bind(executor);
+    let releaseEntry!: () => void;
+    let notifyChecked!: () => void;
+    const checked = new Promise<void>((resolve) => { notifyChecked = resolve; });
+    const entryGate = new Promise<void>((resolve) => { releaseEntry = resolve; });
+    internal.isCurrent = async (claim) => {
+      const current = await originalIsCurrent(claim);
+      notifyChecked();
+      await entryGate;
+      return current;
+    };
+
+    const staleExecution = executor.execute(stale);
+    await checked;
+    await postgres.db.updateTable("job_steps").set({
+      lease_expires_at: sql<Date>`clock_timestamp() - interval '1 second'`,
+    }).where("id", "=", stale.stepId).execute();
+    const current = await parentLeases().claimNext(parentJobId, "current-worker", new Date());
+    releaseEntry();
+
+    await expect(staleExecution).resolves.toEqual({ disposition: "terminal-noop" });
+    expect(current).toMatchObject({ stepId: stale.stepId, attemptNo: stale.attemptNo + 1 });
+    expect(await postgres.db.selectFrom("index_groups").select("id")
+      .where("book_id", "=", bookId).execute()).toEqual([]);
+    expect(await postgres.db.selectFrom("jobs").select("id")
+      .where("type", "=", "l2-index").execute()).toEqual([]);
   });
 });
