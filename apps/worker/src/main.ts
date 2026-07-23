@@ -14,6 +14,7 @@ import {
 import { LibraryImportExecutor } from "./library-executor.js";
 import { AnalysisExecutor } from "./analysis-executor.js";
 import { QueryExecutor } from "./query-executor.js";
+import { RebuildExecutor } from "./rebuild-executor.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
@@ -53,7 +54,13 @@ const queryExecutor = cipher
 const analysisExecutor = cipher
   ? new AnalysisExecutor({ database, cipher, dify: queryConfig.analysisSummaryKey ? adapter : undefined, executionConfig: analysisConfig })
   : undefined;
-const executor = createWorkerStepExecutor({ database, libraryExecutor, queryExecutor, analysisExecutor });
+const executor = createWorkerStepExecutor({
+  database,
+  libraryExecutor,
+  rebuildExecutor: new RebuildExecutor({ database }),
+  queryExecutor,
+  analysisExecutor,
+});
 const productionBarrier: ExecutionBarrier = {
   async afterAttemptStarted() {},
 };

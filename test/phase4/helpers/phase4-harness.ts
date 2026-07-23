@@ -18,6 +18,7 @@ import {
   createLibraryRepository,
   type DatabaseConnection,
 } from "@novel-analysis/database";
+import { buildL1Signature, buildL2Signature } from "@novel-analysis/domain";
 import {
   L1_ROUTE_SCHEMA_VERSION,
   L2_ADMISSION_VERSION,
@@ -360,10 +361,11 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
           contentHash: createHash("sha256").update(l2PromptContent).digest("hex"),
         });
         const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "phase4-l1-v1", dslHash: "phase4-l1-dsl" });
+        const l2Workflow = await indexes.createWorkflowVersion({ target: "l2-index", contractVersion: "phase4-l2-v1", dslHash: "phase4-l2-dsl" });
         const summaryWorkflow = await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "phase4-summary-v1", dslHash: "phase4-summary-dsl" });
         const group = await indexes.createIndexGroup({
           bookId: book.id,
-          key: "general",
+          key: "base",
           name: "Phase 4 General",
           categoryScope: "general",
           promptVersionId: l2Prompt.id,
@@ -400,15 +402,34 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
             signals: [],
             category_scores: {},
           };
+          const l1Signature = buildL1Signature({
+            sourceVersion: "phase4-source-v1",
+            chapterHmac: `phase4-hmac-${position}`,
+            promptHash: l1Prompt.content_hash,
+            workflowDslHash: l1Workflow.dsl_hash,
+            adapterContractVersion: l1Workflow.contract_version,
+            schemaVersion: L1_ROUTE_SCHEMA_VERSION,
+          });
           const l1 = await indexes.putL1Index({
             chapterId: chapter.id,
             promptVersionId: l1Prompt.id,
             workflowVersionId: l1Workflow.id,
-            inputSignature: `phase4-l1-${position}`,
+            inputSignature: l1Signature,
             status: "fresh",
             route,
           });
-          await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: `phase4-l2-${position}`, status: "fresh" });
+          const l2Signature = buildL2Signature({
+            sourceVersion: "phase4-source-v1",
+            chapterHmac: `phase4-hmac-${position}`,
+            promptHash: l2Prompt.content_hash,
+            workflowDslHash: l2Workflow.dsl_hash,
+            adapterContractVersion: l2Workflow.contract_version,
+            schemaVersion: L2_FACT_SCHEMA_VERSION,
+            admissionVersion: L2_ADMISSION_VERSION,
+            indexGroupConfigHash: "phase4-group-v1",
+            l1Signature,
+          });
+          await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: l2Signature, status: "fresh" });
           const metadata = risk.get(position) ?? { importance: 0.1, confidence: 0.9 };
           const fact = await indexes.addFact({
             groupId: group.id,
@@ -427,12 +448,12 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
               id: l1.id,
               promptVersionId: l1Prompt.id,
               workflowVersionId: l1Workflow.id,
-              inputSignature: `phase4-l1-${position}`,
+              inputSignature: l1Signature,
               status: "fresh",
               route,
             },
             l2: {
-              inputSignature: `phase4-l2-${position}`,
+              inputSignature: l2Signature,
               status: "fresh",
               facts: [{
                 id: fact.id,
@@ -492,7 +513,7 @@ export async function startPhase4ProcessHarness(): Promise<Phase4ProcessHarness>
               range: { startChapter: 1, endChapter: 100 },
               indexGroup: {
                 id: group.id,
-                key: "general",
+                key: "base",
                 name: "Phase 4 General",
                 categoryScope: "general",
                 configHash: "phase4-group-v1",

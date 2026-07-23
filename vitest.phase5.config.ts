@@ -4,8 +4,8 @@ export default defineConfig({
   test: {
     environment: "node",
     include: [
+      "test/phase5/**/*.e2e.test.ts",
       "test/phase5/**/*.integration.test.ts",
-      "packages/migration/src/**/*.integration.test.ts",
     ],
     testTimeout: 60_000,
     hookTimeout: 60_000,

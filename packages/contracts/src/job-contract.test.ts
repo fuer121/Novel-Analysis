@@ -8,6 +8,7 @@ import {
   JobResponseSchema,
   JobScopeSchema,
   PublicJobSchema,
+  RebuildStepRefSchema,
 } from "./job-contract.js";
 import type { JobProgress } from "./job-contract.js";
 
@@ -97,6 +98,31 @@ describe("job contracts", () => {
         sourceLabel: "正式 SQLite 快照",
       },
     }).type).toBe("migration");
+  });
+
+  it("accepts only the global library rebuild scope and strict persisted step references", () => {
+    expect(PublicJobSchema.parse({
+      ...validJob,
+      type: "library-rebuild",
+      scope: { target: "all" },
+    }).type).toBe("library-rebuild");
+    expect(RebuildStepRefSchema.parse({
+      bookId: "2152434a-02fd-4a67-95cd-d1a574c1695f",
+      stage: "l2",
+      l1JobId: validJob.id,
+      l2JobId: "c5c5cac7-3fe5-4dc8-93d2-1d0252a4ab87",
+      baseGroupId: "9e8d8997-b0d1-4bd7-8ec4-b1b2b0b61009",
+    }).stage).toBe("l2");
+    expect(() => RebuildStepRefSchema.parse({
+      bookId: "2152434a-02fd-4a67-95cd-d1a574c1695f",
+      stage: "waiting",
+      token: "must-not-be-persisted",
+    })).toThrow();
+    expect(() => PublicJobSchema.parse({
+      ...validJob,
+      type: "library-rebuild",
+      scope: { target: "some" },
+    })).toThrow();
   });
 
   it("rejects an unknown status", () => {

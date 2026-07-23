@@ -15,6 +15,7 @@ import { createQuerySessionsRouter } from "./routes/query-sessions.js";
 import { createAdvancedAnalysisRouter } from "./routes/advanced-analysis.js";
 import { createAdminAnalysisJobsRouter } from "./routes/admin-analysis-jobs.js";
 import { createLegacyAnalysisRouter } from "./routes/legacy-analysis.js";
+import { createAdminRebuildRouter } from "./routes/admin-rebuild.js";
 import { EMPTY_LEGACY_ANALYSIS_READER, type LegacyAnalysisReader } from "./legacy-analysis.js";
 
 export interface CreateAppOptions {
@@ -38,6 +39,7 @@ export function createApp(options: CreateAppOptions): Express {
   app.use("/api/auth", createAuthRouter({ ...options, logger }));
   app.use("/api/admin/members", createAdminMembersRouter(options.database, options.config));
   app.use("/api/admin/advanced-analysis", createAdminAnalysisJobsRouter(options.database, options.config));
+  app.use("/api/admin/library-rebuilds", createAdminRebuildRouter(options.database, options.config));
   app.use("/api/job-events", createJobEventsRouter(options.database, options.config));
   app.use("/api/jobs", createJobsRouter(options.database, options.config));
   app.use("/api/books", createBooksRouter(options.database, options.config));
