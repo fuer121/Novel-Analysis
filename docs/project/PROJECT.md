@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: d922877ce826d6794daf096fe76d4be0ec96650c
+baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-23T20:54:10+08:00
+updated_at: 2026-07-23T20:59:36+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK8-ACCEPTED
+last_checkpoint: CP-20260723-PHASE5-TASK8-MERGED-TOOLS-GATE-SUBMITTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `d922877ce826d6794daf096fe76d4be0ec96650c` |
-| Latest merged implementation | PR #149 `https://github.com/fuer121/Novel-Analysis/pull/149` |
+| Accepted implementation baseline | `069e3f399d6ac06eec9b64fdb85436ad6cc9f846` |
+| Latest merged implementation | PR #150 `https://github.com/fuer121/Novel-Analysis/pull/150` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK8 | phase-5 | Thin evidence aggregator与engineering Gate dossier | controller-agent | codex/phase5-task8 | d922877ce826d6794daf096fe76d4be0ec96650c | f32d4228ac4b5582f61e3aaa2493cc4bd79dcac0 | accepted | CP-20260723-PHASE5-TASK7-MERGED-TASK8-STARTED | CP-20260723-PHASE5-TASK8-ACCEPTED | create PR and merge after CI |
+| GATE-PHASE5-TOOLS-ACCEPTED | phase-5 | Engineering tools Gate decision | user | none | 069e3f399d6ac06eec9b64fdb85436ad6cc9f846 | 069e3f399d6ac06eec9b64fdb85436ad6cc9f846 | ready | CP-20260723-PHASE5-TASK8-MERGED-TOOLS-GATE-SUBMITTED | CP-20260723-PHASE5-TOOLS-GATE-SUBMITTED | await explicit user Gate decision |
 
 ## Phase Ledgers
 
@@ -94,7 +94,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-7已合并并post-merge verified；Task 8 thin aggregator、spec、quality与controller verification已accepted，等待PR与CI；所有formal operation Gates仍未解锁
+Phase 5 Tasks 1–8 engineering tools已合并并post-merge verified；`GATE-PHASE5-TOOLS-ACCEPTED`已submitted并等待用户明确决策；所有formal operation Gates仍未解锁
 
 ## Next Gate
 
@@ -102,6 +102,8 @@ Phase 5 Tasks 1-7已合并并post-merge verified；Task 8 thin aggregator、spec
 
 ## Evidence Index
 
+- [Phase 5 Task 8 merged and tools Gate submitted](checkpoints/CP-20260723-PHASE5-TASK8-MERGED-TOOLS-GATE-SUBMITTED.md)
+- [Phase 5 tools Gate submitted](checkpoints/CP-20260723-PHASE5-TOOLS-GATE-SUBMITTED.md)
 - [Phase 5 Task 8 accepted](checkpoints/CP-20260723-PHASE5-TASK8-ACCEPTED.md)
 - [Phase 5 Task 7 merged and Task 8 started](checkpoints/CP-20260723-PHASE5-TASK7-MERGED-TASK8-STARTED.md)
 - [Phase 5 Task 7 accepted](checkpoints/CP-20260723-PHASE5-TASK7-ACCEPTED.md)
