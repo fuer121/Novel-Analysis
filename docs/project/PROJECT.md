@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f207db4310b944eb0114a28ccde03bf973636161
 baseline_status: current
-updated_at: 2026-07-23T09:28:49+08:00
+updated_at: 2026-07-23T09:59:41+08:00
 updated_by: controller-agent
 current_phase: phase-5-planning
 last_checkpoint: CP-20260723-PHASE5-DESIGN-ACCEPTED
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-PLAN | phase-5 | Migration、performance、UAT and cutover planning | controller-agent | codex/phase5-design | fd0702e917ed08778898cc0fbb7cf1442576daf7 | 3d7e43d94dfd4e18c861e9ff3ebb91b5404abf37 | ready | CP-20260723-PHASE5-DESIGN-ACCEPTED | CP-20260723-PHASE5-DESIGN-ACCEPTED | write 6-8 task implementation plan；no implementation or formal operations |
+| PHASE5-PLAN | phase-5 | Migration、rebuild、performance and operations implementation plan | controller-agent | codex/phase5-plan | f71782e5a35ae694092a2e336a91c0b1221a1993 | f71782e5a35ae694092a2e336a91c0b1221a1993 | review | CP-20260723-PHASE5-DESIGN-ACCEPTED | CP-20260723-PHASE5-PLAN-SUBMITTED | decide GATE-PHASE5-PLAN-APPROVED；no implementation or formal operations |
 
 ## Phase Ledgers
 
@@ -89,7 +89,7 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 
 ## Pending Feedback
 
-Phase 5 设计已接受，可编写 6 至 8 项实施计划；编码、正式快照、旧密钥、飞书配置、UAT、部署与切换仍未授权
+Phase 5 的 8 项实施计划已提交 Gate 复核；编码、正式快照、旧密钥、飞书配置、UAT、部署与切换仍未授权
 
 ## Next Gate
 
@@ -97,6 +97,8 @@ Phase 5 设计已接受，可编写 6 至 8 项实施计划；编码、正式快
 
 ## Evidence Index
 
+- [Phase 5 plan submitted](checkpoints/CP-20260723-PHASE5-PLAN-SUBMITTED.md)
+- [Phase 5 implementation plan](../superpowers/plans/2026-07-23-phase-5-migration-cutover-implementation-plan.md)
 - [Phase 5 design accepted](checkpoints/CP-20260723-PHASE5-DESIGN-ACCEPTED.md)
 - [Phase 5 selective migration decision](decisions/DEC-0017-phase5-selective-migration-and-no-entry-rollback.md)
 - [Phase 5 design submitted](checkpoints/CP-20260723-PHASE5-DESIGN-SUBMITTED.md)
