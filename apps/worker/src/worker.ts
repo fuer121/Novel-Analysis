@@ -12,6 +12,7 @@ import {
 import { failImportClaim, type LibraryImportExecutor } from "./library-executor.js";
 import type { AnalysisExecutor } from "./analysis-executor.js";
 import type { QueryExecutor } from "./query-executor.js";
+import type { RebuildExecutor } from "./rebuild-executor.js";
 
 export const BACKGROUND_WAKE_QUEUE = "jobs.wake";
 export const INTERACTIVE_WAKE_QUEUE = "jobs.query.wake";
@@ -128,13 +129,18 @@ export function parseLibraryRuntimeConfig(environment: Record<string, string | u
   return { baseUrl: url!.toString().replace(/\/$/, ""), chapterImportKey: environment.DIFY_CHAPTER_IMPORT_KEY!, l1WorkflowKey: environment.DIFY_L1_WORKFLOW_API_KEY!, l2WorkflowKey: environment.DIFY_L2_WORKFLOW_API_KEY!, contentKey: contentKey!, contentKeyVersion: environment.CONTENT_ENCRYPTION_KEY_VERSION!, hmacKey: hmacKey! };
 }
 
-export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor; queryExecutor?: Pick<QueryExecutor, "execute">; analysisExecutor?: Pick<AnalysisExecutor, "execute"> }): StepExecutor {
+export function createWorkerStepExecutor(options: { database: DatabaseConnection; libraryExecutor?: LibraryImportExecutor; rebuildExecutor?: Pick<RebuildExecutor, "execute">; queryExecutor?: Pick<QueryExecutor, "execute">; analysisExecutor?: Pick<AnalysisExecutor, "execute"> }): StepExecutor {
   const example = new ExampleExecutor();
   return {
     execute(claim) {
       if (claim.kind === "chapter-import" || claim.kind === "l1-index" || claim.kind === "l2-index") {
         return options.libraryExecutor
           ? options.libraryExecutor.execute(claim)
+          : failImportClaim(options.database, claim, "configuration_error");
+      }
+      if (claim.kind === "library-rebuild-book") {
+        return options.rebuildExecutor
+          ? options.rebuildExecutor.execute(claim)
           : failImportClaim(options.database, claim, "configuration_error");
       }
       if (["l2-query", "query-summary-retry", "query-local-summary"].includes(claim.kind)) {
@@ -318,6 +324,10 @@ export class JobWorker {
         attemptNo: claim.attemptNo,
       });
       const output = await this.executor.execute(claim);
+      if (claim.kind === "library-rebuild-book"
+        && output && typeof output === "object" && "disposition" in output) {
+        return;
+      }
       if (claim.kind === "chapter-import" && output && typeof output === "object" && "disposition" in output) {
         const disposition = (output as { disposition?: string }).disposition;
         if (disposition !== "completed") return;

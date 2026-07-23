@@ -103,6 +103,16 @@ progress { display: block; width: 92px; height: 5px; margin-top: 6px; accent-col
 .book-create-form .button-row { grid-column: 1 / -1; }
 .form-error { grid-column: 1 / -1; margin: 0; color: #a13232; }
 .book-list { border-top: 1px solid #dfe4ea; }
+.rebuild-queue { margin-bottom: 26px; padding: 18px 0; border-top: 1px solid #dfe4ea; border-bottom: 1px solid #dfe4ea; }
+.rebuild-summary { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; color: #596579; }
+.rebuild-summary strong { color: #17202a; font-size: 20px; font-variant-numeric: tabular-nums; }
+.rebuild-steps { margin: 0; padding: 0; list-style: none; border-top: 1px solid #edf0f3; }
+.rebuild-steps li { display: grid; grid-template-columns: 100px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 54px; border-bottom: 1px solid #edf0f3; }
+.rebuild-steps small { grid-column: 2; color: #a13232; }
+.rebuild-stage { font-size: 12px; }
+.rebuild-order-actions { display: flex; gap: 4px; }
+.rebuild-order-actions button { width: 32px; height: 32px; display: grid; place-items: center; border: 1px solid #cfd7e2; border-radius: 4px; background: #fff; color: #344054; }
+.rebuild-order-actions button:disabled { color: #a7b0bd; background: #f5f7f9; }
 .book-row { display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 14px; min-height: 74px; padding: 14px 8px; border-bottom: 1px solid #dfe4ea; text-decoration: none; background: #fff; }
 .book-row:hover { background: #f8fbff; }
 .book-row strong, .book-row small { display: block; }

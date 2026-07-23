@@ -1,6 +1,7 @@
 import { sql } from "kysely";
 
-import type { DatabaseConnection } from "@novel-analysis/database";
+import type { DatabaseConnection, DatabaseExecutor } from "@novel-analysis/database";
+import { RebuildStepRefSchema, type RebuildStepRef } from "@novel-analysis/contracts";
 
 const DEFAULT_LEASE_DURATION_MS = 30_000;
 
@@ -30,6 +31,10 @@ export type CompletionDisposition =
   | "paused-boundary"
   | "discarded-cancelled"
   | "terminal-noop";
+
+export type DeferDisposition = "deferred" | Exclude<CompletionDisposition, "completed">;
+
+class StaleDeferredClaimError extends Error {}
 
 export interface StepLeaseService {
   claimNext(jobId: string, workerId: string, now: Date): Promise<ClaimedStep | null>;
@@ -258,6 +263,104 @@ export class PostgresStepLeaseService implements StepLeaseService {
         }).execute();
       }
       return { disposition: "completed" };
+    });
+  }
+
+  deferStep(
+    claim: ClaimedStep,
+    outputRef: RebuildStepRef,
+    delayMs = 1_000,
+  ): Promise<{ disposition: DeferDisposition }> {
+    const validatedRef = RebuildStepRefSchema.parse(outputRef);
+    return this.deferStepWithEffect(claim, async () => validatedRef, delayMs);
+  }
+
+  deferStepWithEffect(
+    claim: ClaimedStep,
+    effect: (database: DatabaseExecutor) => Promise<RebuildStepRef>,
+    delayMs = 1_000,
+  ): Promise<{ disposition: DeferDisposition }> {
+    if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
+      return Promise.reject(new Error("Invalid defer delay"));
+    }
+    return this.options.database.transaction().execute(async (transaction): Promise<{
+      disposition: DeferDisposition;
+    }> => {
+      const job = await transaction.selectFrom("jobs").select("status")
+        .where("id", "=", claim.jobId).forUpdate().executeTakeFirst();
+      if (!job) return { disposition: "terminal-noop" };
+      const step = await transaction.selectFrom("job_steps").selectAll()
+        .where("id", "=", claim.stepId).where("job_id", "=", claim.jobId)
+        .forUpdate().executeTakeFirst();
+      if (!step) return { disposition: "terminal-noop" };
+      if (step.status === "completed") return { disposition: "already-completed" };
+      if (job.status === "cancelled") return { disposition: "discarded-cancelled" };
+      if (job.status === "completed" || job.status === "failed") return { disposition: "terminal-noop" };
+      const databaseNow = (await sql<{ now: Date }>`select clock_timestamp() as now`
+        .execute(transaction)).rows[0]!.now;
+      if (step.status !== "running"
+        || step.lease_owner !== claim.workerId
+        || step.attempt_count !== claim.attemptNo
+        || step.lease_expires_at?.getTime() !== claim.leaseExpiresAt.getTime()
+        || step.lease_expires_at.getTime() <= databaseNow.getTime()) {
+        return { disposition: "terminal-noop" };
+      }
+      const attempt = await transaction.selectFrom("job_attempts").selectAll()
+        .where("id", "=", claim.attemptId).forUpdate().executeTakeFirst();
+      if (!attempt || attempt.step_id !== claim.stepId || attempt.attempt_no !== claim.attemptNo
+        || attempt.worker_id !== claim.workerId || attempt.status !== "running") {
+        return { disposition: "terminal-noop" };
+      }
+      const validatedRef = RebuildStepRefSchema.parse(await effect(transaction));
+      const fencedNow = (await sql<{ now: Date }>`select clock_timestamp() as now`
+        .execute(transaction)).rows[0]!.now;
+      const fencedStep = await transaction.selectFrom("job_steps").selectAll()
+        .where("id", "=", step.id).executeTakeFirstOrThrow();
+      const fencedAttempt = await transaction.selectFrom("job_attempts").selectAll()
+        .where("id", "=", attempt.id).executeTakeFirstOrThrow();
+      if (fencedStep.status !== "running"
+        || fencedStep.lease_owner !== claim.workerId
+        || fencedStep.attempt_count !== claim.attemptNo
+        || fencedStep.lease_expires_at?.getTime() !== claim.leaseExpiresAt.getTime()
+        || fencedStep.lease_expires_at.getTime() <= fencedNow.getTime()
+        || fencedAttempt.step_id !== claim.stepId
+        || fencedAttempt.attempt_no !== claim.attemptNo
+        || fencedAttempt.worker_id !== claim.workerId
+        || fencedAttempt.status !== "running") {
+        throw new StaleDeferredClaimError();
+      }
+      await transaction.updateTable("job_attempts").set({
+        status: "completed",
+        finished_at: fencedNow,
+      }).where("id", "=", attempt.id).executeTakeFirstOrThrow();
+      await transaction.updateTable("job_steps").set({
+        status: "queued",
+        output_ref: validatedRef,
+        lease_owner: null,
+        lease_expires_at: null,
+        updated_at: fencedNow,
+      }).where("id", "=", step.id).executeTakeFirstOrThrow();
+      const dedupeKey = `defer:${step.id}:${claim.attemptNo}`;
+      const pending = await transaction.selectFrom("job_outbox").select(["id", "payload"])
+        .where("job_id", "=", claim.jobId).where("topic", "=", "jobs.wake")
+        .where("delivered_at", "is", null).execute();
+      if (!pending.some((wake) => wake.payload.dedupeKey === dedupeKey)) {
+        await transaction.insertInto("job_outbox").values({
+          job_id: claim.jobId,
+          topic: "jobs.wake",
+          payload: { jobId: claim.jobId, dedupeKey },
+          available_at: new Date(fencedNow.getTime() + delayMs),
+          claimed_by: null,
+          claim_expires_at: null,
+          delivered_at: null,
+        }).execute();
+      }
+      return { disposition: "deferred" };
+    }).catch((error: unknown) => {
+      if (error instanceof StaleDeferredClaimError) {
+        return { disposition: "terminal-noop" as const };
+      }
+      throw error;
     });
   }
 }

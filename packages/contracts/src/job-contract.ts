@@ -7,6 +7,7 @@ export const JOB_TYPES = [
   "query",
   "advanced-analysis",
   "migration",
+  "library-rebuild",
 ] as const;
 
 export const JOB_STATUSES = [
@@ -66,14 +67,30 @@ export const MigrationJobScopeSchema = z.strictObject({
   sourceLabel: z.string().trim().min(1),
 });
 
+export const LibraryRebuildJobScopeSchema = z.strictObject({
+  target: z.literal("all"),
+});
+
 export const JobScopeSchema = z.union([
   BookJobScopeSchema,
   MigrationJobScopeSchema,
+  LibraryRebuildJobScopeSchema,
 ]);
 
 export type BookJobScope = z.infer<typeof BookJobScopeSchema>;
 export type MigrationJobScope = z.infer<typeof MigrationJobScopeSchema>;
+export type LibraryRebuildJobScope = z.infer<typeof LibraryRebuildJobScopeSchema>;
 export type JobScope = z.infer<typeof JobScopeSchema>;
+
+export const RebuildStepRefSchema = z.strictObject({
+  bookId: z.string().uuid(),
+  stage: z.enum(["waiting", "l1", "l2", "verify"]),
+  l1JobId: z.string().uuid().optional(),
+  l2JobId: z.string().uuid().optional(),
+  baseGroupId: z.string().uuid().optional(),
+});
+
+export type RebuildStepRef = z.infer<typeof RebuildStepRefSchema>;
 
 export const JobProgressSchema = z.object({
   total: z.number().int().nonnegative(),
@@ -118,6 +135,11 @@ export const PublicJobSchema = z.discriminatedUnion("type", [
     ...PublicJobFields,
     type: z.literal("migration"),
     scope: MigrationJobScopeSchema,
+  }),
+  z.object({
+    ...PublicJobFields,
+    type: z.literal("library-rebuild"),
+    scope: LibraryRebuildJobScopeSchema,
   }),
 ]);
 

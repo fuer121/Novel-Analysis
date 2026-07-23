@@ -8,14 +8,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AppRouter } from "../../app/router.js";
 import { setCsrfToken } from "../../shared/csrf-memory.js";
 
-const user = { id: "00000000-0000-4000-8000-000000000001", displayName: "测试成员", role: "member" };
+const user = { id: "00000000-0000-4000-8000-000000000001", displayName: "测试成员", role: "member" as const };
+const admin = { ...user, displayName: "测试管理员", role: "admin" as const };
 const book = { id: "00000000-0000-4000-8000-000000000010", title: "山海长卷", status: "active", chapterCount: 12, createdAt: "2026-07-20T00:00:00.000Z" };
 const group = { id: "00000000-0000-4000-8000-000000000020", key: "creatures", name: "异兽事实", categoryScope: "magical_creature", status: "active" };
 const preview = { total: 12, fresh: 3, missing: 6, failed: 1, stale: 2, executable: 9, skipped: 3, scopeHash: "a".repeat(64) };
 
 class FakeEventSource { static instance: FakeEventSource; onmessage: ((event: MessageEvent<string>) => void) | null = null; onerror = null; close = vi.fn(); constructor() { FakeEventSource.instance = this; } }
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
-function renderPath(path: string) { const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); client.setQueryData(["current-user"], user); return { client, ...render(<QueryClientProvider client={client}><AppRouter initialEntries={[path]} /></QueryClientProvider>) }; }
+function renderPath(path: string, currentUser: { id: string; displayName: string; role: "admin" | "member" } = user) { const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } }); client.setQueryData(["current-user"], currentUser); return { client, ...render(<QueryClientProvider client={client}><AppRouter initialEntries={[path]} /></QueryClientProvider>) }; }
 
 describe("book workspace", () => {
   beforeEach(() => { setCsrfToken("csrf"); vi.stubGlobal("EventSource", FakeEventSource); });
@@ -37,6 +38,76 @@ describe("book workspace", () => {
     await userEvent.click(screen.getByRole("button", { name: "创建并进入" }));
     expect(await screen.findByRole("heading", { name: book.title })).toBeTruthy();
     expect(screen.getByRole("link", { name: "导入" }).getAttribute("href")).toContain(`/books/${book.id}/import`);
+  });
+
+  it("shows admins persistent rebuild progress and reorders only untouched waiting books", async () => {
+    const firstId = "00000000-0000-4000-8000-000000000061";
+    const secondId = "00000000-0000-4000-8000-000000000062";
+    const detail = {
+      job: {
+        id: "00000000-0000-4000-8000-000000000060",
+        type: "library-rebuild",
+        status: "queued",
+        requestedBy: admin.id,
+        scope: { target: "all" },
+        progress: { total: 2, completed: 0, failed: 0, skipped: 0, current: "" },
+        createdAt: book.createdAt,
+        updatedAt: book.createdAt,
+      },
+      steps: [
+        { id: firstId, position: 0, status: "queued", attemptCount: 0, bookTitle: "第一本", ref: { bookId: book.id, stage: "waiting" }, failureCode: null },
+        { id: secondId, position: 1, status: "queued", attemptCount: 0, bookTitle: "第二本", ref: { bookId: "00000000-0000-4000-8000-000000000099", stage: "waiting" }, failureCode: null },
+      ],
+    };
+    let reorderedBody = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/books") return json({ books: [] });
+      if (url === "/api/admin/library-rebuilds/current") return json({ detail });
+      if (url.endsWith("/order") && init?.method === "PUT") {
+        reorderedBody = String(init.body);
+        return json({ detail: { ...detail, steps: [...detail.steps].reverse().map((step, position) => ({ ...step, position })) } });
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath("/books", admin);
+    expect(await screen.findByRole("heading", { name: "索引重建队列" })).toBeTruthy();
+    expect(await screen.findByText("0 / 2")).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "上移 第二本" }));
+    expect(JSON.parse(reorderedBody)).toEqual({ orderedStepIds: [secondId, firstId] });
+    expect((await screen.findAllByText(/本$/))[0]?.textContent).toContain("第二本");
+    expect(screen.queryByRole("button", { name: /跳过校验/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /全库重建/ })).toBeNull();
+  });
+
+  it("lets admins start a new rebuild after the latest batch reaches a terminal status", async () => {
+    const completed = {
+      job: {
+        id: "00000000-0000-4000-8000-000000000060",
+        type: "library-rebuild",
+        status: "completed",
+        requestedBy: admin.id,
+        scope: { target: "all" },
+        progress: { total: 2, completed: 2, failed: 0, skipped: 0, current: "" },
+        createdAt: book.createdAt,
+        updatedAt: book.createdAt,
+      },
+      steps: [],
+    };
+    let created = false;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "/api/books") return json({ books: [] });
+      if (url === "/api/admin/library-rebuilds/current") return json({ detail: completed });
+      if (url === "/api/admin/library-rebuilds" && init?.method === "POST") {
+        created = true;
+        return json({ detail: { ...completed, job: { ...completed.job, status: "queued" } } }, 201);
+      }
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath("/books", admin);
+    await userEvent.click(await screen.findByRole("button", { name: "重新发起全库重建" }));
+    await waitFor(() => expect(created).toBe(true));
   });
 
   it("keeps analysis entries visible but blocks them until readiness refetch unlocks", async () => {

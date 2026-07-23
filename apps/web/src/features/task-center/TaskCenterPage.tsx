@@ -12,6 +12,7 @@ const typeLabel: Record<PublicJob["type"], string> = {
   query: "提问",
   "advanced-analysis": "高级分析",
   migration: "迁移",
+  "library-rebuild": "书库索引重建",
 };
 
 const statusLabel: Record<PublicJob["status"], string> = {

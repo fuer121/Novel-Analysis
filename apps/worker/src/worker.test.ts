@@ -60,4 +60,20 @@ describe("interactive Worker queues", () => {
     await expect(executor.execute(claim)).resolves.toEqual({ disposition: "completed" });
     expect(calls).toEqual(["advanced-analysis"]);
   });
+
+  it("routes rebuild parent steps only to the rebuild executor", async () => {
+    const calls: string[] = [];
+    const executor = createWorkerStepExecutor({
+      database: {} as never,
+      rebuildExecutor: {
+        async execute(claim) {
+          calls.push(claim.kind);
+          return { disposition: "deferred" as const };
+        },
+      },
+    });
+    const claim = { jobId: "job", stepId: "step", attemptId: "attempt", attemptNo: 1, position: 1, kind: "library-rebuild-book", workerId: "worker", leaseExpiresAt: new Date() };
+    await expect(executor.execute(claim)).resolves.toEqual({ disposition: "deferred" });
+    expect(calls).toEqual(["library-rebuild-book"]);
+  });
 });

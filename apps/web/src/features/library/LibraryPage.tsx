@@ -5,11 +5,14 @@ import { Link, useNavigate } from "react-router-dom";
 
 import { apiRead, apiWrite } from "../../shared/api.js";
 import type { BookSummary } from "./types.js";
+import { useCurrentUser } from "../auth/useCurrentUser.js";
+import { RebuildQueuePanel } from "./RebuildQueuePanel.js";
 
 export function LibraryPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [creating, setCreating] = useState(false);
+  const currentUser = useCurrentUser();
   const books = useQuery({ queryKey: ["books"], queryFn: () => apiRead<{ books: BookSummary[] }>("/books") });
   const createBook = useMutation({
     mutationFn: (form: FormData) => apiWrite<{ book: BookSummary }>("/books", {
@@ -35,6 +38,7 @@ export function LibraryPage() {
       <div className="button-row"><button className="primary-button" disabled={createBook.isPending}>创建并进入</button><button className="secondary-button" type="button" onClick={() => setCreating(false)}>取消</button></div>
       {createBook.isError ? <p className="form-error">创建失败，请检查数据源与章节范围</p> : null}
     </form> : null}
+    {currentUser.data?.role === "admin" ? <RebuildQueuePanel /> : null}
     {books.isPending ? <p className="empty-state">正在读取书库...</p> : null}
     {books.isError ? <p className="error-notice">书库读取失败</p> : null}
     {books.data?.books.length === 0 ? <p className="empty-state">书库暂无书籍</p> : null}

@@ -8,8 +8,12 @@ import {
   createContentCipher,
   createIndexRepository,
   createLibraryRepository,
+  L1_ROUTE_SCHEMA_VERSION,
+  L2_ADMISSION_VERSION,
+  L2_FACT_SCHEMA_VERSION,
   type DatabaseConnection,
 } from "@novel-analysis/database";
+import { buildL1Signature, buildL2Signature } from "@novel-analysis/domain";
 import type {
   AnalysisSummaryInput,
   ChapterImportInput,
@@ -514,14 +518,21 @@ export async function startPhase3Harness(): Promise<Phase3Harness> {
     const library = createLibraryRepository(postgres.db, cipher);
     const indexes = createIndexRepository(postgres.db, cipher);
     const book = await library.createBook({ title: "Phase 3 Book", createdBy: user.id });
+    const l1PromptContent = "phase3 l1 prompt";
+    const l1Prompt = await indexes.createPromptVersion({ target: "l1-index", version: "phase3-l1", content: l1PromptContent, contentHash: createHash("sha256").update(l1PromptContent).digest("hex") });
     const prompt = await indexes.createPromptVersion({ target: "l2-index", version: "phase3-l2", content: "phase3 prompt", contentHash: createHash("sha256").update("phase3 prompt").digest("hex") });
-    const group = await indexes.createIndexGroup({ bookId: book.id, key: "people", name: "人物事实", categoryScope: "general", promptVersionId: prompt.id, configHash: "phase3-group-v1" });
+    const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "phase3-l1-v1", dslHash: "phase3-l1-dsl-v1" });
+    const l2Workflow = await indexes.createWorkflowVersion({ target: "l2-index", contractVersion: "phase3-l2-v1", dslHash: "phase3-l2-dsl-v1" });
+    const group = await indexes.createIndexGroup({ bookId: book.id, key: "base", name: "人物事实", categoryScope: "general", promptVersionId: prompt.id, configHash: "phase3-group-v1" });
     await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "phase3-summary-v1", dslHash: "phase3-summary-dsl-v1" });
     await indexes.registerSubject({ groupId: group.id, subjectKey: "chen-ping-an", displayName: "陈平安", aliases: ["平安"] });
     for (const chapterIndex of [1, 2, 3, 101]) {
       const chapter = await library.insertChapter({ bookId: book.id, chapterIndex, title: `第 ${chapterIndex} 章`, plaintext: `${SENTINELS.chapter}_${chapterIndex}`, contentHmac: `phase3-hmac-${chapterIndex}`, sourceVersion: "phase3-source" });
+      const l1Signature = buildL1Signature({ sourceVersion: "phase3-source", chapterHmac: `phase3-hmac-${chapterIndex}`, promptHash: l1Prompt.content_hash, workflowDslHash: l1Workflow.dsl_hash, adapterContractVersion: l1Workflow.contract_version, schemaVersion: L1_ROUTE_SCHEMA_VERSION });
+      await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: l1Signature, status: "fresh", route: { route_schema_version: L1_ROUTE_SCHEMA_VERSION, route_entities: [], route_keywords: [], signals: [], category_scores: {} } });
+      const l2Signature = buildL2Signature({ sourceVersion: "phase3-source", chapterHmac: `phase3-hmac-${chapterIndex}`, promptHash: prompt.content_hash, workflowDslHash: l2Workflow.dsl_hash, adapterContractVersion: l2Workflow.contract_version, schemaVersion: L2_FACT_SCHEMA_VERSION, admissionVersion: L2_ADMISSION_VERSION, indexGroupConfigHash: "phase3-group-v1", l1Signature });
+      await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: l2Signature, status: "fresh" });
       if (chapterIndex < 3) {
-        await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: `phase3-coverage-${chapterIndex}`, status: "fresh" });
         for (let factIndex = 1; factIndex <= 11; factIndex += 1) {
           await indexes.addFact({ groupId: group.id, chapterId: chapter.id, subjectKey: "chen-ping-an", factType: "event", plaintext: `${SENTINELS.fact}_${chapterIndex}_${factIndex}`, metadata: { category: "event", scopeEligible: true } });
         }
