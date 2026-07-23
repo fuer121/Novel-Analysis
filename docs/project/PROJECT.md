@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f207db4310b944eb0114a28ccde03bf973636161
 baseline_status: current
-updated_at: 2026-07-23T09:04:15+08:00
+updated_at: 2026-07-23T09:28:49+08:00
 updated_by: controller-agent
-current_phase: phase-4-accepted
-last_checkpoint: CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED
+current_phase: phase-5-planning
+last_checkpoint: CP-20260723-PHASE5-DESIGN-ACCEPTED
 next_gate: GATE-PHASE5-PLAN-APPROVED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-PLAN | phase-5 | Migration、performance、UAT and cutover design | controller-agent | codex/phase5-design | fd0702e917ed08778898cc0fbb7cf1442576daf7 | fd0702e917ed08778898cc0fbb7cf1442576daf7 | review | CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED | CP-20260723-PHASE5-DESIGN-SUBMITTED | wait for written design review；no implementation or formal operations |
+| PHASE5-PLAN | phase-5 | Migration、performance、UAT and cutover planning | controller-agent | codex/phase5-design | fd0702e917ed08778898cc0fbb7cf1442576daf7 | 3d7e43d94dfd4e18c861e9ff3ebb91b5404abf37 | ready | CP-20260723-PHASE5-DESIGN-ACCEPTED | CP-20260723-PHASE5-DESIGN-ACCEPTED | write 6-8 task implementation plan；no implementation or formal operations |
 
 ## Phase Ledgers
 
@@ -69,6 +69,7 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 - [DEC-0014 Query HMAC Key Policy](decisions/DEC-0014-query-hmac-key-policy.md)
 - [DEC-0015 Query Turn History And Trace Projection](decisions/DEC-0015-query-turn-history-and-trace-projection.md)
 - [DEC-0016 Encrypted Advanced Analysis Execution Snapshot](decisions/DEC-0016-phase4-encrypted-execution-snapshot.md)
+- [DEC-0017 Phase 5 Selective Migration And No Entry Rollback](decisions/DEC-0017-phase5-selective-migration-and-no-entry-rollback.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -88,7 +89,7 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 
 ## Pending Feedback
 
-Phase 5 设计已提交书面复核；只迁移书籍与章节、切换后不恢复旧入口属于拟议设计修正，尚未形成 accepted checkpoint
+Phase 5 设计已接受，可编写 6 至 8 项实施计划；编码、正式快照、旧密钥、飞书配置、UAT、部署与切换仍未授权
 
 ## Next Gate
 
@@ -96,6 +97,8 @@ Phase 5 设计已提交书面复核；只迁移书籍与章节、切换后不恢
 
 ## Evidence Index
 
+- [Phase 5 design accepted](checkpoints/CP-20260723-PHASE5-DESIGN-ACCEPTED.md)
+- [Phase 5 selective migration decision](decisions/DEC-0017-phase5-selective-migration-and-no-entry-rollback.md)
 - [Phase 5 design submitted](checkpoints/CP-20260723-PHASE5-DESIGN-SUBMITTED.md)
 - [Phase 5 migration and cutover design](../superpowers/specs/2026-07-23-phase-5-migration-cutover-design.md)
 - [Phase 4 implementation accepted](checkpoints/CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED.md)
