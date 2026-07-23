@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { isAbsolute, resolve } from "node:path";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/;
@@ -19,13 +19,33 @@ function fail(code, message) {
   throw new EvidenceValidationError(code, message);
 }
 
-function validateLocalInput(command, artifactPath, cwd) {
+function isInside(root, target) {
+  const path = relative(root, target);
+  return path === "" || (!isAbsolute(path) && path !== ".." && !path.startsWith(`..${sep}`));
+}
+
+async function existingRealPath(path, missingCode, label) {
+  try {
+    return await realpath(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") fail(missingCode, `${label} does not exist`);
+    throw error;
+  }
+}
+
+async function validateLocalInput(command, artifactPath, root, cwd) {
   if (PRODUCTION_PATTERN.test(command) || PRODUCTION_PATTERN.test(artifactPath)) {
     fail("production_input", "Production-looking commands and artifact paths are prohibited");
   }
-  const artifact = resolve(cwd, artifactPath);
-  const root = `${resolve(cwd)}/`;
-  if (isAbsolute(artifactPath) || !artifact.startsWith(root)) {
+  if (isAbsolute(artifactPath)) {
+    fail("production_input", "Artifact path must remain inside the local working directory");
+  }
+  const artifact = await existingRealPath(
+    resolve(cwd, artifactPath),
+    "artifact_missing",
+    `Artifact ${artifactPath}`,
+  );
+  if (!isInside(root, artifact)) {
     fail("production_input", "Artifact path must remain inside the local working directory");
   }
   return artifact;
@@ -34,6 +54,7 @@ function validateLocalInput(command, artifactPath, cwd) {
 export async function validateEvidenceManifest(manifest, options) {
   const expectedCommitSha = options?.expectedCommitSha;
   const cwd = options?.cwd ?? process.cwd();
+  const root = await existingRealPath(cwd, "artifact_missing", "Local working directory");
   if (!SHA_PATTERN.test(expectedCommitSha ?? "")) {
     fail("expected_commit_invalid", "Expected commit SHA must be a lowercase 40-character SHA");
   }
@@ -64,14 +85,8 @@ export async function validateEvidenceManifest(manifest, options) {
       fail("fingerprint_mismatch", "Artifact SHA-256 must be a lowercase hexadecimal fingerprint");
     }
 
-    const artifact = validateLocalInput(entry.command, entry.artifactPath, cwd);
-    let content;
-    try {
-      content = await readFile(artifact);
-    } catch (error) {
-      if (error?.code === "ENOENT") fail("artifact_missing", `Artifact does not exist: ${entry.artifactPath}`);
-      throw error;
-    }
+    const artifact = await validateLocalInput(entry.command, entry.artifactPath, root, cwd);
+    const content = await readFile(artifact);
     const actualFingerprint = createHash("sha256").update(content).digest("hex");
     if (actualFingerprint !== entry.artifactSha256) {
       fail("fingerprint_mismatch", `Artifact fingerprint mismatch: ${entry.artifactPath}`);
@@ -91,7 +106,16 @@ async function main() {
     const manifestPath = argument("--manifest");
     const expectedCommitSha = argument("--expected-sha");
     if (!manifestPath) fail("manifest_missing", "Usage: --manifest <local-json> --expected-sha <commit>");
-    const manifest = JSON.parse(await readFile(resolve(manifestPath), "utf8"));
+    const root = await existingRealPath(process.cwd(), "manifest_missing", "Local working directory");
+    const manifestRealPath = await existingRealPath(
+      resolve(manifestPath),
+      "manifest_missing",
+      `Manifest ${manifestPath}`,
+    );
+    if (!isInside(root, manifestRealPath)) {
+      fail("production_input", "Manifest path must remain inside the local working directory");
+    }
+    const manifest = JSON.parse(await readFile(manifestRealPath, "utf8"));
     const result = await validateEvidenceManifest(manifest, { expectedCommitSha });
     process.stdout.write(`${JSON.stringify(result)}\n`);
   } catch (error) {
