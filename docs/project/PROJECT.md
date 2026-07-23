@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 0eaf4b5430cd56de01caa39f470c73ccb97782c5
 baseline_status: current
-updated_at: 2026-07-23T16:20:00+08:00
+updated_at: 2026-07-23T16:38:25+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK6-BLOCKED
+last_checkpoint: CP-20260723-PHASE5-TASK6-REPEATABILITY-AUDIT-AUTHORIZED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | implementation-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | blocked | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-BLOCKED | choose reproducibility audit, performance diagnosis, or remain blocked；preserve threshold and drafts |
+| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | implementation-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | 6029dfbb0eab27f6fd30c12310425473ffc754c2 | in_progress | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-REPEATABILITY-AUDIT-AUTHORIZED | run five unchanged artifact repetitions and report all results；no code changes |
 
 ## Phase Ledgers
 
@@ -91,7 +91,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-5已合并并post-merge verified；Task 6最终artifact复跑browse p95 505.528ms超过500ms threshold且与前次结果冲突，已暂停等待决策；Task 7、Task 8与所有正式操作未解锁
+Phase 5 Tasks 1-5已合并并post-merge verified；Task 6已授权五次不改代码与threshold的重复性审计，原blocked证据仍有效；Task 7、Task 8与所有正式操作未解锁
 
 ## Next Gate
 
@@ -99,6 +99,7 @@ Phase 5 Tasks 1-5已合并并post-merge verified；Task 6最终artifact复跑bro
 
 ## Evidence Index
 
+- [Phase 5 Task 6 repeatability audit authorized](checkpoints/CP-20260723-PHASE5-TASK6-REPEATABILITY-AUDIT-AUTHORIZED.md)
 - [Phase 5 Task 6 blocked](checkpoints/CP-20260723-PHASE5-TASK6-BLOCKED.md)
 - [Phase 5 Task 5 merged and Task 6 started](checkpoints/CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED.md)
 - [Phase 5 Task 5 accepted](checkpoints/CP-20260723-PHASE5-TASK5-ACCEPTED.md)
