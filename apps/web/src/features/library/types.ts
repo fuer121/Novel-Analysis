@@ -1,6 +1,6 @@
-import type { BookSummary, FactReviewPage, IndexCoverage } from "@novel-analysis/contracts";
+import type { BookAnalysisReadiness, BookSummary, FactReviewPage, IndexCoverage } from "@novel-analysis/contracts";
 
-export type { BookSummary, FactReviewPage, IndexCoverage };
+export type { BookAnalysisReadiness, BookSummary, FactReviewPage, IndexCoverage };
 
 export interface IndexGroup {
   id: string;

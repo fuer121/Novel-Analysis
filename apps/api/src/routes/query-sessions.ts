@@ -4,7 +4,7 @@ import { sql } from "kysely";
 import { z } from "zod";
 
 import { QueryTurnDetailSchema, QueryTurnHistoryPageSchema } from "@novel-analysis/contracts";
-import { createQueryRepository, type ContentCipher, type DatabaseConnection, type QueryActor, type QuerySession, type QueryTurn, type QueryTurnDetail } from "@novel-analysis/database";
+import { createQueryRepository, getBookAnalysisReadiness, type ContentCipher, type DatabaseConnection, type QueryActor, type QuerySession, type QueryTurn, type QueryTurnDetail } from "@novel-analysis/database";
 import { QueryAccessDeniedError, QueryConfigurationError, QueryIdempotencyConflictError, QueryInvalidRequestError, QueryInvalidStateError, QueryJobService, QueryNotFoundError, QueryScopeChangedError } from "@novel-analysis/jobs";
 
 import { requireCsrf } from "../auth/csrf.js";
@@ -123,7 +123,11 @@ export function createQuerySessionsRouter(database: DatabaseConnection, config: 
 
   router.post("/:bookId/query-sessions/:sessionId/turns", ...csrf, async (request: AuthenticatedRequest, response, next) => {
     const params = paramsSchema.safeParse(request.params); const body = createTurnSchema.safeParse(request.body); const key = idempotencyKey(request, response); if (!params.success || !params.data.sessionId || !body.success || !key) { if (!response.headersSent) response.status(400).json({ error: "invalid_request" }); return; }
-    try { const created = await jobs.createTurn({ bookId: params.data.bookId, sessionId: params.data.sessionId, actor: actor(request), requestId: key, ...body.data }); response.status(201).json({ turn: publicCreatedTurn({ ...created.turn, evidence: [] }), job: created.job }); } catch (error) { handleError(error, response, next); }
+    try {
+      await jobs.preview({ bookId: params.data.bookId, sessionId: params.data.sessionId, actor: actor(request), ...body.data });
+      if (!(await getBookAnalysisReadiness(database, params.data.bookId)).analysisAvailable) { response.status(409).json({ error: "analysis_rebuild_incomplete" }); return; }
+      const created = await jobs.createTurn({ bookId: params.data.bookId, sessionId: params.data.sessionId, actor: actor(request), requestId: key, ...body.data }); response.status(201).json({ turn: publicCreatedTurn({ ...created.turn, evidence: [] }), job: created.job });
+    } catch (error) { handleError(error, response, next); }
   });
 
   router.get("/:bookId/query-sessions/:sessionId/turns", sessionAuth, async (request: AuthenticatedRequest, response, next) => {

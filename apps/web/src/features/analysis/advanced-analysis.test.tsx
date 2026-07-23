@@ -78,6 +78,7 @@ function renderPath(path = `/books/${ids.book}/analysis`) {
 
 function baseRead(url: string): Response | undefined {
   if (url === `/api/books/${ids.book}`) return json({ book });
+  if (url === `/api/books/${ids.book}/analysis-readiness`) return json({ state: "available", chapterTotal: 120, l1Fresh: 120, l2Fresh: 120, progressPercent: 100, analysisAvailable: true, blockingCode: null });
   if (url === `/api/books/${ids.book}/index-groups`) return json({ indexGroups: [group] });
   if (url === `/api/books/${ids.book}/analysis-templates`) return json({ templates: [template] });
   if (url === `/api/books/${ids.book}/analysis-templates/${ids.template}`) return json({ template: templateDetail });

@@ -18,6 +18,15 @@ export const IndexCoverageSchema = z.strictObject({
   missing: z.number().int().nonnegative(), failed: z.number().int().nonnegative(),
   stale: z.number().int().nonnegative(),
 });
+export const BookAnalysisReadinessSchema = z.strictObject({
+  state: z.enum(["waiting", "building_l1", "building_l2", "available", "failed"]),
+  chapterTotal: z.number().int().nonnegative(),
+  l1Fresh: z.number().int().nonnegative(),
+  l2Fresh: z.number().int().nonnegative(),
+  progressPercent: z.number().int().min(0).max(100),
+  analysisAvailable: z.boolean(),
+  blockingCode: z.enum(["l1_incomplete", "l2_incomplete", "rebuild_failed"]).nullable(),
+});
 export const FactRetrievalMetadataSchema = z.strictObject({
   category: FactCategorySchema.optional(),
   importance: z.number().min(0).max(1).optional(),
@@ -36,4 +45,5 @@ export const FactReviewPageSchema = z.strictObject({ facts: z.array(FactReviewSc
 export type BookSummary = z.infer<typeof BookSummarySchema>;
 export type ChapterSummary = z.infer<typeof ChapterSummarySchema>;
 export type IndexCoverage = z.infer<typeof IndexCoverageSchema>;
+export type BookAnalysisReadiness = z.infer<typeof BookAnalysisReadinessSchema>;
 export type FactReviewPage = z.infer<typeof FactReviewPageSchema>;

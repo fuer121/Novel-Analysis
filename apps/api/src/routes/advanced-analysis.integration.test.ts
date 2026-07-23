@@ -4,7 +4,8 @@ import { sql } from "kysely";
 import request from "supertest";
 
 import { AnalysisScopePreviewSchema } from "@novel-analysis/contracts";
-import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
+import { createContentCipher, createIndexRepository, createLibraryRepository, L1_ROUTE_SCHEMA_VERSION, L2_ADMISSION_VERSION, L2_FACT_SCHEMA_VERSION } from "@novel-analysis/database";
+import { buildL1Signature, buildL2Signature } from "@novel-analysis/domain";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../../packages/database/src/testing/postgres.js";
 
 import { createApp } from "../app.js";
@@ -27,9 +28,18 @@ describe("advanced analysis routes", () => {
     const library = createLibraryRepository(postgres.db, cipher); const indexes = createIndexRepository(postgres.db, cipher);
     bookId = (await library.createBook({ title: "Book", createdBy: identities.owner!.id })).id;
     const prompt = await indexes.createPromptVersion({ target: "l2-index", version: "v1", content: "index", contentHash: createHash("sha256").update("index").digest("hex") });
-    groupId = (await indexes.createIndexGroup({ bookId, key: "people", name: "People", categoryScope: "general", promptVersionId: prompt.id, configHash: "group-v1" })).id;
+    const l1Prompt = await indexes.createPromptVersion({ target: "l1-index", version: "v1", content: "route", contentHash: createHash("sha256").update("route").digest("hex") });
+    const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-v1", dslHash: "l1-dsl-v1" });
+    const l2Workflow = await indexes.createWorkflowVersion({ target: "l2-index", contractVersion: "l2-v1", dslHash: "l2-dsl-v1" });
+    groupId = (await indexes.createIndexGroup({ bookId, key: "base", name: "People", categoryScope: "general", promptVersionId: prompt.id, configHash: "group-v1" })).id;
     await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "summary-v1", dslHash: "dsl-v1" });
-    for (let chapterIndex = 1; chapterIndex <= 2; chapterIndex += 1) await library.insertChapter({ bookId, chapterIndex, title: `C${chapterIndex}`, plaintext: `SENTINEL_CHAPTER_${chapterIndex}`, contentHmac: `h-${chapterIndex}`, sourceVersion: "source" });
+    for (let chapterIndex = 1; chapterIndex <= 2; chapterIndex += 1) {
+      const chapter = await library.insertChapter({ bookId, chapterIndex, title: `C${chapterIndex}`, plaintext: `SENTINEL_CHAPTER_${chapterIndex}`, contentHmac: `h-${chapterIndex}`, sourceVersion: "source" });
+      const l1Signature = buildL1Signature({ sourceVersion: chapter.source_version, chapterHmac: `h-${chapterIndex}`, promptHash: l1Prompt.content_hash, workflowDslHash: l1Workflow.dsl_hash, adapterContractVersion: l1Workflow.contract_version, schemaVersion: L1_ROUTE_SCHEMA_VERSION });
+      const l2Signature = buildL2Signature({ sourceVersion: chapter.source_version, chapterHmac: `h-${chapterIndex}`, promptHash: prompt.content_hash, workflowDslHash: l2Workflow.dsl_hash, adapterContractVersion: l2Workflow.contract_version, schemaVersion: L2_FACT_SCHEMA_VERSION, admissionVersion: L2_ADMISSION_VERSION, indexGroupConfigHash: "group-v1", l1Signature });
+      await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: l1Signature, status: "fresh", route: { route_schema_version: L1_ROUTE_SCHEMA_VERSION, route_entities: [], route_keywords: [], signals: [], category_scores: {} } });
+      await indexes.putL2ChapterStatus({ groupId, chapterId: chapter.id, inputSignature: l2Signature, status: "fresh" });
+    }
   });
   afterEach(async () => postgres.destroy());
   const app = () => createApp({ database: postgres.db, config, feishu: new FakeFeishuOAuthAdapter(), contentCipher: cipher, advancedAnalysisExecutionConfig: executionConfig });
@@ -76,6 +86,19 @@ describe("advanced analysis routes", () => {
     expect(JSON.stringify(admin.body)).not.toMatch(/SENTINEL_(PROMPT|SCHEMA|CHAPTER)/);
     const controlled = await request(app()).post(`/api/admin/advanced-analysis/${runId}/control`).set(write("admin")).send({ action: "pause", requestId: "admin-pause" });
     expect(controlled.status).toBe(200); expect(controlled.body.job.status).toBe("paused"); expect(JSON.stringify(controlled.body)).not.toMatch(/SENTINEL_(PROMPT|SCHEMA|CHAPTER)/);
+  });
+
+  it("rejects preview and create when readiness is incomplete", async () => {
+    const template = await request(app()).post(`/api/books/${bookId}/analysis-templates`).set(write("owner")).send({ bookId, name: "Locked", prompt: "prompt", outputSchema: {}, indexGroupId: groupId });
+    await postgres.db.updateTable("l2_chapter_statuses").set({ status: "stale" }).where("group_id", "=", groupId).execute();
+    const input = { bookId, templateId: template.body.template.id, mode: "balanced", startChapter: 1, endChapter: 2 };
+    const preview = await request(app()).post(`/api/books/${bookId}/advanced-analysis/preview`).set(write("owner")).send(input);
+    expect(preview.status).toBe(409);
+    expect(preview.body).toEqual({ error: "analysis_rebuild_incomplete" });
+    const created = await request(app()).post(`/api/books/${bookId}/advanced-analysis`).set(write("owner")).send({ ...input, templateVersionId: template.body.template.currentVersionId, scopeHash: "0".repeat(64), idempotencyKey: "locked" });
+    expect(created.status).toBe(409);
+    expect(created.body).toEqual({ error: "analysis_rebuild_incomplete" });
+    expect(await postgres.db.selectFrom("analysis_runs").select("id").execute()).toEqual([]);
   });
 
   it("uses CSRF and strict contracts", async () => {

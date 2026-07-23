@@ -1,13 +1,18 @@
 import { createHash } from "node:crypto";
 
 import type { PublicJob } from "@novel-analysis/contracts";
-import type { DatabaseConnection, DatabaseExecutor } from "@novel-analysis/database";
-import { buildL2Signature, selectL2Scope, type L2ChapterIndexState, type L2ScopeMode } from "@novel-analysis/domain";
+import {
+  L2_ADMISSION_VERSION,
+  L2_FACT_SCHEMA_VERSION,
+  selectCanonicalL2Freshness,
+  type DatabaseConnection,
+  type DatabaseExecutor,
+} from "@novel-analysis/database";
+import { selectL2Scope, type L2ChapterIndexState, type L2ScopeMode } from "@novel-analysis/domain";
 
 import { jobRowToPublic, PUBLIC_JOB_COLUMNS } from "../job-repository.js";
 
-export const L2_FACT_SCHEMA_VERSION = "l2-facts-v1";
-export const L2_ADMISSION_VERSION = "l2-admission-v1";
+export { L2_ADMISSION_VERSION, L2_FACT_SCHEMA_VERSION };
 
 export class L2BookNotFoundError extends Error {}
 export class L2IndexGroupNotFoundError extends Error {}
@@ -68,47 +73,26 @@ function preview(selection: Selection): L2ScopePreview {
 }
 
 async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promise<Selection> {
-  const book = await database.selectFrom("books").select("id").where("id", "=", input.bookId).where("status", "=", "active").executeTakeFirst();
-  if (!book) throw new L2BookNotFoundError();
-  const group = await database.selectFrom("index_groups as g")
-    .innerJoin("prompt_versions as p", "p.id", "g.prompt_version_id")
-    .select(["g.id", "g.key", "g.name", "g.category_scope", "g.config_hash", "p.id as prompt_id", "p.version as prompt_version", "p.content as prompt_content", "p.content_hash as prompt_hash"])
-    .where("g.id", "=", input.groupId).where("g.book_id", "=", input.bookId).where("g.status", "=", "active").where("p.target", "=", "l2-index").executeTakeFirst();
-  if (!group) throw new L2IndexGroupNotFoundError();
-  const workflow = await database.selectFrom("workflow_versions").selectAll().where("target", "=", "l2-index").where("enabled", "=", true).orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst();
-  if (!workflow || !group.prompt_content.trim()
-    || createHash("sha256").update(group.prompt_content).digest("hex") !== group.prompt_hash) throw new L2ConfigurationError();
-
-  const rows = await database.selectFrom("chapters as c")
-    .leftJoin("l1_indexes as l", (join) => join.onRef("l.chapter_id", "=", "c.id").on("l.is_current", "=", true))
-    .leftJoin("l2_chapter_statuses as s", (join) => join.onRef("s.chapter_id", "=", "c.id").on("s.group_id", "=", input.groupId))
-    .select(["c.id", "c.chapter_index", "c.title", "c.source_version", "c.content_hmac", "l.input_signature as l1_signature", "s.input_signature", "s.status"])
-    .where("c.book_id", "=", input.bookId).orderBy("c.chapter_index").execute();
+  const canonical = await selectCanonicalL2Freshness(database, input);
+  if (canonical.kind === "book_not_found") throw new L2BookNotFoundError();
+  if (canonical.kind === "index_group_not_found") throw new L2IndexGroupNotFoundError();
+  if (canonical.kind === "configuration_error") throw new L2ConfigurationError();
 
   const counts = { fresh: 0, missing: 0, failed: 0, stale: 0 };
   const states: L2ChapterIndexState[] = [];
   const snapshots = new Map<number, ChapterSnapshot>();
-  for (const row of rows) {
-    const l1Signature = row.l1_signature ?? "";
-    const inputSignature = buildL2Signature({
-      sourceVersion: row.source_version,
-      chapterHmac: row.content_hmac,
-      promptHash: group.prompt_hash,
-      workflowDslHash: workflow.dsl_hash,
-      adapterContractVersion: workflow.contract_version,
-      schemaVersion: L2_FACT_SCHEMA_VERSION,
-      admissionVersion: L2_ADMISSION_VERSION,
-      indexGroupConfigHash: group.config_hash,
-      l1Signature,
+  for (const chapter of canonical.chapters) {
+    if (chapter.chapterIndex >= input.startChapter && chapter.chapterIndex <= input.endChapter) counts[chapter.state] += 1;
+    states.push({ chapterId: chapter.chapterId, chapterIndex: chapter.chapterIndex, status: chapter.state });
+    snapshots.set(chapter.chapterIndex, {
+      chapterId: chapter.chapterId,
+      chapterIndex: chapter.chapterIndex,
+      chapterTitle: chapter.chapterTitle,
+      sourceVersion: chapter.sourceVersion,
+      chapterHmac: chapter.chapterHmac,
+      l1Signature: chapter.l1Signature,
+      inputSignature: chapter.inputSignature,
     });
-    const status = row.input_signature === null
-      ? "missing"
-      : row.input_signature !== inputSignature || row.status === "stale"
-        ? "stale"
-        : row.status === "failed" ? "failed" : "fresh";
-    if (row.chapter_index >= input.startChapter && row.chapter_index <= input.endChapter) counts[status] += 1;
-    states.push({ chapterId: row.id, chapterIndex: row.chapter_index, status });
-    snapshots.set(row.chapter_index, { chapterId: row.id, chapterIndex: row.chapter_index, chapterTitle: row.title, sourceVersion: row.source_version, chapterHmac: row.content_hmac, l1Signature, inputSignature });
   }
   const selected = selectL2Scope({ ...input, chapters: states });
   const chapters = selected.execute.map((chapterIndex) => snapshots.get(chapterIndex)!);
@@ -119,12 +103,12 @@ async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promi
     endChapter: input.endChapter,
     mode: input.mode,
     force: input.force,
-    prompt: { id: group.prompt_id, contentHash: group.prompt_hash },
-    workflow: { id: workflow.id, dslHash: workflow.dsl_hash, adapterContractVersion: workflow.contract_version },
+    prompt: { id: canonical.prompt.id, contentHash: canonical.prompt.contentHash },
+    workflow: { id: canonical.workflow.id, dslHash: canonical.workflow.dslHash, adapterContractVersion: canonical.workflow.adapterContractVersion },
     schemaVersion: L2_FACT_SCHEMA_VERSION,
     admissionVersion: L2_ADMISSION_VERSION,
-    indexGroupConfigHash: group.config_hash,
-    indexGroupCategoryScope: group.category_scope,
+    indexGroupConfigHash: canonical.indexGroup.configHash,
+    indexGroupCategoryScope: canonical.indexGroup.categoryScope,
     states: states.filter(({ chapterIndex }) => chapterIndex >= input.startChapter && chapterIndex <= input.endChapter)
       .map((state) => ({ chapterId: state.chapterId, chapterIndex: state.chapterIndex, status: state.status, inputSignature: snapshots.get(state.chapterIndex)!.inputSignature })),
   });
@@ -135,9 +119,9 @@ async function selectScope(database: DatabaseExecutor, input: ScopeInput): Promi
     executable: chapters.length,
     skipped: total - chapters.length,
     scopeHash,
-    prompt: { id: group.prompt_id, version: group.prompt_version, content: group.prompt_content, contentHash: group.prompt_hash },
-    workflow: { id: workflow.id, dslHash: workflow.dsl_hash, contractVersion: workflow.contract_version, adapterContractVersion: workflow.contract_version },
-    indexGroup: { id: group.id, key: group.key, name: group.name, categoryScope: group.category_scope, configHash: group.config_hash },
+    prompt: canonical.prompt,
+    workflow: canonical.workflow,
+    indexGroup: canonical.indexGroup,
     chapters,
   };
 }

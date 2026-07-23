@@ -61,6 +61,9 @@ button:disabled { opacity: .55; cursor: wait; }
 .data-table tbody tr:hover { background: #f8fbff; }
 progress { display: block; width: 92px; height: 5px; margin-top: 6px; accent-color: #1f5fbf; }
 .progress-value { font-variant-numeric: tabular-nums; }
+.workspace-tabs a[aria-disabled="true"] { color: #8a94a3; cursor: not-allowed; }
+.analysis-readiness { display: grid; grid-template-columns: auto 120px 4ch; align-items: center; gap: 9px; min-height: 30px; color: #697586; font-size: 12px; }
+.analysis-readiness progress { width: 120px; margin: 0; }
 .status { display: inline-block; min-width: 58px; padding: 3px 7px; border: 1px solid #cdd5df; border-radius: 4px; color: #4a5565; background: #f8fafc; text-align: center; font-size: 12px; }
 .status-completed { color: #23734d; border-color: #a9d4bd; background: #eff9f3; }
 .status-failed, .status-cancelled { color: #a13232; border-color: #e1b4b4; background: #fff4f4; }
