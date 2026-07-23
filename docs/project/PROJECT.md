@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: d922877ce826d6794daf096fe76d4be0ec96650c
 baseline_status: current
-updated_at: 2026-07-23T20:28:03+08:00
+updated_at: 2026-07-23T20:54:10+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK7-MERGED-TASK8-STARTED
+last_checkpoint: CP-20260723-PHASE5-TASK8-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK8 | phase-5 | Thin evidence aggregator与engineering Gate dossier | implementation-agent | codex/phase5-task8 | d922877ce826d6794daf096fe76d4be0ec96650c | d922877ce826d6794daf096fe76d4be0ec96650c | in_progress | CP-20260723-PHASE5-TASK7-MERGED-TASK8-STARTED | CP-20260723-PHASE5-TASK7-MERGED-TASK8-STARTED | implement metadata-only evidence aggregation |
+| PHASE5-TASK8 | phase-5 | Thin evidence aggregator与engineering Gate dossier | controller-agent | codex/phase5-task8 | d922877ce826d6794daf096fe76d4be0ec96650c | f32d4228ac4b5582f61e3aaa2493cc4bd79dcac0 | accepted | CP-20260723-PHASE5-TASK7-MERGED-TASK8-STARTED | CP-20260723-PHASE5-TASK8-ACCEPTED | create PR and merge after CI |
 
 ## Phase Ledgers
 
@@ -94,7 +94,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-7已合并并post-merge verified；Task 8按DEC-0021 thin aggregation contract实施；所有formal operation Gates仍未解锁
+Phase 5 Tasks 1-7已合并并post-merge verified；Task 8 thin aggregator、spec、quality与controller verification已accepted，等待PR与CI；所有formal operation Gates仍未解锁
 
 ## Next Gate
 
@@ -102,6 +102,7 @@ Phase 5 Tasks 1-7已合并并post-merge verified；Task 8按DEC-0021 thin aggreg
 
 ## Evidence Index
 
+- [Phase 5 Task 8 accepted](checkpoints/CP-20260723-PHASE5-TASK8-ACCEPTED.md)
 - [Phase 5 Task 7 merged and Task 8 started](checkpoints/CP-20260723-PHASE5-TASK7-MERGED-TASK8-STARTED.md)
 - [Phase 5 Task 7 accepted](checkpoints/CP-20260723-PHASE5-TASK7-ACCEPTED.md)
 - [Phase 5 Task 6 merged and Task 7 started](checkpoints/CP-20260723-PHASE5-TASK6-MERGED-TASK7-STARTED.md)
