@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f207db4310b944eb0114a28ccde03bf973636161
 baseline_status: current
-updated_at: 2026-07-23T10:29:47+08:00
+updated_at: 2026-07-23T11:02:49+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK1-STARTED
+last_checkpoint: CP-20260723-PHASE5-TASK1-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK1 | phase-5 | Migration contracts and read-only legacy snapshot boundary | unassigned | none | b7b5a8b10d613fd3a3eac3c0ffef7e32c4aeb3bf | b7b5a8b10d613fd3a3eac3c0ffef7e32c4aeb3bf | ready | CP-20260723-PHASE5-PLAN-APPROVED | CP-20260723-PHASE5-TASK1-STARTED | merge contract and create one implementation worktree；no formal operations |
+| PHASE5-TASK1 | phase-5 | Migration contracts and read-only legacy snapshot boundary | implementer-agent | codex/phase5-task1 | 6158e7612b8bec0105abfb72019a00b3e54532f9 | 7e84fffe7a1951ee056546c3d9ad90fdb91c30c4 | accepted | CP-20260723-PHASE5-PLAN-APPROVED | CP-20260723-PHASE5-TASK1-ACCEPTED | create implementation PR, wait for CI, merge, then create merged checkpoint and Task 2 Started Contract；no formal operations |
 
 ## Phase Ledgers
 
@@ -89,7 +89,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Task 1 contract 已接受，等待从 merged main 创建唯一实现 worktree；Task 2 与所有正式操作未解锁
+Phase 5 Task 1 已通过实现、规格与质量验收，等待 implementation PR、CI 与合并；Task 2 与所有正式操作未解锁
 
 ## Next Gate
 
@@ -97,6 +97,7 @@ Phase 5 Task 1 contract 已接受，等待从 merged main 创建唯一实现 wor
 
 ## Evidence Index
 
+- [Phase 5 Task 1 accepted](checkpoints/CP-20260723-PHASE5-TASK1-ACCEPTED.md)
 - [Phase 5 Task 1 started](checkpoints/CP-20260723-PHASE5-TASK1-STARTED.md)
 - [Phase 5 plan approved](checkpoints/CP-20260723-PHASE5-PLAN-APPROVED.md)
 - [Phase 5 plan submitted](checkpoints/CP-20260723-PHASE5-PLAN-SUBMITTED.md)
