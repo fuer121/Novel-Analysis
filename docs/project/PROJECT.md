@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 78421b32d812f281480bca0e2af403484f6a1062
 baseline_status: current
-updated_at: 2026-07-23T13:05:14+08:00
+updated_at: 2026-07-23T13:15:58+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK4-BLOCKED
+last_checkpoint: CP-20260723-PHASE5-TASK4-UNBLOCKED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | implementer-agent | codex/phase5-task4 | c9d5663297c5c636d55385330068dfce5d718689 | 959bc28ad72c59ba0216402e8f1170617bce23f9 | blocked | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK4-BLOCKED | user decision required: approve database-to-domain shared selector extraction or move readiness ownership；Task 5 locked |
+| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | implementer-agent | codex/phase5-task4 | c9d5663297c5c636d55385330068dfce5d718689 | 959bc28ad72c59ba0216402e8f1170617bce23f9 | in_progress | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK4-UNBLOCKED | merge DEC-0018 governance, update preserved worktree, mechanically extract shared selector and re-review；Task 5 locked |
 
 ## Phase Ledgers
 
@@ -70,6 +70,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 - [DEC-0015 Query Turn History And Trace Projection](decisions/DEC-0015-query-turn-history-and-trace-projection.md)
 - [DEC-0016 Encrypted Advanced Analysis Execution Snapshot](decisions/DEC-0016-phase4-encrypted-execution-snapshot.md)
 - [DEC-0017 Phase 5 Selective Migration And No Entry Rollback](decisions/DEC-0017-phase5-selective-migration-and-no-entry-rollback.md)
+- [DEC-0018 Phase 5 Shared Freshness Selector Ownership](decisions/DEC-0018-phase5-shared-freshness-selector.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -89,7 +90,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-3 已合并；Task 4 implementation/spec correction 已完成但 quality review 发现 canonical freshness 不能在当前 dependency graph 内复用，状态 blocked，等待 dependency/ownership 决策；Task 5 与所有正式操作未解锁
+Phase 5 Tasks 1-3 已合并；用户批准 DEC-0018 方案 A，Task 4 已解锁并将在 preserved worktree机械抽取 shared canonical selector后重新审查；Task 5 与所有正式操作未解锁
 
 ## Next Gate
 
@@ -97,6 +98,8 @@ Phase 5 Tasks 1-3 已合并；Task 4 implementation/spec correction 已完成但
 
 ## Evidence Index
 
+- [Phase 5 Task 4 unblocked](checkpoints/CP-20260723-PHASE5-TASK4-UNBLOCKED.md)
+- [Phase 5 shared freshness selector decision](decisions/DEC-0018-phase5-shared-freshness-selector.md)
 - [Phase 5 Task 4 blocked](checkpoints/CP-20260723-PHASE5-TASK4-BLOCKED.md)
 - [Phase 5 Task 3 merged and Task 4 started](checkpoints/CP-20260723-PHASE5-TASK3-MERGED-TASK4-STARTED.md)
 - [Phase 5 Task 3 accepted](checkpoints/CP-20260723-PHASE5-TASK3-ACCEPTED.md)
