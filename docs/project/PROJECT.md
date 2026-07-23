@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: c41cf0f6f09f267d52d53a14f3952b0628c77798
+baseline_commit: 0eaf4b5430cd56de01caa39f470c73ccb97782c5
 baseline_status: current
-updated_at: 2026-07-23T15:54:27+08:00
+updated_at: 2026-07-23T16:00:23+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK5-ACCEPTED
+last_checkpoint: CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `c41cf0f6f09f267d52d53a14f3952b0628c77798` |
-| Latest merged implementation | PR #143 `https://github.com/fuer121/Novel-Analysis/pull/143` |
+| Accepted implementation baseline | `0eaf4b5430cd56de01caa39f470c73ccb97782c5` |
+| Latest merged implementation | PR #146 `https://github.com/fuer121/Novel-Analysis/pull/146` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK5 | phase-5 | Approved indexing baseline and recoverable persistent rebuild batch | controller-agent | codex/phase5-task5 | df4b29259e9c52d12cab08976a921cb5bfc95a7e | a728013c63fb6465540e88a9fe6e1d65b390a2a4 | accepted | CP-20260723-PHASE5-TASK4-MERGED | CP-20260723-PHASE5-TASK5-ACCEPTED | create PR, verify CI, merge under DEC-0002, then post-merge checkpoint |
+| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | unassigned | none | 0eaf4b5430cd56de01caa39f470c73ccb97782c5 | 0eaf4b5430cd56de01caa39f470c73ccb97782c5 | ready | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | merge contract, create unique worktree and dispatch fresh implementer；local synthetic load only |
 
 ## Phase Ledgers
 
@@ -91,7 +91,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-4已合并；Task 5 implementation已通过双阶段独立审查与controller full verification并accepted，等待PR/CI/merge；Task 6与所有正式操作未解锁
+Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 capacity harness contract已接受，等待治理PR合并与fresh implementer；Task 7、Task 8与所有正式操作未解锁
 
 ## Next Gate
 
@@ -99,6 +99,7 @@ Phase 5 Tasks 1-4已合并；Task 5 implementation已通过双阶段独立审查
 
 ## Evidence Index
 
+- [Phase 5 Task 5 merged and Task 6 started](checkpoints/CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED.md)
 - [Phase 5 Task 5 accepted](checkpoints/CP-20260723-PHASE5-TASK5-ACCEPTED.md)
 - [Phase 5 Task 5 reorder correction](checkpoints/CP-20260723-PHASE5-TASK5-REORDER-CORRECTION.md)
 - [Phase 5 Task 5 started](checkpoints/CP-20260723-PHASE5-TASK5-STARTED.md)
