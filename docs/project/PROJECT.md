@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: c41cf0f6f09f267d52d53a14f3952b0628c77798
 baseline_status: current
-updated_at: 2026-07-23T14:36:00+08:00
+updated_at: 2026-07-23T15:54:27+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK5-REORDER-CORRECTION
+last_checkpoint: CP-20260723-PHASE5-TASK5-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK5 | phase-5 | Approved indexing baseline and recoverable persistent rebuild batch | implementation-agent | codex/phase5-task5 | df4b29259e9c52d12cab08976a921cb5bfc95a7e | df4b29259e9c52d12cab08976a921cb5bfc95a7e | in_progress | CP-20260723-PHASE5-TASK4-MERGED | CP-20260723-PHASE5-TASK5-REORDER-CORRECTION | implement with TDD using DEC-0019 positive temporary range；synthetic recovery only |
+| PHASE5-TASK5 | phase-5 | Approved indexing baseline and recoverable persistent rebuild batch | controller-agent | codex/phase5-task5 | df4b29259e9c52d12cab08976a921cb5bfc95a7e | a728013c63fb6465540e88a9fe6e1d65b390a2a4 | accepted | CP-20260723-PHASE5-TASK4-MERGED | CP-20260723-PHASE5-TASK5-ACCEPTED | create PR, verify CI, merge under DEC-0002, then post-merge checkpoint |
 
 ## Phase Ledgers
 
@@ -91,7 +91,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-4已合并；Task 5已通过DEC-0019修正reorder collision strategy并恢复TDD实施；Task 6与所有正式操作未解锁
+Phase 5 Tasks 1-4已合并；Task 5 implementation已通过双阶段独立审查与controller full verification并accepted，等待PR/CI/merge；Task 6与所有正式操作未解锁
 
 ## Next Gate
 
@@ -99,6 +99,7 @@ Phase 5 Tasks 1-4已合并；Task 5已通过DEC-0019修正reorder collision stra
 
 ## Evidence Index
 
+- [Phase 5 Task 5 accepted](checkpoints/CP-20260723-PHASE5-TASK5-ACCEPTED.md)
 - [Phase 5 Task 5 reorder correction](checkpoints/CP-20260723-PHASE5-TASK5-REORDER-CORRECTION.md)
 - [Phase 5 Task 5 started](checkpoints/CP-20260723-PHASE5-TASK5-STARTED.md)
 - [Phase 5 Task 4 merged](checkpoints/CP-20260723-PHASE5-TASK4-MERGED.md)
