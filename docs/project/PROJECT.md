@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-23T20:59:36+08:00
+updated_at: 2026-07-23T21:05:15+08:00
 updated_by: controller-agent
-current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK8-MERGED-TOOLS-GATE-SUBMITTED
-next_gate: GATE-PHASE5-TOOLS-ACCEPTED
+current_phase: phase-5-tools-accepted
+last_checkpoint: CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED
+next_gate: GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | active | 8 项工程任务已批准；正式数据、部署、UAT 与切换未授权 |
+| Phase 5 | tools accepted | Tasks 1–8已合并；production snapshot、rehearsal、UAT、部署与切换未授权 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GATE-PHASE5-TOOLS-ACCEPTED | phase-5 | Engineering tools Gate decision | user | none | 069e3f399d6ac06eec9b64fdb85436ad6cc9f846 | 069e3f399d6ac06eec9b64fdb85436ad6cc9f846 | ready | CP-20260723-PHASE5-TASK8-MERGED-TOOLS-GATE-SUBMITTED | CP-20260723-PHASE5-TOOLS-GATE-SUBMITTED | await explicit user Gate decision |
+| GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS | phase-5 | Production snapshot access authorization | user | none | d5967f3391c2865f3ab221d8376033d72776f5aa | d5967f3391c2865f3ab221d8376033d72776f5aa | ready | CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED | CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED | prepare access scope without reading production data |
 
 ## Phase Ledgers
 
@@ -94,14 +94,15 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1–8 engineering tools已合并并post-merge verified；`GATE-PHASE5-TOOLS-ACCEPTED`已submitted并等待用户明确决策；所有formal operation Gates仍未解锁
+`GATE-PHASE5-TOOLS-ACCEPTED`已通过；下一步只允许准备Production Snapshot Access Gate，production snapshot、old key、target-server rehearsal、UAT、deployment与cutover仍未授权
 
 ## Next Gate
 
-下一阶段门禁为 `GATE-PHASE5-TOOLS-ACCEPTED`，只有 Tasks 1 至 8 全部 accepted 并 merged 后才可请求明确 Gate 决策
+下一阶段门禁为`GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS`；接受前不得读取、复制、解密或指纹化production snapshot，不得请求或使用old production key
 
 ## Evidence Index
 
+- [Phase 5 tools Gate accepted](checkpoints/CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED.md)
 - [Phase 5 Task 8 merged and tools Gate submitted](checkpoints/CP-20260723-PHASE5-TASK8-MERGED-TOOLS-GATE-SUBMITTED.md)
 - [Phase 5 tools Gate submitted](checkpoints/CP-20260723-PHASE5-TOOLS-GATE-SUBMITTED.md)
 - [Phase 5 Task 8 accepted](checkpoints/CP-20260723-PHASE5-TASK8-ACCEPTED.md)
