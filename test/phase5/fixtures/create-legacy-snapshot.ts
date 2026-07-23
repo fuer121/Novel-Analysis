@@ -3,7 +3,9 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-export const createLegacySnapshot = (filePath: string): void => {
+export const SYNTHETIC_LEGACY_MASTER_KEY = Buffer.alloc(32, 7);
+
+const createSnapshot = (filePath: string, emptyChapter: boolean): void => {
   mkdirSync(dirname(filePath), { recursive: true });
   const db = new DatabaseSync(filePath);
   try {
@@ -28,13 +30,14 @@ export const createLegacySnapshot = (filePath: string): void => {
     `);
     db.prepare("INSERT INTO books VALUES (?, ?, ?, ?)").run(
       "book-source-1",
-      "Synthetic Book",
+      emptyChapter ? "" : "Synthetic Book",
       "2026-01-01T00:00:00.000Z",
       "2026-01-03T00:00:00.000Z",
     );
     const insert = db.prepare("INSERT INTO chapters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
     for (const chapterIndex of [2, 1]) {
-      const plaintext = `Synthetic chapter ${chapterIndex}`;
+      const isEmpty = emptyChapter && chapterIndex === 1;
+      const plaintext = isEmpty ? "" : `Synthetic chapter ${chapterIndex}`;
       const iv = randomBytes(12);
       const cipher = createCipheriv("aes-256-gcm", SYNTHETIC_LEGACY_MASTER_KEY, iv);
       cipher.setAAD(Buffer.from(`chapter:book-source-1:${chapterIndex}`));
@@ -42,7 +45,7 @@ export const createLegacySnapshot = (filePath: string): void => {
       insert.run(
         "book-source-1",
         chapterIndex,
-        `Chapter ${chapterIndex}`,
+        isEmpty ? "" : `Chapter ${chapterIndex}`,
         createHmac("sha256", SYNTHETIC_LEGACY_MASTER_KEY).update(plaintext).digest("hex"),
         ciphertext.toString("base64"),
         iv.toString("base64"),
@@ -56,4 +59,6 @@ export const createLegacySnapshot = (filePath: string): void => {
   }
 };
 
-export const SYNTHETIC_LEGACY_MASTER_KEY = Buffer.alloc(32, 7);
+export const createLegacySnapshot = (filePath: string): void => createSnapshot(filePath, false);
+
+export const createEmptyLegacySnapshot = (filePath: string): void => createSnapshot(filePath, true);

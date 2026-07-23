@@ -20,6 +20,11 @@ const nonemptyString = (value: SQLInputValue, field: string): string => {
   return value;
 };
 
+const stringValue = (value: SQLInputValue, field: string): string => {
+  if (typeof value !== "string") throw new Error(`invalid legacy value: ${field}`);
+  return value;
+};
+
 const assertNoSidecars = (filePath: string): void => {
   for (const suffix of ["-wal", "-shm"]) {
     try {
@@ -49,9 +54,9 @@ const readBooks = (db: DatabaseSync): readonly LegacyBook[] => {
     identities.add(sourceId);
     return Object.freeze({
       sourceId,
-      title: nonemptyString(row.book_name, "books.book_name"),
-      createdAt: nonemptyString(row.created_at, "books.created_at"),
-      updatedAt: nonemptyString(row.updated_at, "books.updated_at"),
+      title: stringValue(row.book_name, "books.book_name"),
+      createdAt: stringValue(row.created_at, "books.created_at"),
+      updatedAt: stringValue(row.updated_at, "books.updated_at"),
     });
   }));
 };
@@ -73,7 +78,7 @@ const readChapters = (db: DatabaseSync, bookIds: ReadonlySet<string>): readonly 
     if (positions.has(position)) throw new Error(`duplicate chapter position: ${bookSourceId}/${row.chapter_index}`);
     positions.add(position);
 
-    if (typeof row.ciphertext !== "string" || !row.ciphertext.trim()
+    if (typeof row.ciphertext !== "string"
       || typeof row.iv !== "string" || !row.iv.trim()
       || typeof row.tag !== "string" || !row.tag.trim()) {
       throw new Error(`incomplete chapter cipher tuple: ${bookSourceId}/${row.chapter_index}`);
@@ -81,19 +86,19 @@ const readChapters = (db: DatabaseSync, bookIds: ReadonlySet<string>): readonly 
     const ciphertext = row.ciphertext;
     const iv = row.iv;
     const tag = row.tag;
-    const algorithm = nonemptyString(row.algorithm, "chapters.algorithm");
+    const algorithm = stringValue(row.algorithm, "chapters.algorithm");
     if (algorithm !== "aes-256-gcm") throw new Error(`unsupported chapter algorithm: ${algorithm}`);
 
     return Object.freeze({
       bookSourceId,
       chapterIndex: row.chapter_index,
-      title: nonemptyString(row.title, "chapters.title"),
+      title: stringValue(row.title, "chapters.title"),
       contentHmac: nonemptyString(row.content_hmac, "chapters.content_hmac"),
       ciphertext,
       iv,
       tag,
       algorithm,
-      updatedAt: nonemptyString(row.updated_at, "chapters.updated_at"),
+      updatedAt: stringValue(row.updated_at, "chapters.updated_at"),
     });
   }));
 };

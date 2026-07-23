@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, describe, expect, it } from "vitest";
-import { createLegacySnapshot, SYNTHETIC_LEGACY_MASTER_KEY } from "../../../test/phase5/fixtures/create-legacy-snapshot.js";
+import { createEmptyLegacySnapshot, createLegacySnapshot, SYNTHETIC_LEGACY_MASTER_KEY } from "../../../test/phase5/fixtures/create-legacy-snapshot.js";
 import { createLegacySnapshotOpener, openLegacySnapshot } from "./legacy-reader.js";
 
 const temporaryDirectories: string[] = [];
@@ -73,6 +73,26 @@ describe("openLegacySnapshot", () => {
       expect(plaintext).toBe(`Synthetic chapter ${chapter.chapterIndex}`);
       expect(chapter.contentHmac).toBe(createHmac("sha256", SYNTHETIC_LEGACY_MASTER_KEY).update(plaintext).digest("hex"));
     }
+    reader.close();
+  });
+
+  it("accepts and independently verifies an unnamed empty encrypted chapter", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "empty legacy snapshot #"));
+    temporaryDirectories.push(directory);
+    const filePath = join(directory, "empty # snapshot.sqlite");
+    createEmptyLegacySnapshot(filePath);
+
+    const reader = openLegacySnapshot({ filePath, readOnly: true });
+    expect(reader.books()[0]!.title).toBe("");
+    const chapter = reader.chapters("book-source-1")[0]!;
+    expect(chapter.title).toBe("");
+    expect(chapter.ciphertext).toBe("");
+    const decipher = createDecipheriv("aes-256-gcm", SYNTHETIC_LEGACY_MASTER_KEY, Buffer.from(chapter.iv, "base64"));
+    decipher.setAAD(Buffer.from(`chapter:${chapter.bookSourceId}:${chapter.chapterIndex}`));
+    decipher.setAuthTag(Buffer.from(chapter.tag, "base64"));
+    const plaintext = Buffer.concat([decipher.update(Buffer.from(chapter.ciphertext, "base64")), decipher.final()]).toString("utf8");
+    expect(plaintext).toBe("");
+    expect(chapter.contentHmac).toBe(createHmac("sha256", SYNTHETIC_LEGACY_MASTER_KEY).update(plaintext).digest("hex"));
     reader.close();
   });
 
@@ -174,12 +194,7 @@ describe("openLegacySnapshot", () => {
   });
 
   it.each([
-    ["books", "book_name"],
-    ["books", "created_at"],
-    ["books", "updated_at"],
-    ["chapters", "title"],
     ["chapters", "content_hmac"],
-    ["chapters", "updated_at"],
   ])("rejects empty required metadata %s.%s", async (table, column) => {
     const filePath = await snapshot();
     mutate(filePath, `UPDATE ${table} SET ${column} = '   '`);
@@ -192,7 +207,7 @@ describe("openLegacySnapshot", () => {
     expect(() => openLegacySnapshot({ filePath, readOnly: true })).toThrow("unsupported chapter algorithm");
   });
 
-  it.each(["ciphertext", "iv", "tag"])("rejects an incomplete cipher tuple missing %s", async (column) => {
+  it.each(["iv", "tag"])("rejects an incomplete cipher tuple missing %s", async (column) => {
     const filePath = await snapshot();
     mutate(filePath, `UPDATE chapters SET ${column} = '' WHERE chapter_index = 1`);
     expect(() => openLegacySnapshot({ filePath, readOnly: true })).toThrow("incomplete chapter cipher tuple");
