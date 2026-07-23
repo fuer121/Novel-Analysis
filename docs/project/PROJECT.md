@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 0eaf4b5430cd56de01caa39f470c73ccb97782c5
 baseline_status: current
-updated_at: 2026-07-23T16:00:23+08:00
+updated_at: 2026-07-23T16:20:00+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED
+last_checkpoint: CP-20260723-PHASE5-TASK6-BLOCKED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | unassigned | none | 0eaf4b5430cd56de01caa39f470c73ccb97782c5 | 0eaf4b5430cd56de01caa39f470c73ccb97782c5 | ready | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | merge contract, create unique worktree and dispatch fresh implementer；local synthetic load only |
+| PHASE5-TASK6 | phase-5 | Production-scale capacity harness with controlled provider | implementation-agent | codex/phase5-task6 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | 66e1f4d5d4ea98b611dc6556c748234e077f82a3 | blocked | CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED | CP-20260723-PHASE5-TASK6-BLOCKED | choose reproducibility audit, performance diagnosis, or remain blocked；preserve threshold and drafts |
 
 ## Phase Ledgers
 
@@ -91,7 +91,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 capacity harness contract已接受，等待治理PR合并与fresh implementer；Task 7、Task 8与所有正式操作未解锁
+Phase 5 Tasks 1-5已合并并post-merge verified；Task 6最终artifact复跑browse p95 505.528ms超过500ms threshold且与前次结果冲突，已暂停等待决策；Task 7、Task 8与所有正式操作未解锁
 
 ## Next Gate
 
@@ -99,6 +99,7 @@ Phase 5 Tasks 1-5已合并并post-merge verified；Task 6 capacity harness contr
 
 ## Evidence Index
 
+- [Phase 5 Task 6 blocked](checkpoints/CP-20260723-PHASE5-TASK6-BLOCKED.md)
 - [Phase 5 Task 5 merged and Task 6 started](checkpoints/CP-20260723-PHASE5-TASK5-MERGED-TASK6-STARTED.md)
 - [Phase 5 Task 5 accepted](checkpoints/CP-20260723-PHASE5-TASK5-ACCEPTED.md)
 - [Phase 5 Task 5 reorder correction](checkpoints/CP-20260723-PHASE5-TASK5-REORDER-CORRECTION.md)
