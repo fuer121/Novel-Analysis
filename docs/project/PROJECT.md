@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f207db4310b944eb0114a28ccde03bf973636161
 baseline_status: current
-updated_at: 2026-07-23T10:26:32+08:00
+updated_at: 2026-07-23T10:29:47+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-PLAN-APPROVED
+last_checkpoint: CP-20260723-PHASE5-TASK1-STARTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-PLAN | phase-5 | Migration、rebuild、performance and operations implementation plan | controller-agent | codex/phase5-plan | f71782e5a35ae694092a2e336a91c0b1221a1993 | 33b419a8009875712b9e251c6c58988532a9e31a | accepted | CP-20260723-PHASE5-DESIGN-ACCEPTED | CP-20260723-PHASE5-PLAN-APPROVED | merge plan and start Task 1 contract；no formal operations |
+| PHASE5-TASK1 | phase-5 | Migration contracts and read-only legacy snapshot boundary | unassigned | none | b7b5a8b10d613fd3a3eac3c0ffef7e32c4aeb3bf | b7b5a8b10d613fd3a3eac3c0ffef7e32c4aeb3bf | ready | CP-20260723-PHASE5-PLAN-APPROVED | CP-20260723-PHASE5-TASK1-STARTED | merge contract and create one implementation worktree；no formal operations |
 
 ## Phase Ledgers
 
@@ -89,7 +89,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 的 8 项实施计划已批准，可按 Task Contract 实施；正式快照、旧密钥、飞书配置、UAT、部署与切换仍未授权
+Phase 5 Task 1 contract 已接受，等待从 merged main 创建唯一实现 worktree；Task 2 与所有正式操作未解锁
 
 ## Next Gate
 
@@ -97,6 +97,7 @@ Phase 5 的 8 项实施计划已批准，可按 Task Contract 实施；正式快
 
 ## Evidence Index
 
+- [Phase 5 Task 1 started](checkpoints/CP-20260723-PHASE5-TASK1-STARTED.md)
 - [Phase 5 plan approved](checkpoints/CP-20260723-PHASE5-PLAN-APPROVED.md)
 - [Phase 5 plan submitted](checkpoints/CP-20260723-PHASE5-PLAN-SUBMITTED.md)
 - [Phase 5 implementation plan](../superpowers/plans/2026-07-23-phase-5-migration-cutover-implementation-plan.md)
