@@ -1,8 +1,12 @@
 # Phase 5 Performance Report Schema
 
-`phase5-load-report-v1`记录一次本地受控容量测试的环境、数据规模、原始样本、阈值结果和队列优先级证据，不代表生产容量承诺
+`phase5-load-report-v1`记录一次专用空闲本地宿主上的受控容量测试环境、数据规模、原始样本、阈值结果和队列优先级证据，不代表生产容量承诺
 
 ## Reproduction
+
+运行前确认测试PostgreSQL健康、宿主没有其他高负载任务，并使用controlled provider。该命令只供手动本地证据使用，standard CI不运行scale suite
+
+同一repository同一时间只允许一个scale run。命令在测量前取得跨process、跨worktree共享的single-instance lock；并发命令会fail closed，不会建库、测量或覆盖performance report
 
 运行专用 suite 并保留机器可读报告
 
@@ -23,6 +27,8 @@ npm run test:phase5:scale -- --reporter=json --outputFile=.artifacts/phase5-scal
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `schemaVersion` | `"phase5-load-report-v1"` | 报告结构版本 |
+| `benchmarkContractVersion` | `"phase5-local-idle-v1"` | 专用空闲本地benchmark执行契约 |
+| `isolation` | object | `mode: "local-idle-host"`与成功取得single-instance lock的证据 |
 | `status` | `"PASS" \| "FAIL"` | 全部 latency 与 priority checks 的汇总结果 |
 | `server` | object | CPU、总内存字节数、Node 与 PostgreSQL 版本 |
 | `dataset` | object | 测量数据库中的 books、chapters 与 facts 计数 |

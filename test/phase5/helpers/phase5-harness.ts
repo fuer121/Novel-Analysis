@@ -574,13 +574,20 @@ export class Phase5ScaleHarness implements Phase5LoadHarness {
       delivered_at: null,
     }).execute();
     this.rebuildJobId = job.id;
-    await Promise.race([
-      this.barrier.started,
-      new Promise<never>((_, reject) => setTimeout(
-        () => reject(new Error("Timed out waiting for running rebuild step")),
-        10_000,
-      )),
-    ]);
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.barrier.started,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error("Timed out waiting for running rebuild step")),
+            10_000,
+          );
+        }),
+      ]);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+    }
   }
 
   async submit(userIndex: number): Promise<{

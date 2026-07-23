@@ -28,6 +28,9 @@ describe("Phase 5 production-scale capacity evidence", () => {
   afterEach(async () => harness?.stop());
 
   it("meets the accepted thresholds through real API, PostgreSQL, and a controlled provider", async () => {
+    if (process.env.PHASE5_SCALE_LOCK_ACQUIRED !== "1") {
+      throw new Error("Phase 5 scale benchmark requires the single-instance isolation runner");
+    }
     harness = await createPhase5ScaleHarness(PHASE5_SCALE_PROFILE);
 
     const report = await runPhase5Load(harness, PHASE5_SCALE_PROFILE);
@@ -35,6 +38,11 @@ describe("Phase 5 production-scale capacity evidence", () => {
     console.info("PHASE5_LOAD_REPORT", JSON.stringify(report));
 
     expect(report.dataset).toEqual(PHASE5_SCALE_PROFILE.dataset);
+    expect(report.benchmarkContractVersion).toBe("phase5-local-idle-v1");
+    expect(report.isolation).toEqual({
+      mode: "local-idle-host",
+      lockAcquired: true,
+    });
     expect(report.browse.users).toBe(20);
     expect(report.submit.users).toBe(10);
     expect(report.rawSamplesMs.browse).toHaveLength(20);

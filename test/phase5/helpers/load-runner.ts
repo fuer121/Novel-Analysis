@@ -24,6 +24,11 @@ export type Phase5LoadProfile = Readonly<{
 
 export type Phase5LoadReport = Readonly<{
   schemaVersion: "phase5-load-report-v1";
+  benchmarkContractVersion: "phase5-local-idle-v1";
+  isolation: Readonly<{
+    mode: "local-idle-host";
+    lockAcquired: true;
+  }>;
   status: Check;
   server: Readonly<{
     cpu: string;
@@ -132,6 +137,8 @@ export async function runPhase5Load(
 
   return {
     schemaVersion: "phase5-load-report-v1",
+    benchmarkContractVersion: "phase5-local-idle-v1",
+    isolation: { mode: "local-idle-host", lockAcquired: true },
     status: Object.values(checks).every((value) => value === "PASS")
       ? "PASS"
       : "FAIL",
