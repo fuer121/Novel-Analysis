@@ -44,6 +44,16 @@ describe("book analysis readiness", () => {
     }).execute();
   }
 
+  async function completeCoverage() {
+    const { bookId, chapters } = await fixture(2);
+    const { indexes, l1Prompt, workflow, group } = await indexSetup(bookId);
+    for (const chapter of chapters) {
+      await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: workflow.id, inputSignature: chapter.id, status: "fresh", route: {} });
+      await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: chapter.id, status: "fresh" });
+    }
+    return bookId;
+  }
+
   test("returns waiting for a book without chapters or indexes", async () => {
     const { bookId } = await fixture(0);
     expect(await getBookAnalysisReadiness(postgres.db, bookId)).toEqual({
@@ -73,15 +83,34 @@ describe("book analysis readiness", () => {
   });
 
   test("returns available only for complete current L1 and base-group L2 coverage", async () => {
-    const { bookId, chapters } = await fixture(2);
-    const { indexes, l1Prompt, workflow, group } = await indexSetup(bookId);
-    for (const chapter of chapters) {
-      await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: workflow.id, inputSignature: chapter.id, status: "fresh", route: {} });
-      await indexes.putL2ChapterStatus({ groupId: group.id, chapterId: chapter.id, inputSignature: chapter.id, status: "fresh" });
-    }
+    const bookId = await completeCoverage();
     expect(await getBookAnalysisReadiness(postgres.db, bookId)).toEqual({
       state: "available", chapterTotal: 2, l1Fresh: 2, l2Fresh: 2, progressPercent: 100,
       analysisAvailable: true, blockingCode: null,
+    });
+  });
+
+  test("locks retained complete coverage while a new L1 job is active", async () => {
+    const bookId = await completeCoverage();
+    await job(bookId, "l1-index", "running");
+    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+      state: "building_l1", progressPercent: 100, analysisAvailable: false, blockingCode: "l1_incomplete",
+    });
+  });
+
+  test("locks retained complete coverage while a new L2 job is active", async () => {
+    const bookId = await completeCoverage();
+    await job(bookId, "l2-index", "running");
+    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+      state: "building_l2", progressPercent: 100, analysisAvailable: false, blockingCode: "l2_incomplete",
+    });
+  });
+
+  test("marks retained complete coverage failed when the latest rebuild job failed", async () => {
+    const bookId = await completeCoverage();
+    await job(bookId, "l1-index", "failed");
+    expect(await getBookAnalysisReadiness(postgres.db, bookId)).toMatchObject({
+      state: "failed", progressPercent: 100, analysisAvailable: false, blockingCode: "rebuild_failed",
     });
   });
 

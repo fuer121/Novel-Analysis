@@ -70,6 +70,44 @@ describe("book workspace", () => {
     expect(readinessSlot?.textContent).toBe("");
   });
 
+  it("blocks analysis navigation immediately while readiness is pending", async () => {
+    let resolveReadiness: ((response: Response) => void) | undefined;
+    const pendingReadiness = new Promise<Response>((resolve) => { resolveReadiness = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `/api/books/${book.id}`) return json({ book });
+      if (url.endsWith("/analysis-readiness")) return pendingReadiness;
+      if (url.endsWith("/l1-coverage")) return json({ total: 12, fresh: 3, missing: 6, failed: 1, stale: 2 });
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath(`/books/${book.id}/overview`);
+    const query = await screen.findByRole("link", { name: /连续提问/ });
+    expect(query.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("link", { name: /高级分析/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("索引重建中")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("0");
+    await userEvent.click(query);
+    expect(screen.getByRole("heading", { name: "索引概况" })).toBeTruthy();
+    resolveReadiness?.(json({ state: "available", chapterTotal: 12, l1Fresh: 12, l2Fresh: 12, progressPercent: 100, analysisAvailable: true, blockingCode: null }));
+  });
+
+  it("keeps analysis navigation locked when readiness fails", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `/api/books/${book.id}`) return json({ book });
+      if (url.endsWith("/analysis-readiness")) return json({ error: "internal_error" }, 500);
+      if (url.endsWith("/l1-coverage")) return json({ total: 12, fresh: 3, missing: 6, failed: 1, stale: 2 });
+      throw new Error(`unexpected ${url}`);
+    }));
+    renderPath(`/books/${book.id}/overview`);
+    const query = await screen.findByRole("link", { name: /连续提问/ });
+    await waitFor(() => expect(screen.getByText("索引重建中")).toBeTruthy());
+    expect(query.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("link", { name: /高级分析/ }).getAttribute("aria-disabled")).toBe("true");
+    await userEvent.click(query);
+    expect(screen.getByRole("heading", { name: "索引概况" })).toBeTruthy();
+  });
+
   it("requires preview and reconfirmation when the server reports scope_changed", async () => {
     let submissions = 0;
     const keys: string[] = [];

@@ -38,31 +38,29 @@ export async function getBookAnalysisReadiness(
   const l1Fresh = Number(row.l1_fresh);
   const l2Fresh = Number(row.l2_fresh);
   const progressPercent = chapterTotal === 0 ? 0 : Math.floor(((l1Fresh + l2Fresh) * 100) / (chapterTotal * 2));
-  const complete = chapterTotal > 0 && l1Fresh === chapterTotal && l2Fresh === chapterTotal;
-  if (complete) {
-    return { state: "available", chapterTotal, l1Fresh, l2Fresh, progressPercent: 100, analysisAvailable: true, blockingCode: null };
-  }
 
-  const jobs = await database.selectFrom("jobs")
+  const currentJob = await database.selectFrom("jobs")
     .select(["type", "status"])
     .where("type", "in", ["l1-index", "l2-index"])
     .where(sql<boolean>`scope ->> 'bookId' = ${bookId}`)
+    .orderBy("updated_at", "desc")
     .orderBy("created_at", "desc")
     .orderBy("id", "desc")
-    .execute();
-  const latest = new Map<string, (typeof jobs)[number]>();
-  for (const job of jobs) if (!latest.has(job.type)) latest.set(job.type, job);
-  const l1Job = latest.get("l1-index");
-  const l2Job = latest.get("l2-index");
+    .executeTakeFirst();
 
-  if (l1Job && ACTIVE_JOB_STATUSES.has(l1Job.status)) {
+  if (currentJob?.status === "failed") {
+    return { state: "failed", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "rebuild_failed" };
+  }
+  if (currentJob?.type === "l1-index" && ACTIVE_JOB_STATUSES.has(currentJob.status)) {
     return { state: "building_l1", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "l1_incomplete" };
   }
-  if (l1Fresh === chapterTotal && l2Job && ACTIVE_JOB_STATUSES.has(l2Job.status)) {
+  if (currentJob?.type === "l2-index" && ACTIVE_JOB_STATUSES.has(currentJob.status)) {
     return { state: "building_l2", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "l2_incomplete" };
   }
-  if (l1Job?.status === "failed" || l2Job?.status === "failed") {
-    return { state: "failed", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "rebuild_failed" };
+
+  const complete = chapterTotal > 0 && l1Fresh === chapterTotal && l2Fresh === chapterTotal;
+  if (complete) {
+    return { state: "available", chapterTotal, l1Fresh, l2Fresh, progressPercent: 100, analysisAvailable: true, blockingCode: null };
   }
   if (chapterTotal > 0 && l1Fresh === chapterTotal) {
     return { state: "building_l2", chapterTotal, l1Fresh, l2Fresh, progressPercent, analysisAvailable: false, blockingCode: "l2_incomplete" };

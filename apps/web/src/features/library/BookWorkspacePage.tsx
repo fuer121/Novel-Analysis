@@ -8,7 +8,7 @@ export function BookWorkspacePage() {
   const { bookId } = useParams();
   const book = useQuery({ queryKey: ["book", bookId], queryFn: () => apiRead<{ book: BookSummary }>(`/books/${bookId}`), enabled: Boolean(bookId) });
   const readiness = useQuery({ queryKey: ["analysis-readiness", bookId], queryFn: () => apiRead<BookAnalysisReadiness>(`/books/${bookId}/analysis-readiness`), enabled: Boolean(bookId) });
-  const analysisLocked = readiness.data?.analysisAvailable === false;
+  const analysisLocked = readiness.data?.analysisAvailable !== true;
   const analysisProgress = readiness.data?.progressPercent ?? 0;
   if (!bookId) return <Navigate to="/books" replace />;
   if (book.isPending) return <p className="empty-state">正在打开书籍...</p>;
@@ -21,11 +21,11 @@ export function BookWorkspacePage() {
       <NavLink to="analysis" aria-disabled={analysisLocked || undefined} onClick={(event) => { if (analysisLocked) event.preventDefault(); }}>高级分析</NavLink>
     </nav>
     <div className="analysis-readiness" aria-live="polite">
-      {analysisLocked && <>
+      {analysisLocked ? <>
         <span>索引重建中</span>
         <progress aria-label="索引重建进度" value={analysisProgress} max={100} />
         <span className="progress-value">{analysisProgress}%</span>
-      </>}
+      </> : null}
     </div>
     <Outlet context={{ book: book.data.book }} />
   </section>;
