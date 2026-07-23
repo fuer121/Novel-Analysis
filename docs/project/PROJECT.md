@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-23T21:05:15+08:00
+updated_at: 2026-07-23T21:15:26+08:00
 updated_by: controller-agent
 current_phase: phase-5-tools-accepted
 last_checkpoint: CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS | phase-5 | Production snapshot access authorization | user | none | d5967f3391c2865f3ab221d8376033d72776f5aa | d5967f3391c2865f3ab221d8376033d72776f5aa | ready | CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED | CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED | prepare access scope without reading production data |
+| GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS | phase-5 | Production snapshot acquisition and controlled custody authorization | user | codex/phase5-snapshot-access-gate | cc6366a4fe87d6b17b59baa8ad5dd763863bf1e6 | cc6366a4fe87d6b17b59baa8ad5dd763863bf1e6 | ready | CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED | CP-20260723-PHASE5-PRODUCTION-SNAPSHOT-ACCESS-GATE-SUBMITTED | await explicit user Gate decision |
 
 ## Phase Ledgers
 
@@ -94,14 +94,15 @@ next_gate: GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS
 
 ## Pending Feedback
 
-`GATE-PHASE5-TOOLS-ACCEPTED`已通过；下一步只允许准备Production Snapshot Access Gate，production snapshot、old key、target-server rehearsal、UAT、deployment与cutover仍未授权
+`GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS`已submitted并等待用户明确决策；本Gate只请求snapshot acquisition与controlled custody，old key、target-server isolated rehearsal、UAT、deployment与cutover保持locked
 
 ## Next Gate
 
-下一阶段门禁为`GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS`；接受前不得读取、复制、解密或指纹化production snapshot，不得请求或使用old production key
+下一阶段门禁为`GATE-PHASE5-PRODUCTION-SNAPSHOT-ACCESS`；接受后只解锁批准边界内的snapshot acquisition、integrity verification与controlled custody，target-server isolated rehearsal仍需下一独立Gate
 
 ## Evidence Index
 
+- [Phase 5 production snapshot access Gate submitted](checkpoints/CP-20260723-PHASE5-PRODUCTION-SNAPSHOT-ACCESS-GATE-SUBMITTED.md)
 - [Phase 5 tools Gate accepted](checkpoints/CP-20260723-PHASE5-TOOLS-GATE-ACCEPTED.md)
 - [Phase 5 Task 8 merged and tools Gate submitted](checkpoints/CP-20260723-PHASE5-TASK8-MERGED-TOOLS-GATE-SUBMITTED.md)
 - [Phase 5 tools Gate submitted](checkpoints/CP-20260723-PHASE5-TOOLS-GATE-SUBMITTED.md)
