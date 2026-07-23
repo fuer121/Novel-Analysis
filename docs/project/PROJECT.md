@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
 source_version: 1
-baseline_commit: 78421b32d812f281480bca0e2af403484f6a1062
+baseline_commit: c41cf0f6f09f267d52d53a14f3952b0628c77798
 baseline_status: current
-updated_at: 2026-07-23T13:59:55+08:00
+updated_at: 2026-07-23T14:05:21+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK4-ACCEPTED
+last_checkpoint: CP-20260723-PHASE5-TASK4-MERGED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -20,8 +20,8 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `78421b32d812f281480bca0e2af403484f6a1062` |
-| Latest merged implementation | PR #139 `https://github.com/fuer121/Novel-Analysis/pull/139` |
+| Accepted implementation baseline | `c41cf0f6f09f267d52d53a14f3952b0628c77798` |
+| Latest merged implementation | PR #143 `https://github.com/fuer121/Novel-Analysis/pull/143` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
 | Dify workflow | [Workflow](../../dify-workflows/manifest.json) |
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | implementer-agent | codex/phase5-task4 | c9d5663297c5c636d55385330068dfce5d718689 | d3eea9de6276a29b974c2e0d6c1074ae66767df8 | accepted | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK4-ACCEPTED | create implementation PR, wait CI, merge, then create merged checkpoint and Task 5 Started Contract；no formal rebuild |
+| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | implementer-agent | main | c9d5663297c5c636d55385330068dfce5d718689 | c41cf0f6f09f267d52d53a14f3952b0628c77798 | merged | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK4-MERGED | create full Task 5 Started Contract before implementation；formal rebuild remains locked |
 
 ## Phase Ledgers
 
@@ -90,7 +90,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-3 已合并；Task 4 已通过 DEC-0018 correction、最终规格与质量验收，等待 implementation PR、CI与合并；Task 5 与所有正式操作未解锁
+Phase 5 Tasks 1-4 已合并并完成post-merge verification；Task 5等待完整Started Contract，所有正式操作未解锁
 
 ## Next Gate
 
@@ -98,6 +98,7 @@ Phase 5 Tasks 1-3 已合并；Task 4 已通过 DEC-0018 correction、最终规�
 
 ## Evidence Index
 
+- [Phase 5 Task 4 merged](checkpoints/CP-20260723-PHASE5-TASK4-MERGED.md)
 - [Phase 5 Task 4 accepted](checkpoints/CP-20260723-PHASE5-TASK4-ACCEPTED.md)
 - [Phase 5 Task 4 unblocked](checkpoints/CP-20260723-PHASE5-TASK4-UNBLOCKED.md)
 - [Phase 5 shared freshness selector decision](decisions/DEC-0018-phase5-shared-freshness-selector.md)
