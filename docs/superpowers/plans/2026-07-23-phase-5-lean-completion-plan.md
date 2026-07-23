@@ -164,4 +164,3 @@ Expected: all commands PASS and the dossier reports formal Gates as pending
 - Task 8 may combine its Merged checkpoint with the Phase 5 tools Gate submission
 - Implementers run focused verification; controller and CI each run the complete bounded suite once
 - Development-machine timing reruns are not repeated unless the harness behavior changes
-

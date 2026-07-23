@@ -37,4 +37,3 @@ supersedes: none
 ## Accepted Result
 
 PHASE5-TASK6从capacity timing blocker恢复为in_progress并进入corrected contract review；PHASE5-TASK7可在独立worktree启动最小实现；PHASE5-TASK8保持locked直到Tasks 6与7 accepted
-
