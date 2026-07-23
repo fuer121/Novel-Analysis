@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f207db4310b944eb0114a28ccde03bf973636161
 baseline_status: current
-updated_at: 2026-07-23T09:28:49+08:00
+updated_at: 2026-07-23T10:26:32+08:00
 updated_by: controller-agent
-current_phase: phase-5-planning
-last_checkpoint: CP-20260723-PHASE5-DESIGN-ACCEPTED
-next_gate: GATE-PHASE5-PLAN-APPROVED
+current_phase: phase-5-plan-approved
+last_checkpoint: CP-20260723-PHASE5-PLAN-APPROVED
+next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | planned | 仅解锁独立规划，未授权编码、正式数据、部署、UAT 或切换 |
+| Phase 5 | active | 8 项工程任务已批准；正式数据、部署、UAT 与切换未授权 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-PLAN | phase-5 | Migration、performance、UAT and cutover planning | controller-agent | codex/phase5-design | fd0702e917ed08778898cc0fbb7cf1442576daf7 | 3d7e43d94dfd4e18c861e9ff3ebb91b5404abf37 | ready | CP-20260723-PHASE5-DESIGN-ACCEPTED | CP-20260723-PHASE5-DESIGN-ACCEPTED | write 6-8 task implementation plan；no implementation or formal operations |
+| PHASE5-PLAN | phase-5 | Migration、rebuild、performance and operations implementation plan | controller-agent | codex/phase5-plan | f71782e5a35ae694092a2e336a91c0b1221a1993 | 33b419a8009875712b9e251c6c58988532a9e31a | accepted | CP-20260723-PHASE5-DESIGN-ACCEPTED | CP-20260723-PHASE5-PLAN-APPROVED | merge plan and start Task 1 contract；no formal operations |
 
 ## Phase Ledgers
 
@@ -89,14 +89,17 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 
 ## Pending Feedback
 
-Phase 5 设计已接受，可编写 6 至 8 项实施计划；编码、正式快照、旧密钥、飞书配置、UAT、部署与切换仍未授权
+Phase 5 的 8 项实施计划已批准，可按 Task Contract 实施；正式快照、旧密钥、飞书配置、UAT、部署与切换仍未授权
 
 ## Next Gate
 
-下一阶段门禁为 `GATE-PHASE5-PLAN-APPROVED`，当前必须先完成 Phase 5 书面设计复核与实施计划审批
+下一阶段门禁为 `GATE-PHASE5-TOOLS-ACCEPTED`，只有 Tasks 1 至 8 全部 accepted 并 merged 后才可请求明确 Gate 决策
 
 ## Evidence Index
 
+- [Phase 5 plan approved](checkpoints/CP-20260723-PHASE5-PLAN-APPROVED.md)
+- [Phase 5 plan submitted](checkpoints/CP-20260723-PHASE5-PLAN-SUBMITTED.md)
+- [Phase 5 implementation plan](../superpowers/plans/2026-07-23-phase-5-migration-cutover-implementation-plan.md)
 - [Phase 5 design accepted](checkpoints/CP-20260723-PHASE5-DESIGN-ACCEPTED.md)
 - [Phase 5 selective migration decision](decisions/DEC-0017-phase5-selective-migration-and-no-entry-rollback.md)
 - [Phase 5 design submitted](checkpoints/CP-20260723-PHASE5-DESIGN-SUBMITTED.md)
