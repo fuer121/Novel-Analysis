@@ -35,6 +35,7 @@
     "test:phase4:e2e": "TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/postgres vitest run --config vitest.phase4.config.ts",
     "test:phase5": "TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/postgres vitest run --config vitest.phase5.config.ts",
     "phase5:preflight": "node scripts/phase5-preflight.mjs",
+    "phase5:acceptance": "node scripts/phase5-acceptance.mjs",
     "test:phase5:scale": "mkdir -p .artifacts && node scripts/run-phase5-scale.mjs",
     "migration:run": "npm run migration -w @novel-analysis/migration --",
     "typecheck:phase1": "tsc -p packages/contracts/tsconfig.json && tsc -p packages/domain/tsconfig.json && tsc -p packages/database/tsconfig.json && tsc -p packages/jobs/tsconfig.json && tsc -p apps/api/tsconfig.json && tsc -p apps/worker/tsconfig.json && tsc -p apps/web/tsconfig.json && tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --strict --esModuleInterop --skipLibCheck --types node,vitest/globals test/phase1/recovery.e2e.test.ts test/phase1/fixtures/feishu-users.ts test/phase1/helpers/processes.ts test/phase1/helpers/test-api-main.ts test/phase1/helpers/controlled-worker-main.ts vitest.e2e.config.ts",
