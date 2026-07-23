@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 78421b32d812f281480bca0e2af403484f6a1062
 baseline_status: current
-updated_at: 2026-07-23T13:15:58+08:00
+updated_at: 2026-07-23T13:59:55+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK4-UNBLOCKED
+last_checkpoint: CP-20260723-PHASE5-TASK4-ACCEPTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | implementer-agent | codex/phase5-task4 | c9d5663297c5c636d55385330068dfce5d718689 | 959bc28ad72c59ba0216402e8f1170617bce23f9 | in_progress | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK4-UNBLOCKED | merge DEC-0018 governance, update preserved worktree, mechanically extract shared selector and re-review；Task 5 locked |
+| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | implementer-agent | codex/phase5-task4 | c9d5663297c5c636d55385330068dfce5d718689 | d3eea9de6276a29b974c2e0d6c1074ae66767df8 | accepted | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK4-ACCEPTED | create implementation PR, wait CI, merge, then create merged checkpoint and Task 5 Started Contract；no formal rebuild |
 
 ## Phase Ledgers
 
@@ -90,7 +90,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-3 已合并；用户批准 DEC-0018 方案 A，Task 4 已解锁并将在 preserved worktree机械抽取 shared canonical selector后重新审查；Task 5 与所有正式操作未解锁
+Phase 5 Tasks 1-3 已合并；Task 4 已通过 DEC-0018 correction、最终规格与质量验收，等待 implementation PR、CI与合并；Task 5 与所有正式操作未解锁
 
 ## Next Gate
 
@@ -98,6 +98,7 @@ Phase 5 Tasks 1-3 已合并；用户批准 DEC-0018 方案 A，Task 4 已解锁�
 
 ## Evidence Index
 
+- [Phase 5 Task 4 accepted](checkpoints/CP-20260723-PHASE5-TASK4-ACCEPTED.md)
 - [Phase 5 Task 4 unblocked](checkpoints/CP-20260723-PHASE5-TASK4-UNBLOCKED.md)
 - [Phase 5 shared freshness selector decision](decisions/DEC-0018-phase5-shared-freshness-selector.md)
 - [Phase 5 Task 4 blocked](checkpoints/CP-20260723-PHASE5-TASK4-BLOCKED.md)
