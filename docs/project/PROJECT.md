@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: c41cf0f6f09f267d52d53a14f3952b0628c77798
 baseline_status: current
-updated_at: 2026-07-23T14:05:21+08:00
+updated_at: 2026-07-23T14:11:32+08:00
 updated_by: controller-agent
 current_phase: phase-5-plan-approved
-last_checkpoint: CP-20260723-PHASE5-TASK4-MERGED
+last_checkpoint: CP-20260723-PHASE5-TASK5-STARTED
 next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TASK4 | phase-5 | Derived rebuild readiness and fail-closed analysis access | implementer-agent | main | c9d5663297c5c636d55385330068dfce5d718689 | c41cf0f6f09f267d52d53a14f3952b0628c77798 | merged | CP-20260723-PHASE5-TASK3-ACCEPTED | CP-20260723-PHASE5-TASK4-MERGED | create full Task 5 Started Contract before implementation；formal rebuild remains locked |
+| PHASE5-TASK5 | phase-5 | Approved indexing baseline and recoverable persistent rebuild batch | unassigned | none | 61ec7ad70815f818ac69d66d8763e3c239e8fdf8 | 61ec7ad70815f818ac69d66d8763e3c239e8fdf8 | ready | CP-20260723-PHASE5-TASK4-MERGED | CP-20260723-PHASE5-TASK5-STARTED | merge contract, create unique worktree and dispatch fresh implementer；synthetic recovery only |
 
 ## Phase Ledgers
 
@@ -90,7 +90,7 @@ next_gate: GATE-PHASE5-TOOLS-ACCEPTED
 
 ## Pending Feedback
 
-Phase 5 Tasks 1-4 已合并并完成post-merge verification；Task 5等待完整Started Contract，所有正式操作未解锁
+Phase 5 Tasks 1-4已合并；Task 5完整Contract已接受，等待治理PR合并；Task 6与所有正式操作未解锁
 
 ## Next Gate
 
@@ -98,6 +98,7 @@ Phase 5 Tasks 1-4 已合并并完成post-merge verification；Task 5等待完整
 
 ## Evidence Index
 
+- [Phase 5 Task 5 started](checkpoints/CP-20260723-PHASE5-TASK5-STARTED.md)
 - [Phase 5 Task 4 merged](checkpoints/CP-20260723-PHASE5-TASK4-MERGED.md)
 - [Phase 5 Task 4 accepted](checkpoints/CP-20260723-PHASE5-TASK4-ACCEPTED.md)
 - [Phase 5 Task 4 unblocked](checkpoints/CP-20260723-PHASE5-TASK4-UNBLOCKED.md)
