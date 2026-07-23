@@ -1,0 +1,56 @@
+import { createCipheriv, createHmac, randomBytes } from "node:crypto";
+import { mkdirSync } from "node:fs";
+import { dirname } from "node:path";
+import { DatabaseSync } from "node:sqlite";
+
+export const createLegacySnapshot = (filePath: string): void => {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const db = new DatabaseSync(filePath);
+  try {
+    db.exec(`
+      CREATE TABLE books (
+        book_id TEXT PRIMARY KEY,
+        book_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+      CREATE TABLE chapters (
+        book_id TEXT NOT NULL,
+        chapter_index INTEGER NOT NULL,
+        title TEXT NOT NULL,
+        content_hmac TEXT NOT NULL,
+        ciphertext TEXT NOT NULL,
+        iv TEXT NOT NULL,
+        tag TEXT NOT NULL,
+        algorithm TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+    `);
+    db.prepare("INSERT INTO books VALUES (?, ?, ?, ?)").run(
+      "book-source-1",
+      "Synthetic Book",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-03T00:00:00.000Z",
+    );
+    const insert = db.prepare("INSERT INTO chapters VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    for (const chapterIndex of [2, 1]) {
+      const plaintext = `Synthetic chapter ${chapterIndex}`;
+      const iv = randomBytes(12);
+      const cipher = createCipheriv("aes-256-gcm", Buffer.alloc(32, 7), iv);
+      const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+      insert.run(
+        "book-source-1",
+        chapterIndex,
+        `Chapter ${chapterIndex}`,
+        createHmac("sha256", Buffer.alloc(32, 9)).update(plaintext).digest("hex"),
+        ciphertext.toString("base64"),
+        iv.toString("base64"),
+        cipher.getAuthTag().toString("base64"),
+        "aes-256-gcm",
+        `2026-01-0${chapterIndex + 1}T00:00:00.000Z`,
+      );
+    }
+  } finally {
+    db.close();
+  }
+};
