@@ -3,7 +3,7 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: f207db4310b944eb0114a28ccde03bf973636161
 baseline_status: current
-updated_at: 2026-07-22T22:37:55+08:00
+updated_at: 2026-07-23T09:04:15+08:00
 updated_by: controller-agent
 current_phase: phase-4-accepted
 last_checkpoint: CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-PLAN | phase-5 | Independent migration、deployment and cutover planning | unassigned | main | ec2d025abd8528fce05c2f5e28a079b0b6c86d98 | ec2d025abd8528fce05c2f5e28a079b0b6c86d98 | planned | CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED | CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED | wait for explicit authorization to start Phase 5 planning；no implementation or formal operations |
+| PHASE5-PLAN | phase-5 | Migration、performance、UAT and cutover design | controller-agent | codex/phase5-design | fd0702e917ed08778898cc0fbb7cf1442576daf7 | fd0702e917ed08778898cc0fbb7cf1442576daf7 | review | CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED | CP-20260723-PHASE5-DESIGN-SUBMITTED | wait for written design review；no implementation or formal operations |
 
 ## Phase Ledgers
 
@@ -88,14 +88,16 @@ next_gate: GATE-PHASE5-PLAN-APPROVED
 
 ## Pending Feedback
 
-Phase 4 Gate 已明确通过；Phase 5 仅为 planned，尚未授权规划实施、正式数据、部署、UAT 或切换
+Phase 5 设计已提交书面复核；只迁移书籍与章节、切换后不恢复旧入口属于拟议设计修正，尚未形成 accepted checkpoint
 
 ## Next Gate
 
-下一阶段门禁为 `GATE-PHASE4-IMPLEMENTATION-ACCEPTED`，只有 Tasks 1 至 7 全部 accepted 并 merged 后才可请求明确 Gate 决策
+下一阶段门禁为 `GATE-PHASE5-PLAN-APPROVED`，当前必须先完成 Phase 5 书面设计复核与实施计划审批
 
 ## Evidence Index
 
+- [Phase 5 design submitted](checkpoints/CP-20260723-PHASE5-DESIGN-SUBMITTED.md)
+- [Phase 5 migration and cutover design](../superpowers/specs/2026-07-23-phase-5-migration-cutover-design.md)
 - [Phase 4 implementation accepted](checkpoints/CP-20260722-PHASE4-IMPLEMENTATION-ACCEPTED.md)
 - [Phase 4 Task 7 merged](checkpoints/CP-20260722-PHASE4-TASK7-MERGED.md)
 - [Phase 4 Task 7 accepted](checkpoints/CP-20260722-PHASE4-TASK7-ACCEPTED.md)
