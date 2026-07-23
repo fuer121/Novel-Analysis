@@ -39,6 +39,37 @@ describe("book workspace", () => {
     expect(screen.getByRole("link", { name: "导入" }).getAttribute("href")).toContain(`/books/${book.id}/import`);
   });
 
+  it("keeps analysis entries visible but blocks them until readiness refetch unlocks", async () => {
+    let readinessCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === `/api/books/${book.id}`) return json({ book });
+      if (url.endsWith("/analysis-readiness")) {
+        readinessCalls += 1;
+        return json(readinessCalls === 1
+          ? { state: "building_l2", chapterTotal: 12, l1Fresh: 12, l2Fresh: 6, progressPercent: 75, analysisAvailable: false, blockingCode: "l2_incomplete" }
+          : { state: "available", chapterTotal: 12, l1Fresh: 12, l2Fresh: 12, progressPercent: 100, analysisAvailable: true, blockingCode: null });
+      }
+      if (url.endsWith("/l1-coverage")) return json({ total: 12, fresh: 3, missing: 6, failed: 1, stale: 2 });
+      throw new Error(`unexpected ${url}`);
+    }));
+    const { client } = renderPath(`/books/${book.id}/overview`);
+    const query = await screen.findByRole("link", { name: /连续提问/ });
+    const analysis = screen.getByRole("link", { name: /高级分析/ });
+    expect(query.getAttribute("aria-disabled")).toBe("true");
+    expect(analysis.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("索引重建中")).toBeTruthy();
+    expect(screen.getByRole("progressbar").getAttribute("value")).toBe("75");
+    const readinessSlot = screen.getByText("索引重建中").parentElement;
+    await userEvent.click(query);
+    expect(window.location.pathname).not.toContain("/query");
+    await client.invalidateQueries({ queryKey: ["analysis-readiness", book.id] });
+    await waitFor(() => expect(query.getAttribute("aria-disabled")).toBeNull());
+    expect(screen.queryByText("索引重建中")).toBeNull();
+    expect(readinessSlot?.isConnected).toBe(true);
+    expect(readinessSlot?.textContent).toBe("");
+  });
+
   it("requires preview and reconfirmation when the server reports scope_changed", async () => {
     let submissions = 0;
     const keys: string[] = [];

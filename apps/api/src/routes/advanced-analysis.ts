@@ -3,7 +3,7 @@ import { Router } from "express";
 import { z } from "zod";
 
 import { AnalysisRunCreateInputSchema, AnalysisRunDetailSchema, AnalysisRunSummarySchema, AnalysisScopePreviewInputSchema, AnalysisScopePreviewSchema, AnalysisTemplateCreateInputSchema, AnalysisTemplateDetailSchema, AnalysisTemplateSummarySchema, AnalysisTemplateUpdateInputSchema, type AdvancedAnalysisExecutionConfig } from "@novel-analysis/contracts";
-import { createAnalysisRepository, type ContentCipher, type DatabaseConnection } from "@novel-analysis/database";
+import { createAnalysisRepository, getBookAnalysisReadiness, type ContentCipher, type DatabaseConnection } from "@novel-analysis/database";
 import { AnalysisIdempotencyConflictError, AnalysisInvalidRequestError, AnalysisInvalidStateError, AnalysisJobService, AnalysisNotFoundError, AnalysisScopeChangedError } from "@novel-analysis/jobs";
 
 import { requireCsrf } from "../auth/csrf.js";
@@ -54,11 +54,19 @@ export function createAdvancedAnalysisRouter(database: DatabaseConnection, confi
   });
   router.post("/:bookId/advanced-analysis/preview", ...csrf, async (request: AuthenticatedRequest, response, next) => {
     const params = paramsSchema.safeParse(request.params); const body = AnalysisScopePreviewInputSchema.safeParse(request.body); if (!params.success || !body.success || body.data.bookId !== params.data.bookId) { response.status(400).json({ error: "invalid_request" }); return; }
-    try { response.json(AnalysisScopePreviewSchema.parse(await jobs.preview({ ...body.data, actor: actor(request) }))); } catch (error) { handle(error, response, next); }
+    try {
+      const preview = await jobs.preview({ ...body.data, actor: actor(request) });
+      if (!(await getBookAnalysisReadiness(database, params.data.bookId)).analysisAvailable) { response.status(409).json({ error: "analysis_rebuild_incomplete" }); return; }
+      response.json(AnalysisScopePreviewSchema.parse(preview));
+    } catch (error) { handle(error, response, next); }
   });
   router.post("/:bookId/advanced-analysis", ...csrf, async (request: AuthenticatedRequest, response, next) => {
     const params = paramsSchema.safeParse(request.params); const body = AnalysisRunCreateInputSchema.safeParse(request.body); if (!params.success || !body.success || body.data.bookId !== params.data.bookId) { response.status(400).json({ error: "invalid_request" }); return; }
-    try { const created = await jobs.create({ ...body.data, actor: actor(request), requestId: body.data.idempotencyKey }); response.status(201).json({ run: AnalysisRunSummarySchema.parse(created.run), job: created.job }); } catch (error) { handle(error, response, next); }
+    try {
+      await jobs.preview({ bookId: body.data.bookId, templateId: body.data.templateId, mode: body.data.mode, startChapter: body.data.startChapter, endChapter: body.data.endChapter, actor: actor(request) });
+      if (!(await getBookAnalysisReadiness(database, params.data.bookId)).analysisAvailable) { response.status(409).json({ error: "analysis_rebuild_incomplete" }); return; }
+      const created = await jobs.create({ ...body.data, actor: actor(request), requestId: body.data.idempotencyKey }); response.status(201).json({ run: AnalysisRunSummarySchema.parse(created.run), job: created.job });
+    } catch (error) { handle(error, response, next); }
   });
   router.get("/:bookId/advanced-analysis", session, async (request: AuthenticatedRequest, response, next) => {
     const params = paramsSchema.safeParse(request.params); if (!params.success) { response.status(400).json({ error: "invalid_request" }); return; }

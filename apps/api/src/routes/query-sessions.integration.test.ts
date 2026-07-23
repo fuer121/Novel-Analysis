@@ -32,12 +32,15 @@ describe("query session routes", () => {
     const indexes = createIndexRepository(postgres.db, cipher);
     bookId = (await library.createBook({ title: "Book", createdBy: identities.owner!.id })).id;
     const prompt = await indexes.createPromptVersion({ target: "l2-index", version: "v1", content: "prompt", contentHash: createHash("sha256").update("prompt").digest("hex") });
-    groupId = (await indexes.createIndexGroup({ bookId, key: "people", name: "People", categoryScope: "general", promptVersionId: prompt.id, configHash: "group-v1" })).id;
+    const l1Prompt = await indexes.createPromptVersion({ target: "l1-index", version: "v1", content: "route", contentHash: createHash("sha256").update("route").digest("hex") });
+    const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-v1", dslHash: "l1-dsl-v1" });
+    groupId = (await indexes.createIndexGroup({ bookId, key: "base", name: "People", categoryScope: "general", promptVersionId: prompt.id, configHash: "group-v1" })).id;
     await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "summary-v1", dslHash: "summary-dsl-v1" });
     let firstChapterId = "";
     for (let chapterIndex = 1; chapterIndex <= 2; chapterIndex += 1) {
       const chapter = await library.insertChapter({ bookId, chapterIndex, title: `C${chapterIndex}`, plaintext: `body-${chapterIndex}`, contentHmac: `h-${chapterIndex}`, sourceVersion: "source" });
       if (chapterIndex === 1) firstChapterId = chapter.id;
+      await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: `l1-${chapterIndex}`, status: "fresh", route: { route_schema_version: "l1-route-v1", route_entities: [], route_keywords: [], signals: [], category_scores: {} } });
       await indexes.putL2ChapterStatus({ groupId, chapterId: chapter.id, inputSignature: `coverage-${chapterIndex}`, status: "fresh" });
     }
     await indexes.registerSubject({ groupId, subjectKey: "hero", displayName: "Hero", aliases: [] });
@@ -68,6 +71,15 @@ describe("query session routes", () => {
     expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}`).set(auth("owner"))).status).toBe(200);
     expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}`).set(auth("admin"))).status).toBe(200);
     expect((await request(app()).get(`/api/books/${bookId}/query-sessions/${sessionId}`).set(auth("member"))).status).toBe(404);
+  });
+
+  it("rejects turn creation when the server-side readiness recheck is incomplete", async () => {
+    const sessionId = await createSession();
+    await postgres.db.updateTable("l2_chapter_statuses").set({ status: "stale" }).where("group_id", "=", groupId).execute();
+    const created = await request(app()).post(`/api/books/${bookId}/query-sessions/${sessionId}/turns`).set(write("owner", "locked-turn")).send({ question: "Locked?", startChapter: 1, endChapter: 2, scopeHash: "0".repeat(64) });
+    expect(created.status).toBe(409);
+    expect(created.body).toEqual({ error: "analysis_rebuild_incomplete" });
+    expect(await postgres.db.selectFrom("query_turns").select("id").execute()).toEqual([]);
   });
 
   it("allows shared members to read and create their own turn but not manage sessions or another turn", async () => {

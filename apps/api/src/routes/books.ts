@@ -2,8 +2,8 @@ import { Router, type Response } from "express";
 import { sql } from "kysely";
 import { z } from "zod";
 
-import { BookSummarySchema, JobResponseSchema } from "@novel-analysis/contracts";
-import type { DatabaseConnection } from "@novel-analysis/database";
+import { BookAnalysisReadinessSchema, BookSummarySchema, JobResponseSchema } from "@novel-analysis/contracts";
+import { getBookAnalysisReadiness, type DatabaseConnection } from "@novel-analysis/database";
 import {
   BookNotFoundError,
   IdempotencyConflictError,
@@ -102,6 +102,17 @@ export function createBooksRouter(database: DatabaseConnection, config: ApiConfi
       if (!row) { response.status(404).json({ error: "book_not_found" }); return; }
       response.json({ book: publicBook(row) });
     } catch { next(new Error("book detail failed")); }
+  });
+
+  router.get("/:id/analysis-readiness", session, async (request, response, next) => {
+    const params = idSchema.safeParse(request.params);
+    if (!params.success) { response.status(400).json({ error: "invalid_request" }); return; }
+    try {
+      response.json(BookAnalysisReadinessSchema.parse(await getBookAnalysisReadiness(database, params.data.id)));
+    } catch (error) {
+      if (error instanceof Error && error.message === "Book not found") { response.status(404).json({ error: "book_not_found" }); return; }
+      next(new Error("analysis readiness failed"));
+    }
   });
 
   router.get("/:id/l1-coverage", session, async (request, response, next) => {

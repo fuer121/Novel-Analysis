@@ -39,6 +39,17 @@ describe("book routes", () => {
     expect(replay.body.job.id).toBe(job.body.job.id);
   });
 
+  it("returns strict derived analysis readiness under book access rules", async () => {
+    const created = await mutate("/api/books").set("Idempotency-Key", "readiness-book").send({ title: "Readiness", source: { provider: "dify", sourceId: "1", startChapter: 1, endChapter: 1 } });
+    const response = await request(app()).get(`/api/books/${created.body.book.id}/analysis-readiness`).set("Cookie", cookie);
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      state: "waiting", chapterTotal: 0, l1Fresh: 0, l2Fresh: 0, progressPercent: 0,
+      analysisAvailable: false, blockingCode: "l1_incomplete",
+    });
+    expect((await request(app()).get(`/api/books/${created.body.book.id}/analysis-readiness`)).status).toBe(401);
+  });
+
   it("requires authentication, CSRF, idempotency and returns stable scope_changed", async () => {
     expect((await request(app()).get("/api/books")).status).toBe(401);
     expect((await mutate("/api/books").send({ title: "Book", source: { provider: "dify", sourceId: "s", startChapter: 1, endChapter: 1 } })).body).toEqual({ error: "invalid_request" });

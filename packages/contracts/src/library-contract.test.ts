@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  BookAnalysisReadinessSchema,
   BookSummarySchema,
   ChapterSummarySchema,
   FactReviewPageSchema,
@@ -23,5 +24,19 @@ describe("library public contracts", () => {
     const fact = { id: crypto.randomUUID(), chapterId: crypto.randomUUID(), chapterIndex: 1, subjectKey: "a", factType: "event", body: "authorized", metadata: { category: "event", importance: 1, confidence: 0.5, scopeEligible: true, transformationEligible: false, scopeFieldsComplete: true }, createdAt: new Date().toISOString() };
     expect(FactReviewPageSchema.parse({ facts: [fact], nextCursor: null }).facts[0]?.metadata.category).toBe("event");
     expect(() => FactReviewPageSchema.parse({ facts: [{ ...fact, metadata: { evidence: "secret" } }], nextCursor: null })).toThrow();
+  });
+
+  test("accepts only the strict per-book analysis readiness shape", () => {
+    const readiness = {
+      state: "building_l2",
+      chapterTotal: 4,
+      l1Fresh: 4,
+      l2Fresh: 2,
+      progressPercent: 75,
+      analysisAvailable: false,
+      blockingCode: "l2_incomplete",
+    };
+    expect(BookAnalysisReadinessSchema.parse(readiness)).toEqual(readiness);
+    expect(() => BookAnalysisReadinessSchema.parse({ ...readiness, internalJobId: crypto.randomUUID() })).toThrow();
   });
 });
