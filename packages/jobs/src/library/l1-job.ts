@@ -1,12 +1,16 @@
 import { createHash } from "node:crypto";
 
 import type { PublicJob } from "@novel-analysis/contracts";
-import type { DatabaseConnection, DatabaseExecutor } from "@novel-analysis/database";
-import { buildL1Signature } from "@novel-analysis/domain";
+import {
+  L1_ROUTE_SCHEMA_VERSION,
+  selectCanonicalL1Freshness,
+  type DatabaseConnection,
+  type DatabaseExecutor,
+} from "@novel-analysis/database";
 
 import { jobRowToPublic, PUBLIC_JOB_COLUMNS } from "../job-repository.js";
 
-export const L1_ROUTE_SCHEMA_VERSION = "l1-route-v1";
+export { L1_ROUTE_SCHEMA_VERSION };
 
 export class L1BookNotFoundError extends Error {}
 export class L1PromptConfigurationError extends Error {}
@@ -47,51 +51,41 @@ function requestId(bookId: string, value: string): string {
 }
 
 async function selectL1Scope(database: DatabaseExecutor, bookId: string): Promise<L1Selection> {
-  const book = await database.selectFrom("books").select("id").where("id", "=", bookId).where("status", "=", "active").executeTakeFirst();
-  if (!book) throw new L1BookNotFoundError();
-  const prompt = await database.selectFrom("prompt_versions").selectAll().where("target", "=", "l1-index").orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst();
-  const workflow = await database.selectFrom("workflow_versions").selectAll().where("target", "=", "l1-index").where("enabled", "=", true).orderBy("created_at", "desc").orderBy("id", "desc").executeTakeFirst();
-  if (!prompt || !workflow || !prompt.content.trim() || createHash("sha256").update(prompt.content).digest("hex") !== prompt.content_hash) throw new L1PromptConfigurationError();
+  const canonical = await selectCanonicalL1Freshness(database, bookId);
+  if (canonical.kind === "book_not_found") throw new L1BookNotFoundError();
+  if (canonical.kind === "configuration_error") throw new L1PromptConfigurationError();
 
-  const rows = await database.selectFrom("chapters as c")
-    .leftJoin("l1_indexes as l", (join) => join.onRef("l.chapter_id", "=", "c.id").on("l.is_current", "=", true))
-    .select(["c.id", "c.chapter_index", "c.title", "c.source_version", "c.content_hmac", "l.input_signature", "l.status"])
-    .where("c.book_id", "=", bookId).orderBy("c.chapter_index").execute();
   const counts = { fresh: 0, missing: 0, failed: 0, stale: 0 };
   const chapters: L1ChapterSnapshot[] = [];
   const states: Array<{ chapterId: string; inputSignature: string; state: keyof typeof counts }> = [];
-  for (const row of rows) {
-    const inputSignature = buildL1Signature({
-      sourceVersion: row.source_version,
-      chapterHmac: row.content_hmac,
-      promptHash: prompt.content_hash,
-      workflowDslHash: workflow.dsl_hash,
-      adapterContractVersion: workflow.contract_version,
-      schemaVersion: L1_ROUTE_SCHEMA_VERSION,
-    });
-    const state = row.input_signature === null
-      ? "missing"
-      : row.input_signature !== inputSignature || row.status === "stale"
-        ? "stale"
-        : row.status === "failed" ? "failed" : "fresh";
-    counts[state] += 1;
-    states.push({ chapterId: row.id, inputSignature, state });
-    if (state !== "fresh") chapters.push({ chapterId: row.id, chapterIndex: row.chapter_index, chapterTitle: row.title, sourceVersion: row.source_version, chapterHmac: row.content_hmac, inputSignature });
+  for (const chapter of canonical.chapters) {
+    counts[chapter.state] += 1;
+    states.push({ chapterId: chapter.chapterId, inputSignature: chapter.inputSignature, state: chapter.state });
+    if (chapter.state !== "fresh") {
+      chapters.push({
+        chapterId: chapter.chapterId,
+        chapterIndex: chapter.chapterIndex,
+        chapterTitle: chapter.chapterTitle,
+        sourceVersion: chapter.sourceVersion,
+        chapterHmac: chapter.chapterHmac,
+        inputSignature: chapter.inputSignature,
+      });
+    }
   }
   const scopeHash = hash({
     bookId,
-    prompt: { id: prompt.id, contentHash: prompt.content_hash },
-    workflow: { id: workflow.id, dslHash: workflow.dsl_hash, adapterContractVersion: workflow.contract_version },
+    prompt: { id: canonical.prompt.id, contentHash: canonical.prompt.contentHash },
+    workflow: { id: canonical.workflow.id, dslHash: canonical.workflow.dslHash, adapterContractVersion: canonical.workflow.adapterContractVersion },
     schemaVersion: L1_ROUTE_SCHEMA_VERSION,
     states,
   });
   return {
-    total: rows.length,
+    total: canonical.chapters.length,
     ...counts,
     executable: chapters.length,
     scopeHash,
-    prompt: { id: prompt.id, version: prompt.version, content: prompt.content, contentHash: prompt.content_hash },
-    workflow: { id: workflow.id, dslHash: workflow.dsl_hash, contractVersion: workflow.contract_version, adapterContractVersion: workflow.contract_version },
+    prompt: canonical.prompt,
+    workflow: canonical.workflow,
     chapters,
   };
 }

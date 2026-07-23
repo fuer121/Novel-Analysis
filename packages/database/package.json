@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@novel-analysis/domain": "*",
     "kysely": "0.29.4",
     "pg": "8.22.0"
   },

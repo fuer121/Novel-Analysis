@@ -4,7 +4,8 @@ import { sql } from "kysely";
 import request from "supertest";
 
 import { AnalysisScopePreviewSchema } from "@novel-analysis/contracts";
-import { createContentCipher, createIndexRepository, createLibraryRepository } from "@novel-analysis/database";
+import { createContentCipher, createIndexRepository, createLibraryRepository, L1_ROUTE_SCHEMA_VERSION, L2_ADMISSION_VERSION, L2_FACT_SCHEMA_VERSION } from "@novel-analysis/database";
+import { buildL1Signature, buildL2Signature } from "@novel-analysis/domain";
 import { createDisposablePostgres, type DisposablePostgres } from "../../../../packages/database/src/testing/postgres.js";
 
 import { createApp } from "../app.js";
@@ -29,12 +30,15 @@ describe("advanced analysis routes", () => {
     const prompt = await indexes.createPromptVersion({ target: "l2-index", version: "v1", content: "index", contentHash: createHash("sha256").update("index").digest("hex") });
     const l1Prompt = await indexes.createPromptVersion({ target: "l1-index", version: "v1", content: "route", contentHash: createHash("sha256").update("route").digest("hex") });
     const l1Workflow = await indexes.createWorkflowVersion({ target: "l1-index", contractVersion: "l1-v1", dslHash: "l1-dsl-v1" });
+    const l2Workflow = await indexes.createWorkflowVersion({ target: "l2-index", contractVersion: "l2-v1", dslHash: "l2-dsl-v1" });
     groupId = (await indexes.createIndexGroup({ bookId, key: "base", name: "People", categoryScope: "general", promptVersionId: prompt.id, configHash: "group-v1" })).id;
     await indexes.createWorkflowVersion({ target: "analysis-summary", contractVersion: "summary-v1", dslHash: "dsl-v1" });
     for (let chapterIndex = 1; chapterIndex <= 2; chapterIndex += 1) {
       const chapter = await library.insertChapter({ bookId, chapterIndex, title: `C${chapterIndex}`, plaintext: `SENTINEL_CHAPTER_${chapterIndex}`, contentHmac: `h-${chapterIndex}`, sourceVersion: "source" });
-      await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: `l1-${chapterIndex}`, status: "fresh", route: { route_schema_version: "l1-route-v1", route_entities: [], route_keywords: [], signals: [], category_scores: {} } });
-      await indexes.putL2ChapterStatus({ groupId, chapterId: chapter.id, inputSignature: `l2-${chapterIndex}`, status: "fresh" });
+      const l1Signature = buildL1Signature({ sourceVersion: chapter.source_version, chapterHmac: `h-${chapterIndex}`, promptHash: l1Prompt.content_hash, workflowDslHash: l1Workflow.dsl_hash, adapterContractVersion: l1Workflow.contract_version, schemaVersion: L1_ROUTE_SCHEMA_VERSION });
+      const l2Signature = buildL2Signature({ sourceVersion: chapter.source_version, chapterHmac: `h-${chapterIndex}`, promptHash: prompt.content_hash, workflowDslHash: l2Workflow.dsl_hash, adapterContractVersion: l2Workflow.contract_version, schemaVersion: L2_FACT_SCHEMA_VERSION, admissionVersion: L2_ADMISSION_VERSION, indexGroupConfigHash: "group-v1", l1Signature });
+      await indexes.putL1Index({ chapterId: chapter.id, promptVersionId: l1Prompt.id, workflowVersionId: l1Workflow.id, inputSignature: l1Signature, status: "fresh", route: { route_schema_version: L1_ROUTE_SCHEMA_VERSION, route_entities: [], route_keywords: [], signals: [], category_scores: {} } });
+      await indexes.putL2ChapterStatus({ groupId, chapterId: chapter.id, inputSignature: l2Signature, status: "fresh" });
     }
   });
   afterEach(async () => postgres.destroy());
