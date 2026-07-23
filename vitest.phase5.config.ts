@@ -8,6 +8,7 @@ export default defineConfig({
     include: scale
       ? ["test/phase5/scale.integration.test.ts"]
       : [
+          "test/phase5/preflight.test.ts",
           "test/phase5/**/*.e2e.test.ts",
           "test/phase5/**/*.integration.test.ts",
         ],
