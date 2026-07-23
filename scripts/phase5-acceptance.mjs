@@ -68,13 +68,14 @@ export async function validateEvidenceManifest(manifest, options) {
     if (typeof entry?.command !== "string" || entry.command.trim() === "") {
       fail("command_missing", "Every evidence entry must record a command");
     }
-    if (commands.has(entry.command) || artifacts.has(entry.artifactPath)) {
-      fail("evidence_duplicate", "Commands and artifact paths must be unique");
+    const command = entry.command.trim().replace(/\s+/g, " ");
+    if (entry.command !== command) {
+      fail("command_invalid", "Command must use canonical single-space whitespace");
     }
-    commands.add(entry.command);
-    artifacts.add(entry.artifactPath);
+    if (commands.has(command)) fail("evidence_duplicate", "Commands and artifacts must be unique");
+    commands.add(command);
 
-    if (entry.exitCode !== 0) fail("command_failed", `Command failed: ${entry.command}`);
+    if (entry.exitCode !== 0) fail("command_failed", `Command failed: ${command}`);
     if (entry.commitSha !== expectedCommitSha) {
       fail("commit_mismatch", `Evidence commit does not match ${expectedCommitSha}`);
     }
@@ -85,7 +86,9 @@ export async function validateEvidenceManifest(manifest, options) {
       fail("fingerprint_mismatch", "Artifact SHA-256 must be a lowercase hexadecimal fingerprint");
     }
 
-    const artifact = await validateLocalInput(entry.command, entry.artifactPath, root, cwd);
+    const artifact = await validateLocalInput(command, entry.artifactPath, root, cwd);
+    if (artifacts.has(artifact)) fail("evidence_duplicate", "Commands and artifacts must be unique");
+    artifacts.add(artifact);
     const content = await readFile(artifact);
     const actualFingerprint = createHash("sha256").update(content).digest("hex");
     if (actualFingerprint !== entry.artifactSha256) {

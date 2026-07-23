@@ -74,6 +74,58 @@ test("rejects duplicate or contradictory evidence", async () => {
   );
 });
 
+test("rejects the same command with a different artifact", async () => {
+  const { cwd, manifest } = await fixture();
+  const content = Buffer.from("other evidence\n");
+  await writeFile(join(cwd, "artifacts", "other.json"), content);
+  manifest.evidence.push({
+    ...manifest.evidence[0],
+    artifactPath: "artifacts/other.json",
+    artifactSha256: createHash("sha256").update(content).digest("hex"),
+  });
+
+  await assert.rejects(
+    validateEvidenceManifest(manifest, { cwd, expectedCommitSha: EXPECTED_SHA }),
+    (error) => error.code === "evidence_duplicate",
+  );
+});
+
+for (const artifactPath of [
+  "artifacts/./contracts.json",
+  "artifacts/x/../contracts.json",
+]) {
+  test(`rejects the same real artifact through alias ${artifactPath}`, async () => {
+    const { cwd, manifest } = await fixture();
+    await mkdir(join(cwd, "artifacts", "x"));
+    manifest.evidence.push({
+      ...manifest.evidence[0],
+      command: "npm run lint",
+      artifactPath,
+    });
+
+    await assert.rejects(
+      validateEvidenceManifest(manifest, { cwd, expectedCommitSha: EXPECTED_SHA }),
+      (error) => error.code === "evidence_duplicate",
+    );
+  });
+}
+
+for (const command of [
+  " npm run test:contracts",
+  "npm  run test:contracts",
+  "npm\trun test:contracts",
+  "npm run\ntest:contracts",
+]) {
+  test(`rejects noncanonical command whitespace ${JSON.stringify(command)}`, async () => {
+    const { cwd, manifest } = await fixture({ command });
+
+    await assert.rejects(
+      validateEvidenceManifest(manifest, { cwd, expectedCommitSha: EXPECTED_SHA }),
+      (error) => error.code === "command_invalid",
+    );
+  });
+}
+
 test("rejects an artifact symlink that escapes the local root", async () => {
   const { cwd, manifest } = await fixture();
   const externalDirectory = await mkdtemp(join(tmpdir(), "phase5-external-artifact-"));
