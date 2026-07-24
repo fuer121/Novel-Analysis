@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T10:04:00+08:00
+updated_at: 2026-07-24T10:24:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-rehearsal-retry-authorized
-last_checkpoint: CP-20260724-PHASE5-REHEARSAL-PROTOCOL-CORRECTION-ACCEPTED
+current_phase: phase-5-rehearsal-retry-blocked
+last_checkpoint: CP-20260724-PHASE5-REHEARSAL-RETRY-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | rehearsal retry authorized | V2 protocol correction已接受，只解锁一次全新isolated rehearsal retry，所有later Gates仍锁定 |
+| Phase 5 | rehearsal retry blocked | Fresh retry在migration helper加载阶段失败，migration CLI与capacity均未运行，全部private working artifacts已清理 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | none | ae5a3a7ad8c21570f4ac47c7edeeee2a9bcc2ab4 | ae5a3a7ad8c21570f4ac47c7edeeee2a9bcc2ab4 | ready | CP-20260724-PHASE5-REHEARSAL-PROTOCOL-CORRECTION-ACCEPTED | CP-20260724-PHASE5-REHEARSAL-PROTOCOL-CORRECTION-ACCEPTED | verify private v2 identity, create fresh run, then execute one retry |
+| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-rehearsal-retry-blocked | 899ef2848724619a25b0da0057057623440d9c71 | 899ef2848724619a25b0da0057057623440d9c71 | blocked | CP-20260724-PHASE5-REHEARSAL-PROTOCOL-CORRECTION-ACCEPTED | CP-20260724-PHASE5-REHEARSAL-RETRY-BLOCKED | submit minimal helper packaging correction and synthetic evidence before requesting any new retry |
 
 ## Phase Ledgers
 
@@ -93,10 +93,12 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Task 6开发机browse p95存在329.648ms至705.975ms波动，保留为indicative evidence；硬threshold由target-server isolated rehearsal Gate验证
 - Target-server rehearsal的noclobber readiness wrapper曾将private run path写入ordinary terminal；本次run已作废并完成敏感working artifacts与隔离数据库清理，修正协议重新确认前禁止retry
 - Corrected launcher与wrapper已通过process-level private stdio、deterministic wrapper failure、repeated-readiness、identity binding、atomic manifest与cleanup验证；actual retry必须逐byte匹配accepted private identity
+- Fresh retry因repository-external TypeScript helper被按CJS转换而在database initialization阶段blocked；helper修正与新retry必须重新提交确认
+- V2 private identity evidence为pre-run匹配被保留超过protocol acceptance触发的retention deadline；下一修正必须分离raw evidence与具有明确execution custody window的最小identity artifact
 
 ## Pending Feedback
 
-V2 private execution protocol已接受，只允许一次全新isolated rehearsal retry；execution开始前必须验证private identity与fresh run boundary
+V2授权的唯一retry已blocked；migration CLI、hard validations与capacity均未运行，working artifacts最终已清理但存在identity evidence retention protocol failure，任何新retry必须重新确认
 
 ## Next Gate
 
@@ -104,6 +106,7 @@ V2 private execution protocol已接受，只允许一次全新isolated rehearsal
 
 ## Evidence Index
 
+- [Phase 5 rehearsal retry blocked](checkpoints/CP-20260724-PHASE5-REHEARSAL-RETRY-BLOCKED.md)
 - [Phase 5 rehearsal protocol correction accepted](checkpoints/CP-20260724-PHASE5-REHEARSAL-PROTOCOL-CORRECTION-ACCEPTED.md)
 - [Phase 5 rehearsal protocol correction submitted](checkpoints/CP-20260724-PHASE5-REHEARSAL-PROTOCOL-CORRECTION-SUBMITTED.md)
 - [Phase 5 target-server isolated rehearsal blocked](checkpoints/CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-BLOCKED.md)
