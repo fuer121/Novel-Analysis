@@ -3,9 +3,9 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T17:58:20+08:00
+updated_at: 2026-07-24T18:04:31+08:00
 updated_by: controller-agent
-current_phase: phase-5-synthetic-e2e-calibration-v5-accepted
+current_phase: phase-5-real-retry-gate-submitted
 last_checkpoint: CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V5-ACCEPTED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | synthetic E2E calibration v5 accepted | 唯一full synthetic执行12/12通过，容量、原子证据、泄漏扫描、清理及独立spec和quality review全部通过，真实retry仍locked |
+| Phase 5 | real retry Gate submitted | V5 synthetic calibration保持accepted，真实retry Gate contract已提交；当前只请求授权准备real execution identity，真实输入与执行仍locked |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-SYNTHETIC-E2E-CALIBRATION | phase-5 | Full synthetic execution-unit calibration before any real retry | controller-agent | codex/phase5-synthetic-v5-calibration-accepted | 845d73e029f6e47b06e39495972f6c08c4315e51 | 845d73e029f6e47b06e39495972f6c08c4315e51 | accepted | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V5-CORRECTION-ACCEPTED | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V5-ACCEPTED | submit a separate real retry Gate for explicit user confirmation; do not access real snapshot or keys before approval |
+| PHASE5-REAL-RETRY-GATE | phase-5 | Two-confirmation Gate for exact real execution identity and one isolated rehearsal retry | controller-agent | codex/phase5-real-retry-gate-submitted | b8e4aa6e0431dd937a894de54164a9de7128811b | b8e4aa6e0431dd937a894de54164a9de7128811b | planned | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V5-ACCEPTED | CP-20260724-PHASE5-REAL-RETRY-GATE-SUBMITTED | request contract confirmation only; keep snapshot, old key and real retry locked |
 
 ## Phase Ledgers
 
@@ -103,17 +103,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - V4已完成12/12场景、严格容量阈值、零ordinary output及spec approval，但quality review因retained runtime sentinel未完整覆盖、原始manifest digest未独立核验及launcher编排层异常清理缺口而blocked
 - V5已关闭V4三个quality findings与incomplete-status截断盲区，focused evidence与独立审查通过，但尚未执行新的full synthetic E2E
 - V5唯一full synthetic已12/12通过，success browse p95为`395.546ms`，原始evidence digest、absolute-zero scans与资源清理通过，真实retry仍需独立Gate
+- Real retry Gate采用两次明确确认，首次只授权无真实输入的execution identity准备，第二次才可授权唯一真实执行
 
 ## Pending Feedback
 
-Synthetic E2E calibration V5已通过并完成独立spec与quality review，建议下一步只提交真实retry Gate；real snapshot、old key与真实环境访问继续locked
+Real retry Gate contract已提交，等待用户确认是否只授权准备和审查real execution identity；真实snapshot、old key与执行继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；下一动作是提交真实retry Gate并重新确认输入有效期、执行identity、cleanup与失败停止条件，在用户明确批准前不得读取production snapshot、old key或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前需用户确认real retry Gate contract，接受后仅准备exact identity，完成双审后仍需单独Execution confirmation；此前不得读取production snapshot、old key或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 real retry Gate submitted](checkpoints/CP-20260724-PHASE5-REAL-RETRY-GATE-SUBMITTED.md)
 - [Phase 5 synthetic E2E calibration v5 accepted](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V5-ACCEPTED.md)
 - [Phase 5 synthetic E2E calibration v5 correction accepted](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V5-CORRECTION-ACCEPTED.md)
 - [Phase 5 synthetic E2E calibration v4 quality blocked](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V4-QUALITY-BLOCKED.md)
