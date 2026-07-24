@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T19:36:33+08:00
+updated_at: 2026-07-24T23:55:34+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-identity-quality-blocked
-last_checkpoint: CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED
+current_phase: phase-5-real-retry-stage-entry-started
+last_checkpoint: CP-20260724-PHASE5-REAL-RETRY-STAGE-ENTRY-STARTED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -42,7 +42,8 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-real-retry-identity | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | blocked | CP-20260724-PHASE5-REAL-RETRY-GATE-CONTRACT-ACCEPTED | CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED | choose execution closure Option A, B or C before further implementation |
+| PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry | d6d9d9d6bebe63e0aac361ab0a75b4e048949de6 | d6d9d9d6bebe63e0aac361ab0a75b4e048949de6 | in_progress | DEC-0022 | CP-20260724-PHASE5-REAL-RETRY-STAGE-ENTRY-STARTED | implement with TDD, then complete independent spec and quality review |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-real-retry-identity | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | blocked | CP-20260724-PHASE5-REAL-RETRY-STAGE-ENTRY-STARTED | CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED | wait for accepted single-artifact stage entry, then regenerate exact identity |
 
 ## Phase Ledgers
 
@@ -74,6 +75,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - [DEC-0019 Phase 5 Rebuild Reorder Temporary Positions](decisions/DEC-0019-phase5-rebuild-reorder-positive-temporary-positions.md)
 - [DEC-0020 Phase 5 Local Isolated Capacity Benchmark](decisions/DEC-0020-phase5-local-isolated-capacity-benchmark.md)
 - [DEC-0021 Phase 5 Lean Completion Boundary](decisions/DEC-0021-phase5-lean-completion-boundary.md)
+- [DEC-0022 Phase 5 Single Artifact Rehearsal Stage](decisions/DEC-0022-phase5-single-artifact-rehearsal-stage.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -106,17 +108,20 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Real retry Gate采用两次明确确认，首次只授权无真实输入的execution identity准备，第二次才可授权唯一真实执行
 - Gate contract第一次确认已通过，identity准备不得读取snapshot、old key、Keychain或创建真实数据库
 - Real retry identity的focused suites与最终规格审查通过，但独立质量审查因实际执行闭包未冻结及5类关联安全问题blocked；当前069e baseline没有tracked且可直接执行的统一JavaScript stage，需要用户选择执行闭包Option A、B或C
+- 用户已选择Option A，单一committed Node ESM rehearsal stage进入实现；stage通过双审前，blocked candidate SHA继续无效
 
 ## Pending Feedback
 
-Real retry identity质量审查blocked，总控推荐Option A新增最小可直接执行的统一JavaScript stage entry；用户明确选择前停止实现，第二次Execution confirmation、真实snapshot、old key与执行继续locked
+Option A已接受，当前只实施并审查single-artifact rehearsal stage；real retry identity regeneration、第二次Execution confirmation、真实snapshot、old key与执行继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前需先选择real retry execution closure并关闭quality findings，之后才能提交Execution confirmation；此前不得读取production snapshot、old key或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先完成single-artifact stage双审，再重新生成real retry identity并关闭quality findings；此前不得读取production snapshot、old key或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 real retry stage entry started](checkpoints/CP-20260724-PHASE5-REAL-RETRY-STAGE-ENTRY-STARTED.md)
+- [Phase 5 single artifact rehearsal stage decision](decisions/DEC-0022-phase5-single-artifact-rehearsal-stage.md)
 - [Phase 5 real retry identity quality blocked](checkpoints/CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED.md)
 - [Phase 5 real retry Gate contract accepted](checkpoints/CP-20260724-PHASE5-REAL-RETRY-GATE-CONTRACT-ACCEPTED.md)
 - [Phase 5 real retry Gate submitted](checkpoints/CP-20260724-PHASE5-REAL-RETRY-GATE-SUBMITTED.md)
