@@ -1,5 +1,6 @@
 import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 import {
   createContentCipher,
@@ -95,7 +96,7 @@ export async function executeMigrationCli(
   overrides: Partial<ExecuteDependencies> = {},
 ): Promise<number> {
   const dependencies: ExecuteDependencies = {
-    run: runFromCli,
+    run: runMigrationFromCli,
     stdout: (value) => process.stdout.write(value),
     stderr: (value) => process.stderr.write(value),
     ...overrides,
@@ -119,7 +120,7 @@ const readKey = async (filePath: string): Promise<Buffer> => {
 const sameKey = (left: Buffer, right: Buffer): boolean =>
   left.length === right.length && timingSafeEqual(left, right);
 
-async function runFromCli(args: MigrationCliArgs): Promise<MigrationRunResult> {
+export async function runMigrationFromCli(args: MigrationCliArgs): Promise<MigrationRunResult> {
   const [oldMasterKey, targetKey, targetHmacKey] = await Promise.all([
     readKey(args.oldKeyFile),
     readKey(args.targetKeyFile),
@@ -157,6 +158,8 @@ async function runFromCli(args: MigrationCliArgs): Promise<MigrationRunResult> {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1]
+  && basename(process.argv[1]) === "cli.js"
+  && import.meta.url === pathToFileURL(process.argv[1]).href) {
   process.exitCode = await executeMigrationCli(process.argv.slice(2));
 }
