@@ -218,6 +218,10 @@ describe("continuous query workspace", () => {
     const { client } = renderPath(`/books/${ids.book}/query?session=${missingSession}&turn=${missingTurn}`);
     expect(await screen.findByText("选择或新建研究会话")).toBeTruthy();
     await waitFor(() => expect(requested.some((url) => url.endsWith(`/turns/${missingTurn}`))).toBe(true));
+    await waitFor(() => expect(client.getQueryCache().find({
+      queryKey: ["query", ids.book, "session", "none", "turn", "none"],
+      exact: true,
+    })?.getObserversCount()).toBe(1));
     requested.length = 0;
     client.setQueryData(["query", ids.book, "sessions"], { sessions: [session] });
     expect(await screen.findByText("陈平安选择留下守城")).toBeTruthy();
