@@ -3,11 +3,11 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T07:35:29+08:00
+updated_at: 2026-07-24T08:40:27+08:00
 updated_by: controller-agent
-current_phase: phase-5-snapshot-acquired
-last_checkpoint: CP-20260723-PHASE5-PRODUCTION-SNAPSHOT-ACQUISITION-ACCEPTED
-next_gate: GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL
+current_phase: phase-5-rehearsal-authorized
+last_checkpoint: CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED
+next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | snapshot acquired | Read-only snapshot evidence已通过；old key、rehearsal、UAT、部署与切换未授权 |
+| Phase 5 | rehearsal authorized | Current controller Mac已批准为target；rehearsal尚未执行，UAT、部署与切换未授权 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Old-key access and isolated migration/capacity rehearsal authorization | user | codex/phase5-rehearsal-gate | c5c1c5e5eff0ee8e3b895772950f52eba61564e5 | c5c1c5e5eff0ee8e3b895772950f52eba61564e5 | blocked | CP-20260723-PHASE5-PRODUCTION-SNAPSHOT-ACQUISITION-ACCEPTED | CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-SUBMITTED | identify target server and await explicit Gate decision |
+| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | none | 491984d6fb26b40632e31d3e6a7dcf75ce60b0d3 | 491984d6fb26b40632e31d3e6a7dcf75ce60b0d3 | ready | CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED | CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED | run private preflight before accessing old key |
 
 ## Phase Ledgers
 
@@ -94,14 +94,15 @@ next_gate: GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL
 
 ## Pending Feedback
 
-`GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL`材料已submitted；target server尚未识别，因此Gate保持blocked；production snapshot继续受控保管至不晚于2026-07-30T21:37:42+08:00，old key未请求
+`GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL`已接受，current controller Mac为批准target；rehearsal尚未开始，old key尚未请求，必须先通过private preflight
 
 ## Next Gate
 
-下一阶段门禁为`GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL`；必须先识别真实目标服务器并由用户明确接受，当前Mac不得被静默视为目标服务器
+下一阶段门禁为`GATE-PHASE5-FEISHU-UAT`；只有isolated rehearsal全部hard validation与capacity thresholds通过并形成accepted result后才可提交
 
 ## Evidence Index
 
+- [Phase 5 target-server isolated rehearsal Gate accepted](checkpoints/CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED.md)
 - [Phase 5 target-server isolated rehearsal Gate submitted](checkpoints/CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-SUBMITTED.md)
 - [Phase 5 production snapshot acquisition accepted](checkpoints/CP-20260723-PHASE5-PRODUCTION-SNAPSHOT-ACQUISITION-ACCEPTED.md)
 - [Phase 5 production snapshot access Gate accepted](checkpoints/CP-20260723-PHASE5-PRODUCTION-SNAPSHOT-ACCESS-GATE-ACCEPTED.md)
