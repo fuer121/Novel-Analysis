@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T13:28:23+08:00
+updated_at: 2026-07-24T13:49:22+08:00
 updated_by: controller-agent
-current_phase: phase-5-retry-after-cleanup-accepted
-last_checkpoint: CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED
+current_phase: phase-5-retry-containment-blocked
+last_checkpoint: CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | retry after cleanup accepted | Prior Task 6 stale PostgreSQL资源已授权清理并fresh absence verified，一次新的fresh retry已授权但尚未执行 |
+| Phase 5 | retry containment blocked | Fresh target preflight通过后，expected-path containment首项因parent层级比较错误exit `70`，identity、snapshot与key均未访问 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-retry-after-cleanup-accepted | 8a791f6a926b902ed75066d5857bd02a2340cadc | 8a791f6a926b902ed75066d5857bd02a2340cadc | ready | CP-20260724-PHASE5-V3-RETRY-PREFLIGHT-BLOCKED | CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED | execute the single authorized retry under the accepted v3 anchor, pre-run hard stops and cleanup order |
+| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-retry-containment-blocked | 8c85206e032605508147c4d8f35536f0e7679857 | 8c85206e032605508147c4d8f35536f0e7679857 | blocked | CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED | CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED | complete repository-external synthetic correction and independent review of the full preflight wrapper before proposing any new retry |
 
 ## Phase Ledgers
 
@@ -97,17 +97,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - V2 private identity evidence为pre-run匹配被保留超过protocol acceptance触发的retention deadline；下一修正必须分离raw evidence与具有明确execution custody window的最小identity artifact
 - V3 protocol、Git trust anchor与verified-byte handoff已接受；唯一fresh retry必须先完成anchored pre-run验证与identity cleanup，任一mismatch在snapshot/key access前exit `70`
 - Prior Task 6 stale PostgreSQL container、专属volume与空network已在授权后删除并fresh absence verified；新授权的唯一retry仍须遵守v3 anchor、pre-run hard stops与identity-before-snapshot/key cleanup顺序
+- Cleanup后唯一retry在identity open/hash前因expected-path parent层级比较错误于首项containment exit `70`并已消耗；empty run/sink/pointer已清理，任何新retry前必须完整修正并独立审查preflight wrapper
 
 ## Pending Feedback
 
-Stale Task 6 PostgreSQL资源cleanup已完成；一次新的fresh retry已授权但尚未执行，identity bundle仍未open/hash且原custody有效
+Cleanup后唯一retry已在containment preflight阶段blocked并消耗；identity与canonical snapshot保持原custody，等待完整preflight wrapper synthetic correction与独立审查
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；必须先完成唯一authorized retry的anchored pre-run、全部hard validations、capacity thresholds与cleanup
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；必须先完成preflight wrapper external synthetic correction、独立审查与新的明确retry授权，再执行全部hard validations、capacity thresholds与cleanup
 
 ## Evidence Index
 
+- [Phase 5 retry containment blocked](checkpoints/CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED.md)
 - [Phase 5 retry after cleanup accepted](checkpoints/CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED.md)
 - [Phase 5 v3 retry preflight blocked](checkpoints/CP-20260724-PHASE5-V3-RETRY-PREFLIGHT-BLOCKED.md)
 - [Phase 5 v3 retry correction accepted](checkpoints/CP-20260724-PHASE5-V3-RETRY-CORRECTION-ACCEPTED.md)
