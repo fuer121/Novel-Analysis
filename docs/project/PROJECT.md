@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T08:40:27+08:00
+updated_at: 2026-07-24T09:01:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-rehearsal-authorized
-last_checkpoint: CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED
+current_phase: phase-5-rehearsal-blocked
+last_checkpoint: CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | rehearsal authorized | Current controller Mac已批准为target；rehearsal尚未执行，UAT、部署与切换未授权 |
+| Phase 5 | rehearsal blocked | Private execution protocol在migration与capacity执行前触发hard stop；敏感working artifacts与隔离数据库已清理，UAT、部署与切换未授权 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | none | 491984d6fb26b40632e31d3e6a7dcf75ce60b0d3 | 491984d6fb26b40632e31d3e6a7dcf75ce60b0d3 | ready | CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED | CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED | run private preflight before accessing old key |
+| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-rehearsal-blocked | 2f1c81ffc79870cd5b927ba0bfb895373cd38954 | 2f1c81ffc79870cd5b927ba0bfb895373cd38954 | blocked | CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED | CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-BLOCKED | submit corrected private execution protocol and synthetic dry-run evidence for confirmation |
 
 ## Phase Ledgers
 
@@ -91,17 +91,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Task 7 的 10 用户 p95 阈值是本地 fake-provider 验收证据，不代表生产容量承诺
 - Task 7 plaintext 与 credential sentinel 扫描必须覆盖持久化、普通 Query JSON、captured API/Worker logs 与受控 provider error
 - Task 6开发机browse p95存在329.648ms至705.975ms波动，保留为indicative evidence；硬threshold由target-server isolated rehearsal Gate验证
+- Target-server rehearsal的noclobber readiness wrapper曾将private run path写入ordinary terminal；本次run已作废并完成敏感working artifacts与隔离数据库清理，修正协议重新确认前禁止retry
 
 ## Pending Feedback
 
-`GATE-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL`已接受，current controller Mac为批准target；rehearsal尚未开始，old key尚未请求，必须先通过private preflight
+`PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL`因private path disclosure hard stop被阻塞；migration CLI与capacity suite均未执行，敏感working artifacts与隔离数据库已清理
 
 ## Next Gate
 
-下一阶段门禁为`GATE-PHASE5-FEISHU-UAT`；只有isolated rehearsal全部hard validation与capacity thresholds通过并形成accepted result后才可提交
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；必须先批准修正后的private execution protocol，再完成全新isolated rehearsal的全部hard validation与capacity thresholds
 
 ## Evidence Index
 
+- [Phase 5 target-server isolated rehearsal blocked](checkpoints/CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-BLOCKED.md)
 - [Phase 5 target-server isolated rehearsal Gate accepted](checkpoints/CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-ACCEPTED.md)
 - [Phase 5 target-server isolated rehearsal Gate submitted](checkpoints/CP-20260724-PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL-GATE-SUBMITTED.md)
 - [Phase 5 production snapshot acquisition accepted](checkpoints/CP-20260723-PHASE5-PRODUCTION-SNAPSHOT-ACQUISITION-ACCEPTED.md)
