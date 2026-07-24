@@ -1,4 +1,5 @@
 import process from "node:process";
+import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { Migrator, type MigrationResultSet } from "kysely/migration";
@@ -40,7 +41,9 @@ export async function runMigrations(url: string): Promise<void> {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (process.argv[1]
+  && basename(process.argv[1]) === "migrate.js"
+  && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const url = process.env.DATABASE_URL;
   if (!url) {
     console.error("DATABASE_URL is required");
