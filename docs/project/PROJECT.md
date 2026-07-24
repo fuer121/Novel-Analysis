@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-25T01:10:20+08:00
+updated_at: 2026-07-25T01:27:18+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-identity-restarted
-last_checkpoint: CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED
+current_phase: phase-5-real-retry-identity-v2-interface-blocked
+last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -43,7 +43,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-identity-restarted | 72e0d29bb5fade441530e79736deb53c735d794a | 72e0d29bb5fade441530e79736deb53c735d794a | in_progress | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | create new external candidate around accepted artifact SHA, then dual review |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-identity-v2 | cab6a0a61276310cb4dfa8eb7556ae121356b1ed | cab6a0a61276310cb4dfa8eb7556ae121356b1ed | blocked | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED | choose stage interface Option A1 or Gate relaxation Option A2 |
 
 ## Phase Ledgers
 
@@ -111,17 +111,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - 用户已选择Option A，单一committed Node ESM rehearsal stage进入实现；stage通过双审前，blocked candidate SHA继续无效
 - Single-artifact stage已通过规格、质量与总控验证，accepted artifact SHA为`6ea6bebe5cdfee41f9060a270e1a3af8773fc51a8692d097af0900a31d4666f0`；real retry identity仍需围绕该artifact重新生成和双审
 - Single-artifact stage已在PR #177合并并通过post-merge verification；旧candidate继续invalid，新candidate必须关闭accepted task contract中的全部quality findings
+- Identity v2在freeze前确认accepted stage仍以path check后重新open方式消费input且不回传resource IDs，无法满足same-descriptor与resource-match要求；candidate未freeze，等待A1或A2决策
 
 ## Pending Feedback
 
-Single-artifact rehearsal stage已merged，real retry identity correction已重新启动；第二次Execution confirmation、真实snapshot、old key与执行继续locked
+Identity v2因stage input与resource interface blocked，总控推荐A1最小修正stage interface；用户明确选择前停止实现，第二次Execution confirmation与真实input继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前重新生成real retry identity并关闭quality findings；此前不得读取production snapshot、old key或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先选择A1 stage interface correction或A2 Gate relaxation；此前不得读取production snapshot、old key或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 real retry identity v2 interface blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED.md)
 - [Phase 5 stage merged and identity restarted](checkpoints/CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED.md)
 - [Phase 5 real retry stage entry accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-STAGE-ENTRY-ACCEPTED.md)
 - [Phase 5 real retry stage entry started](checkpoints/CP-20260724-PHASE5-REAL-RETRY-STAGE-ENTRY-STARTED.md)
