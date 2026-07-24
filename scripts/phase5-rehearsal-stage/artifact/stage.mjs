@@ -22034,8 +22034,7 @@ var allowsEval = /* @__PURE__ */ cached(() => {
 	if (globalConfig.jitless) return false;
 	if (typeof navigator !== "undefined" && navigator?.userAgent?.includes("Cloudflare")) return false;
 	try {
-		new Function("");
-		return true;
+		throw new Error("phase5_stage_jit_disabled");
 	} catch (_) {
 		return false;
 	}
@@ -22888,10 +22887,7 @@ var Doc = class {
 		for (const line of dedented) this.content.push(line);
 	}
 	compile() {
-		const F = Function;
-		const args = this?.args;
-		const lines = [...(this?.content ?? [``]).map((x) => `  ${x}`)];
-		return new F(...args, lines.join("\n"));
+		throw new Error("phase5_stage_jit_disabled");
 	}
 };
 //#endregion
@@ -44896,7 +44892,26 @@ async function previewL2Job(database, input) {
 //#region packages/jobs/src/library/rebuild-job.ts
 var ACTIVE_KEY = "library-rebuild:all";
 var POSTGRES_INTEGER_MAX = 2147483647;
-var BASELINE_URL = new URL("../../../../config/indexing-baseline.json", import.meta.url);
+var PHASE5_APPROVED_INDEXING_BASELINE = {
+	"version": "phase5-indexing-v1",
+	"l1": {
+		"promptVersion": "phase5-l1-v1",
+		"prompt": "请为当前小说章节建立轻量 L1 章节路由/信号索引。\n定位：L1 只判断本章有哪些可召回信号，服务后续按章节命中后读取 L2 专项事实；不要写长摘要，不要沉淀事实卡，不要替代 L2。\n要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；主体、别名、关键词和分类信号要稳定、短句化、便于检索。",
+		"adapterContractVersion": "l1-route-v1",
+		"dslSha256": "ebd3d3b403e9dd10bc6f5f0a2a16e94c7cfe94dc5c83ed766b34ba9f00190bf9"
+	},
+	"l2": {
+		"promptVersion": "phase5-l2-v1",
+		"prompt": "请为当前小说章节建立 L2 类型化事实索引。\n目标：提取可复用、可检索、可追溯的事实单元，不要写长摘要，不要输出 Markdown。\n分类只能使用：character、relationship、cultivation、force、event、item、magical_creature、location、foreshadowing、other、organization、power、mystery。\n每条事实必须短而明确，保留主体、相关主体、事实类型、重要度、置信度和少量证据摘记。\n不要补充本章原文之外的信息；如果本章没有可复用事实，facts 输出空数组。",
+		"adapterContractVersion": "l2-fact-v1",
+		"dslSha256": "b8003c60302c80d017eb00eac16ed18b0d4dba6df6073c6eb1735a2139ae4894",
+		"baseGroup": {
+			"key": "base",
+			"name": "基础事实",
+			"categoryScope": "general"
+		}
+	}
+};
 var L1_PROMPT = "请为当前小说章节建立轻量 L1 章节路由/信号索引。\n定位：L1 只判断本章有哪些可召回信号，服务后续按章节命中后读取 L2 专项事实；不要写长摘要，不要沉淀事实卡，不要替代 L2。\n要求：只依据本章原文；不要输出 Markdown；不要引用长段原文；主体、别名、关键词和分类信号要稳定、短句化、便于检索。";
 var L2_PROMPT = "请为当前小说章节建立 L2 类型化事实索引。\n目标：提取可复用、可检索、可追溯的事实单元，不要写长摘要，不要输出 Markdown。\n分类只能使用：character、relationship、cultivation、force、event、item、magical_creature、location、foreshadowing、other、organization、power、mystery。\n每条事实必须短而明确，保留主体、相关主体、事实类型、重要度、置信度和少量证据摘记。\n不要补充本章原文之外的信息；如果本章没有可复用事实，facts 输出空数组。";
 var LibraryRebuildConflictError = class extends Error {};
@@ -44908,7 +44923,7 @@ function exactKeys(value, keys) {
 	return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
 }
 async function loadApprovedIndexingBaseline() {
-	const value = JSON.parse(await readFile(BASELINE_URL, "utf8"));
+	const value = structuredClone(PHASE5_APPROVED_INDEXING_BASELINE);
 	if (!exactKeys(value, [
 		"version",
 		"l1",
@@ -46977,10 +46992,14 @@ var require_depd = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 	*/
 	function wrapfunction(fn, message) {
 		if (typeof fn !== "function") throw new TypeError("argument fn must be a function");
-		var args = createArgumentsString(fn.length);
+		createArgumentsString(fn.length);
 		var site = callSiteLocation(getStack()[1]);
 		site.name = fn.name;
-		return new Function("fn", "log", "deprecate", "message", "site", "\"use strict\"\nreturn function (" + args + ") {log.call(deprecate, message, site)\nreturn fn.apply(this, arguments)\n}")(fn, log, this, message, site);
+		var deprecate = this;
+		return function phase5DeprecatedWrapper() {
+			log.call(deprecate, message, site);
+			return fn.apply(this, arguments);
+		};
 	}
 	/**
 	* Wrap property in a deprecation message.
@@ -47641,7 +47660,7 @@ var require_safer = /* @__PURE__ */ __commonJSMin(((exports, module) => {
 		return buf;
 	};
 	if (!safer.kStringMaxLength) try {
-		safer.kStringMaxLength = process.binding("buffer").kStringMaxLength;
+		safer.kStringMaxLength = buffer.constants && buffer.constants.MAX_STRING_LENGTH;
 	} catch (e) {}
 	if (!safer.constants) {
 		safer.constants = { MAX_LENGTH: safer.kMaxLength };
@@ -60434,14 +60453,6 @@ var require_implementation = /* @__PURE__ */ __commonJSMin(((exports, module) =>
 		for (var i = offset || 0, j = 0; i < arrLike.length; i += 1, j += 1) arr[j] = arrLike[i];
 		return arr;
 	};
-	var joiny = function(arr, joiner) {
-		var str = "";
-		for (var i = 0; i < arr.length; i += 1) {
-			str += arr[i];
-			if (i + 1 < arr.length) str += joiner;
-		}
-		return str;
-	};
 	module.exports = function bind(that) {
 		var target = this;
 		if (typeof target !== "function" || toStr.apply(target) !== funcType) throw new TypeError(ERROR_MESSAGE + target);
@@ -60458,7 +60469,9 @@ var require_implementation = /* @__PURE__ */ __commonJSMin(((exports, module) =>
 		var boundLength = max(0, target.length - args.length);
 		var boundArgs = [];
 		for (var i = 0; i < boundLength; i++) boundArgs[i] = "$" + i;
-		bound = Function("binder", "return function (" + joiny(boundArgs, ",") + "){ return binder.apply(this,arguments); }")(binder);
+		bound = function phase5Bound() {
+			return binder.apply(this, arguments);
+		};
 		if (target.prototype) {
 			var Empty = function Empty() {};
 			Empty.prototype = target.prototype;
@@ -60577,10 +60590,8 @@ var require_get_intrinsic = /* @__PURE__ */ __commonJSMin(((exports, module) => 
 	var round = require_round();
 	var sign = require_sign();
 	var $Function = Function;
-	var getEvalledConstructor = function(expressionSyntax) {
-		try {
-			return $Function("\"use strict\"; return (" + expressionSyntax + ").constructor;")();
-		} catch (e) {}
+	var getEvalledConstructor = function() {
+		return undefined;
 	};
 	var $gOPD = require_gopd();
 	var $defineProperty = require_es_define_property();
