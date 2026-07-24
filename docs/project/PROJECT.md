@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T15:03:36+08:00
+updated_at: 2026-07-24T15:29:49+08:00
 updated_by: controller-agent
-current_phase: phase-5-synthetic-e2e-calibration-blocked
-last_checkpoint: CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED
+current_phase: phase-5-synthetic-e2e-calibration-v3-blocked
+last_checkpoint: CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V3-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | synthetic E2E calibration blocked | 10个已定义synthetic场景通过，但exact launcher在post-run packaging exit `1`，且缺少fixture/DB-init failure coverage |
+| Phase 5 | synthetic E2E calibration v3 blocked | Launcher与两个缺失场景已修复，12个场景执行11个通过；success browse p95超阈值且baseline sentinel策略无法通过 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-SYNTHETIC-E2E-CALIBRATION | phase-5 | Full synthetic execution-unit calibration before any real retry | controller-agent | codex/phase5-preflight-correction-accepted | 1bfc74c45a4cf194b2dd611af84356197b3be5db | 1bfc74c45a4cf194b2dd611af84356197b3be5db | blocked | CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED | keep real retry locked; fix exact launcher and missing fixture/DB-init failure coverage before any new calibration proposal |
+| PHASE5-SYNTHETIC-E2E-CALIBRATION | phase-5 | Full synthetic execution-unit calibration before any real retry | controller-agent | codex/phase5-synthetic-calibration-v3-blocked | 0d998e3be341376ea86d665fd15e2ceadbc9526b | 0d998e3be341376ea86d665fd15e2ceadbc9526b | blocked | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V3-BLOCKED | keep real retry locked; correct baseline-relative leakage scan and obtain one complete threshold-passing synthetic success with atomic evidence |
 
 ## Phase Ledgers
 
@@ -99,17 +99,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Prior Task 6 stale PostgreSQL container、专属volume与空network已在授权后删除并fresh absence verified；新授权的唯一retry仍须遵守v3 anchor、pre-run hard stops与identity-before-snapshot/key cleanup顺序
 - Cleanup后唯一retry在identity open/hash前因expected-path parent层级比较错误于首项containment exit `70`并已消耗；empty run/sink/pointer已清理，任何新retry前必须完整修正并独立审查preflight wrapper
 - Full synthetic execution unit的10个已定义场景完成，但exact launcher在post-run packaging exit `1`，fixture generation与database initialization failure未覆盖，spec review blocked且quality review未启动
+- V3已关闭launcher URL-to-path与两个缺失失败场景，但success browse p95为`566.322ms`、成功evidence未发布，且README既有绝对路径触发repository sentinel基线误报
 
 ## Pending Feedback
 
-Synthetic E2E calibration因exact launcher未完整执行且failure coverage不完整而blocked，建议`DO NOT AUTHORIZE REAL RETRY`
+Synthetic E2E calibration V3因capacity硬阈值失败、成功evidence未发布与baseline sentinel策略无法通过而blocked，建议`DO NOT AUTHORIZE REAL RETRY`
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；任何新的真实retry前必须修复exact launcher、补齐fixture/DB-init failure coverage，完成新的全量synthetic E2E及独立spec与quality review，并由用户明确通过retry Gate
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；任何新的真实retry前必须以base-relative方式检测新增路径泄漏、保持secret类绝对零容忍，并完成一次capacity阈值通过且成功原子发布的全量synthetic E2E及独立spec与quality review，再由用户明确通过retry Gate
 
 ## Evidence Index
 
+- [Phase 5 synthetic E2E calibration v3 blocked](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V3-BLOCKED.md)
 - [Phase 5 synthetic E2E calibration blocked](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED.md)
 - [Phase 5 retry containment blocked](checkpoints/CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED.md)
 - [Phase 5 retry after cleanup accepted](checkpoints/CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED.md)
