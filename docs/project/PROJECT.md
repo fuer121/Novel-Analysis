@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T12:44:17+08:00
+updated_at: 2026-07-24T13:28:23+08:00
 updated_by: controller-agent
-current_phase: phase-5-v3-retry-preflight-blocked
-last_checkpoint: CP-20260724-PHASE5-V3-RETRY-PREFLIGHT-BLOCKED
+current_phase: phase-5-retry-after-cleanup-accepted
+last_checkpoint: CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | v3 retry preflight blocked | 唯一retry因prior Task 6 PostgreSQL instance触发target-not-idle/no-concurrent hard stop，identity、snapshot与key均未访问 |
+| Phase 5 | retry after cleanup accepted | Prior Task 6 stale PostgreSQL资源已授权清理并fresh absence verified，一次新的fresh retry已授权但尚未执行 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-v3-retry-preflight-blocked | 78d2a6d9e43b701c9b57a21b575fe792f6d6fd0c | 78d2a6d9e43b701c9b57a21b575fe792f6d6fd0c | blocked | CP-20260724-PHASE5-V3-RETRY-CORRECTION-ACCEPTED | CP-20260724-PHASE5-V3-RETRY-PREFLIGHT-BLOCKED | confirm stale Task 6 PostgreSQL ownership and cleanup authorization, then submit any new retry authorization |
+| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-retry-after-cleanup-accepted | 8a791f6a926b902ed75066d5857bd02a2340cadc | 8a791f6a926b902ed75066d5857bd02a2340cadc | ready | CP-20260724-PHASE5-V3-RETRY-PREFLIGHT-BLOCKED | CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED | execute the single authorized retry under the accepted v3 anchor, pre-run hard stops and cleanup order |
 
 ## Phase Ledgers
 
@@ -96,18 +96,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Fresh retry因repository-external TypeScript helper被按CJS转换而在database initialization阶段blocked；helper修正与新retry必须重新提交确认
 - V2 private identity evidence为pre-run匹配被保留超过protocol acceptance触发的retention deadline；下一修正必须分离raw evidence与具有明确execution custody window的最小identity artifact
 - V3 protocol、Git trust anchor与verified-byte handoff已接受；唯一fresh retry必须先完成anchored pre-run验证与identity cleanup，任一mismatch在snapshot/key access前exit `70`
-- V3唯一retry在identity open/hash前因prior Task 6 PostgreSQL instance触发target-not-idle/no-concurrent hard stop并已消耗；该instance未被停止或删除，任何新retry必须先处理ownership与cleanup授权并重新确认
+- Prior Task 6 stale PostgreSQL container、专属volume与空network已在授权后删除并fresh absence verified；新授权的唯一retry仍须遵守v3 anchor、pre-run hard stops与identity-before-snapshot/key cleanup顺序
 
 ## Pending Feedback
 
-V3唯一retry已在fresh preflight阶段blocked并消耗；等待确认prior Task 6 PostgreSQL ownership与cleanup授权，处理后仍需重新提交任何新retry authorization
+Stale Task 6 PostgreSQL资源cleanup已完成；一次新的fresh retry已授权但尚未执行，identity bundle仍未open/hash且原custody有效
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；必须先解决stale Task 6 PostgreSQL ownership与cleanup授权、重新批准新retry，再完成全新isolated rehearsal的全部hard validation与capacity thresholds
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；必须先完成唯一authorized retry的anchored pre-run、全部hard validations、capacity thresholds与cleanup
 
 ## Evidence Index
 
+- [Phase 5 retry after cleanup accepted](checkpoints/CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED.md)
 - [Phase 5 v3 retry preflight blocked](checkpoints/CP-20260724-PHASE5-V3-RETRY-PREFLIGHT-BLOCKED.md)
 - [Phase 5 v3 retry correction accepted](checkpoints/CP-20260724-PHASE5-V3-RETRY-CORRECTION-ACCEPTED.md)
 - [Phase 5 v3 retry correction submitted](checkpoints/CP-20260724-PHASE5-V3-RETRY-CORRECTION-SUBMITTED.md)
