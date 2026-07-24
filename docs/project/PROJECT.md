@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-25T01:04:48+08:00
+updated_at: 2026-07-25T01:10:20+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-stage-entry-accepted
-last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-STAGE-ENTRY-ACCEPTED
+current_phase: phase-5-real-retry-identity-restarted
+last_checkpoint: CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -42,8 +42,8 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 0839f57a68ead6e264734fef8f155f045dbd88b6 | accepted | DEC-0022 | CP-20260725-PHASE5-REAL-RETRY-STAGE-ENTRY-ACCEPTED | merge implementation and record merged checkpoint |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-real-retry-identity | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | ready | CP-20260725-PHASE5-REAL-RETRY-STAGE-ENTRY-ACCEPTED | CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED | after stage merge regenerate exact identity around accepted artifact SHA and re-run dual review |
+| PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-identity-restarted | 72e0d29bb5fade441530e79736deb53c735d794a | 72e0d29bb5fade441530e79736deb53c735d794a | in_progress | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | create new external candidate around accepted artifact SHA, then dual review |
 
 ## Phase Ledgers
 
@@ -110,17 +110,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Real retry identity的focused suites与最终规格审查通过，但独立质量审查因实际执行闭包未冻结及5类关联安全问题blocked；当前069e baseline没有tracked且可直接执行的统一JavaScript stage，需要用户选择执行闭包Option A、B或C
 - 用户已选择Option A，单一committed Node ESM rehearsal stage进入实现；stage通过双审前，blocked candidate SHA继续无效
 - Single-artifact stage已通过规格、质量与总控验证，accepted artifact SHA为`6ea6bebe5cdfee41f9060a270e1a3af8773fc51a8692d097af0900a31d4666f0`；real retry identity仍需围绕该artifact重新生成和双审
+- Single-artifact stage已在PR #177合并并通过post-merge verification；旧candidate继续invalid，新candidate必须关闭accepted task contract中的全部quality findings
 
 ## Pending Feedback
 
-Single-artifact rehearsal stage已accepted，下一步合并implementation并重新生成real retry identity；第二次Execution confirmation、真实snapshot、old key与执行继续locked
+Single-artifact rehearsal stage已merged，real retry identity correction已重新启动；第二次Execution confirmation、真实snapshot、old key与执行继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前合并single-artifact stage后重新生成real retry identity并关闭quality findings；此前不得读取production snapshot、old key或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前重新生成real retry identity并关闭quality findings；此前不得读取production snapshot、old key或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 stage merged and identity restarted](checkpoints/CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED.md)
 - [Phase 5 real retry stage entry accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-STAGE-ENTRY-ACCEPTED.md)
 - [Phase 5 real retry stage entry started](checkpoints/CP-20260724-PHASE5-REAL-RETRY-STAGE-ENTRY-STARTED.md)
 - [Phase 5 single artifact rehearsal stage decision](decisions/DEC-0022-phase5-single-artifact-rehearsal-stage.md)
