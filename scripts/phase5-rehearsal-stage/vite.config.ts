@@ -28,12 +28,12 @@ export default defineConfig({
     target: "node22",
     minify: false,
     sourcemap: false,
-    rollupOptions: {
+    rolldownOptions: {
       external: (id) => builtins.has(id),
       output: {
         entryFileNames: "stage.mjs",
+        codeSplitting: false,
       },
-      codeSplitting: false,
     },
   },
   ssr: { noExternal: true },

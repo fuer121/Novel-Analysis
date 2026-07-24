@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { builtinModules } from "node:module";
@@ -110,4 +110,8 @@ test("fresh builds are byte-identical to each other and committed artifact", () 
   execFileSync(process.execPath, [join(directory, "check-artifact.mjs")], { cwd: root, stdio: "pipe" });
   const expected = readFileSync(join(directory, "artifact.sha256"), "utf8").trim().split(" ")[0];
   assert.equal(createHash("sha256").update(second).digest("hex"), expected);
+});
+
+test("build inventory contains exactly one runtime artifact", () => {
+  assert.deepEqual(readdirSync(join(directory, "artifact")), ["stage.mjs"]);
 });
