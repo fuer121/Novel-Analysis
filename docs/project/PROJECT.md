@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T15:29:49+08:00
+updated_at: 2026-07-24T17:30:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-synthetic-e2e-calibration-v3-blocked
-last_checkpoint: CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V3-BLOCKED
+current_phase: phase-5-synthetic-e2e-calibration-v4-quality-blocked
+last_checkpoint: CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V4-QUALITY-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | synthetic E2E calibration v3 blocked | Launcher与两个缺失场景已修复，12个场景执行11个通过；success browse p95超阈值且baseline sentinel策略无法通过 |
+| Phase 5 | synthetic E2E calibration v4 quality blocked | 12/12场景、容量阈值与规格审查通过；质量审查发现retained runtime sentinel、原始manifest digest核验与launcher异常清理三个缺口 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-SYNTHETIC-E2E-CALIBRATION | phase-5 | Full synthetic execution-unit calibration before any real retry | controller-agent | codex/phase5-synthetic-calibration-v3-blocked | 0d998e3be341376ea86d665fd15e2ceadbc9526b | 0d998e3be341376ea86d665fd15e2ceadbc9526b | blocked | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V3-BLOCKED | keep real retry locked; correct baseline-relative leakage scan and obtain one complete threshold-passing synthetic success with atomic evidence |
+| PHASE5-SYNTHETIC-E2E-CALIBRATION | phase-5 | Full synthetic execution-unit calibration before any real retry | controller-agent | codex/phase5-synthetic-v4-calibration | 0996b12df6612baab7538ab68b47d1087ed9bcf5 | 0996b12df6612baab7538ab68b47d1087ed9bcf5 | blocked | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V3-BLOCKED | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V4-QUALITY-BLOCKED | keep real retry locked; close retained runtime sentinel, original manifest digest verification and launcher-level cleanup findings before any new synthetic run |
 
 ## Phase Ledgers
 
@@ -100,17 +100,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Cleanup后唯一retry在identity open/hash前因expected-path parent层级比较错误于首项containment exit `70`并已消耗；empty run/sink/pointer已清理，任何新retry前必须完整修正并独立审查preflight wrapper
 - Full synthetic execution unit的10个已定义场景完成，但exact launcher在post-run packaging exit `1`，fixture generation与database initialization failure未覆盖，spec review blocked且quality review未启动
 - V3已关闭launcher URL-to-path与两个缺失失败场景，但success browse p95为`566.322ms`、成功evidence未发布，且README既有绝对路径触发repository sentinel基线误报
+- V4已完成12/12场景、严格容量阈值、零ordinary output及spec approval，但quality review因retained runtime sentinel未完整覆盖、原始manifest digest未独立核验及launcher编排层异常清理缺口而blocked
 
 ## Pending Feedback
 
-Synthetic E2E calibration V3因capacity硬阈值失败、成功evidence未发布与baseline sentinel策略无法通过而blocked，建议`DO NOT AUTHORIZE REAL RETRY`
+Synthetic E2E calibration V4执行与spec review通过，但quality review存在2个Important与1个Moderate finding，建议`DO NOT AUTHORIZE REAL RETRY`
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；任何新的真实retry前必须以base-relative方式检测新增路径泄漏、保持secret类绝对零容忍，并完成一次capacity阈值通过且成功原子发布的全量synthetic E2E及独立spec与quality review，再由用户明确通过retry Gate
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；必须先关闭retained runtime sentinel、原始manifest digest核验与launcher异常清理三个quality findings，完成focused tests并冻结新exact bytes后，才能提请是否执行新的单次synthetic E2E；任何真实retry仍需用户明确通过retry Gate
 
 ## Evidence Index
 
+- [Phase 5 synthetic E2E calibration v4 quality blocked](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V4-QUALITY-BLOCKED.md)
 - [Phase 5 synthetic E2E calibration v3 blocked](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V3-BLOCKED.md)
 - [Phase 5 synthetic E2E calibration blocked](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED.md)
 - [Phase 5 retry containment blocked](checkpoints/CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED.md)
