@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T18:12:15+08:00
+updated_at: 2026-07-24T19:36:33+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-identity-ready
-last_checkpoint: CP-20260724-PHASE5-REAL-RETRY-GATE-CONTRACT-ACCEPTED
+current_phase: phase-5-real-retry-identity-quality-blocked
+last_checkpoint: CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -42,7 +42,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-real-retry-gate-accepted | 8b57d0967d571af7a7e72cece0435bf0d85b9de0 | 8b57d0967d571af7a7e72cece0435bf0d85b9de0 | ready | CP-20260724-PHASE5-REAL-RETRY-GATE-CONTRACT-ACCEPTED | CP-20260724-PHASE5-REAL-RETRY-GATE-CONTRACT-ACCEPTED | prepare exact identity with synthetic stubs only, complete dual review, then request Execution confirmation |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-real-retry-identity | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | a0ff410feb2883001b434b1d30f0a39ef3c1dbcc | blocked | CP-20260724-PHASE5-REAL-RETRY-GATE-CONTRACT-ACCEPTED | CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED | choose execution closure Option A, B or C before further implementation |
 
 ## Phase Ledgers
 
@@ -105,17 +105,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - V5唯一full synthetic已12/12通过，success browse p95为`395.546ms`，原始evidence digest、absolute-zero scans与资源清理通过，真实retry仍需独立Gate
 - Real retry Gate采用两次明确确认，首次只授权无真实输入的execution identity准备，第二次才可授权唯一真实执行
 - Gate contract第一次确认已通过，identity准备不得读取snapshot、old key、Keychain或创建真实数据库
+- Real retry identity的focused suites与最终规格审查通过，但独立质量审查因实际执行闭包未冻结及5类关联安全问题blocked；当前069e baseline没有tracked且可直接执行的统一JavaScript stage，需要用户选择执行闭包Option A、B或C
 
 ## Pending Feedback
 
-Real retry Gate contract已接受，允许准备和审查real execution identity；第二次Execution confirmation、真实snapshot、old key与执行继续locked
+Real retry identity质量审查blocked，总控推荐Option A新增最小可直接执行的统一JavaScript stage entry；用户明确选择前停止实现，第二次Execution confirmation、真实snapshot、old key与执行继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前只准备exact real retry identity并完成双审，之后提交Execution confirmation；此前不得读取production snapshot、old key或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前需先选择real retry execution closure并关闭quality findings，之后才能提交Execution confirmation；此前不得读取production snapshot、old key或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 real retry identity quality blocked](checkpoints/CP-20260724-PHASE5-REAL-RETRY-IDENTITY-QUALITY-BLOCKED.md)
 - [Phase 5 real retry Gate contract accepted](checkpoints/CP-20260724-PHASE5-REAL-RETRY-GATE-CONTRACT-ACCEPTED.md)
 - [Phase 5 real retry Gate submitted](checkpoints/CP-20260724-PHASE5-REAL-RETRY-GATE-SUBMITTED.md)
 - [Phase 5 synthetic E2E calibration v5 accepted](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-V5-ACCEPTED.md)
