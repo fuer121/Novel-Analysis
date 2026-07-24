@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T11:36:52+08:00
+updated_at: 2026-07-24T12:27:59+08:00
 updated_by: controller-agent
-current_phase: phase-5-v3-correction-confirmation
-last_checkpoint: CP-20260724-PHASE5-REHEARSAL-RETRY-BLOCKED
+current_phase: phase-5-v3-correction-accepted
+last_checkpoint: CP-20260724-PHASE5-V3-RETRY-CORRECTION-ACCEPTED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | v3 quality fix confirmation | Content-addressed launch、strict identity allowlist与replacement custody已通过synthetic验证并提交确认，actual retry仍锁定 |
+| Phase 5 | v3 correction accepted | V3 protocol与Git trust anchor已接受，一次fresh isolated rehearsal retry已授权但尚未开始 |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-v3-correction-submitted | 62140af90cd533a0e92feb780a73168e94324136 | 62140af90cd533a0e92feb780a73168e94324136 | blocked | CP-20260724-PHASE5-REHEARSAL-RETRY-BLOCKED | CP-20260724-PHASE5-V3-RETRY-CORRECTION-SUBMITTED | confirm v3 correction before any production snapshot or key access |
+| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-v3-correction-accepted | f07588c00124739ffe8cebf4e577c19f371bf59c | f07588c00124739ffe8cebf4e577c19f371bf59c | ready | CP-20260724-PHASE5-V3-RETRY-CORRECTION-ACCEPTED | CP-20260724-PHASE5-V3-RETRY-CORRECTION-ACCEPTED | execute accepted pre-run trust verification and identity cleanup, then the single authorized retry |
 
 ## Phase Ledgers
 
@@ -95,11 +95,11 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Corrected launcher与wrapper已通过process-level private stdio、deterministic wrapper failure、repeated-readiness、identity binding、atomic manifest与cleanup验证；actual retry必须逐byte匹配accepted private identity
 - Fresh retry因repository-external TypeScript helper被按CJS转换而在database initialization阶段blocked；helper修正与新retry必须重新提交确认
 - V2 private identity evidence为pre-run匹配被保留超过protocol acceptance触发的retention deadline；下一修正必须分离raw evidence与具有明确execution custody window的最小identity artifact
-- V3 quality fix已验证verified-bytes launch handoff、exact identity allowlist与replacement-before-destruction custody；raw evidence与旧invalid bundle已销毁，actual retry仍需独立审查与明确接受
+- V3 protocol、Git trust anchor与verified-byte handoff已接受；唯一fresh retry必须先完成anchored pre-run验证与identity cleanup，任一mismatch在snapshot/key access前exit `70`
 
 ## Pending Feedback
 
-V3 quality fix与replacement private identity evidence已提交；等待独立spec/quality review与明确决定，等待期间production snapshot、old key与actual rehearsal保持locked
+V3 correction已接受且唯一fresh retry已授权但尚未开始；下一步先执行accepted Git anchor验证与identity cleanup，再进入同一次retry
 
 ## Next Gate
 
@@ -107,6 +107,7 @@ V3 quality fix与replacement private identity evidence已提交；等待独立sp
 
 ## Evidence Index
 
+- [Phase 5 v3 retry correction accepted](checkpoints/CP-20260724-PHASE5-V3-RETRY-CORRECTION-ACCEPTED.md)
 - [Phase 5 v3 retry correction submitted](checkpoints/CP-20260724-PHASE5-V3-RETRY-CORRECTION-SUBMITTED.md)
 - [Phase 5 rehearsal retry blocked](checkpoints/CP-20260724-PHASE5-REHEARSAL-RETRY-BLOCKED.md)
 - [Phase 5 rehearsal protocol correction accepted](checkpoints/CP-20260724-PHASE5-REHEARSAL-PROTOCOL-CORRECTION-ACCEPTED.md)
