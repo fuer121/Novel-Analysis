@@ -3,10 +3,10 @@ project_id: novel-analysis-refactor
 source_version: 1
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-24T13:49:22+08:00
+updated_at: 2026-07-24T15:03:36+08:00
 updated_by: controller-agent
-current_phase: phase-5-retry-containment-blocked
-last_checkpoint: CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED
+current_phase: phase-5-synthetic-e2e-calibration-blocked
+last_checkpoint: CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -36,13 +36,13 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | retry containment blocked | Fresh target preflight通过后，expected-path containment首项因parent层级比较错误exit `70`，identity、snapshot与key均未访问 |
+| Phase 5 | synthetic E2E calibration blocked | 10个已定义synthetic场景通过，但exact launcher在post-run packaging exit `1`，且缺少fixture/DB-init failure coverage |
 
 ## Active Work
 
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| PHASE5-TARGET-SERVER-ISOLATED-REHEARSAL | phase-5 | Isolated migration hard validation and capacity rehearsal | controller-agent | codex/phase5-retry-containment-blocked | 8c85206e032605508147c4d8f35536f0e7679857 | 8c85206e032605508147c4d8f35536f0e7679857 | blocked | CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED | CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED | complete repository-external synthetic correction and independent review of the full preflight wrapper before proposing any new retry |
+| PHASE5-SYNTHETIC-E2E-CALIBRATION | phase-5 | Full synthetic execution-unit calibration before any real retry | controller-agent | codex/phase5-preflight-correction-accepted | 1bfc74c45a4cf194b2dd611af84356197b3be5db | 1bfc74c45a4cf194b2dd611af84356197b3be5db | blocked | CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED | CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED | keep real retry locked; fix exact launcher and missing fixture/DB-init failure coverage before any new calibration proposal |
 
 ## Phase Ledgers
 
@@ -98,17 +98,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - V3 protocol、Git trust anchor与verified-byte handoff已接受；唯一fresh retry必须先完成anchored pre-run验证与identity cleanup，任一mismatch在snapshot/key access前exit `70`
 - Prior Task 6 stale PostgreSQL container、专属volume与空network已在授权后删除并fresh absence verified；新授权的唯一retry仍须遵守v3 anchor、pre-run hard stops与identity-before-snapshot/key cleanup顺序
 - Cleanup后唯一retry在identity open/hash前因expected-path parent层级比较错误于首项containment exit `70`并已消耗；empty run/sink/pointer已清理，任何新retry前必须完整修正并独立审查preflight wrapper
+- Full synthetic execution unit的10个已定义场景完成，但exact launcher在post-run packaging exit `1`，fixture generation与database initialization failure未覆盖，spec review blocked且quality review未启动
 
 ## Pending Feedback
 
-Cleanup后唯一retry已在containment preflight阶段blocked并消耗；identity与canonical snapshot保持原custody，等待完整preflight wrapper synthetic correction与独立审查
+Synthetic E2E calibration因exact launcher未完整执行且failure coverage不完整而blocked，建议`DO NOT AUTHORIZE REAL RETRY`
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；必须先完成preflight wrapper external synthetic correction、独立审查与新的明确retry授权，再执行全部hard validations、capacity thresholds与cleanup
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；任何新的真实retry前必须修复exact launcher、补齐fixture/DB-init failure coverage，完成新的全量synthetic E2E及独立spec与quality review，并由用户明确通过retry Gate
 
 ## Evidence Index
 
+- [Phase 5 synthetic E2E calibration blocked](checkpoints/CP-20260724-PHASE5-SYNTHETIC-E2E-CALIBRATION-BLOCKED.md)
 - [Phase 5 retry containment blocked](checkpoints/CP-20260724-PHASE5-RETRY-CONTAINMENT-BLOCKED.md)
 - [Phase 5 retry after cleanup accepted](checkpoints/CP-20260724-PHASE5-RETRY-AFTER-CLEANUP-ACCEPTED.md)
 - [Phase 5 v3 retry preflight blocked](checkpoints/CP-20260724-PHASE5-V3-RETRY-PREFLIGHT-BLOCKED.md)
