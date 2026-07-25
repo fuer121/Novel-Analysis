@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 9
+source_version: 10
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-25T14:36:00+08:00
+updated_at: 2026-07-25T14:45:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-identity-v3-v1-quality-blocked
-last_checkpoint: CP-20260725-PHASE5-IDENTITY-V3-V1-QUALITY-BLOCKED
+current_phase: phase-5-real-retry-identity-v3-v2
+last_checkpoint: CP-20260725-PHASE5-IDENTITY-V3-V2-RESTARTED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -43,7 +43,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | fbf2181c24473cded608d22c5405f26fb67c0d07 | fbf2181c24473cded608d22c5405f26fb67c0d07 | blocked | DEC-0025 | CP-20260725-PHASE5-IDENTITY-V3-V1-QUALITY-BLOCKED | decide a volume deletion identity strategy, then close four Important quality findings in one correction |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | c29966d7a18a54ad84305b4ebb8c2e32a88c3c53 | c29966d7a18a54ad84305b4ebb8c2e32a88c3c53 | in_progress | DEC-0026 | CP-20260725-PHASE5-IDENTITY-V3-V2-RESTARTED | implement one synthetic correction for container-owned storage and all four V1 quality findings |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -80,6 +80,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - [DEC-0023 Phase 5 Stage Verified Input And Resource Binding](decisions/DEC-0023-phase5-stage-verified-input-resource-binding.md)
 - [DEC-0024 Phase 5 Launcher Owned PostgreSQL Lifecycle](decisions/DEC-0024-phase5-launcher-owned-postgres-lifecycle.md)
 - [DEC-0025 Phase 5 Docker Resource Kind Identities](decisions/DEC-0025-phase5-docker-resource-kind-identities.md)
+- [DEC-0026 Phase 5 Container Owned Ephemeral Storage](decisions/DEC-0026-phase5-container-owned-ephemeral-storage.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -124,17 +125,20 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - R1 candidate已关闭原规格findings，但synthetic fixture错误假设Docker volume具有`Id`；等待V1或V2 volume identity决策
 - 用户已选择V1，named volume改用Docker真实字段的composite attestation，kind-specific fixture correction进入implementation
 - V1 candidate的kind-specific correction已通过规格审查，但独立质量审查发现volume deletion TOCTOU、manifest sentinel、durable atomic publication与cleanup blocked evidence四个Important finding，candidate继续blocked
+- 用户确认放弃V1并切换到V2，container-owned anonymous storage与immutable container ID cleanup进入单一synthetic correction
 
 ## Pending Feedback
 
-Identity v3 V1规格通过但质量blocked；先确认volume deletion identity策略，再用单一correction关闭四个Important finding；真实input、Docker与database继续locked
+Identity v3已按V2重启单一synthetic correction，关闭container storage lifecycle与V1四个quality findings；真实input、Docker与database继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先确认volume deletion identity策略并关闭V1四个quality findings；此前不得读取production snapshot、old key、连接Docker或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先完成V2 correction与独立双审；此前不得读取production snapshot、old key、连接Docker或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 identity v3 V2 restarted](checkpoints/CP-20260725-PHASE5-IDENTITY-V3-V2-RESTARTED.md)
+- [Phase 5 container owned ephemeral storage decision](decisions/DEC-0026-phase5-container-owned-ephemeral-storage.md)
 - [Phase 5 identity v3 V1 quality blocked](checkpoints/CP-20260725-PHASE5-IDENTITY-V3-V1-QUALITY-BLOCKED.md)
 - [Phase 5 identity v3 V1 restarted](checkpoints/CP-20260725-PHASE5-IDENTITY-V3-V1-RESTARTED.md)
 - [Phase 5 Docker resource kind identities decision](decisions/DEC-0025-phase5-docker-resource-kind-identities.md)
