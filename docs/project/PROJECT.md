@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 17
+source_version: 18
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-25T19:20:00+08:00
+updated_at: 2026-07-25T20:40:35+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-execution-v3-preparation-blocked
-last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED
-next_gate: GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION
+current_phase: phase-5-snapshot-preflight-correction
+last_checkpoint: CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-STARTED
+next_gate: GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Execution V3 preparation blocked | Config已安全冻结，但完整执行单元仍需在snapshot validation前准备keys；Gate未提交，全部真实资源继续locked |
+| Phase 5 | Snapshot preflight correction active | Option A已接受；仅解锁repository-external synthetic correction，Execution V3 Gate与全部真实资源继续locked |
 
 ## Active Work
 
@@ -47,6 +47,7 @@ next_gate: GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION
 | PHASE5-REAL-RETRY-EXECUTION-V2 | phase-5 | Execute one real isolated rehearsal using only accepted V2 bytes after explicit confirmation | controller-agent | codex/phase5-real-retry-execution-v2-blocked | de143a8e2fd6aa7159e5a5c31d02bc20b9eb2afb | de143a8e2fd6aa7159e5a5c31d02bc20b9eb2afb | blocked | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-BLOCKED | correct controller preflight implementation and identity-before-snapshot ordering before any retry |
 | PHASE5-REAL-RETRY-CORRECTION | phase-5 | Candidate-owned preflight、snapshot validation ordering、synthetic refreeze与双审 | controller-agent | codex/phase5-real-retry-correction-accepted | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | superseded | DEC-0027 | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | full-unit ordering gap recorded by V3 preparation blocked checkpoint |
 | PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION | phase-5 | Freeze V3 config and audit complete preflight-to-sensitive-input ordering before Gate submission | controller-agent | codex/phase5-v3-gate-preparation-blocked | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | blocked | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED | choose snapshot-preflight correction strategy |
+| PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION | phase-5 | Add candidate-owned snapshot preflight without key or runtime resource access, then refreeze and review | controller-agent | codex/phase5-snapshot-preflight-correction-started | f061d20c2b852a68af44d6b26195faaf5493b14e | f061d20c2b852a68af44d6b26195faaf5493b14e | in_progress | DEC-0028 | CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-STARTED | implement only in a new repository-external synthetic candidate |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -85,6 +86,7 @@ next_gate: GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION
 - [DEC-0025 Phase 5 Docker Resource Kind Identities](decisions/DEC-0025-phase5-docker-resource-kind-identities.md)
 - [DEC-0026 Phase 5 Container Owned Ephemeral Storage](decisions/DEC-0026-phase5-container-owned-ephemeral-storage.md)
 - [DEC-0027 Phase 5 Candidate Owned Preflight](decisions/DEC-0027-phase5-candidate-owned-preflight.md)
+- [DEC-0028 Phase 5 Snapshot Preflight Mode](decisions/DEC-0028-phase5-snapshot-preflight-mode.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -139,14 +141,16 @@ next_gate: GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION
 
 ## Pending Feedback
 
-Execution V3 Gate preparation已BLOCKED；等待用户选择Option A candidate-owned snapshot-preflight或Option B candidate-owned key acquisition，全部真实资源与任何retry继续locked
+Option A已接受，`PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION`进入repository-external synthetic implementation；全部真实资源与任何retry继续locked
 
 ## Next Gate
 
-`GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION`等待用户决策；完成synthetic correction与独立双审前不得提交`GATE-PHASE5-REAL-RETRY-EXECUTION-V3`，`GATE-PHASE5-FEISHU-UAT`继续locked
+`GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED`等待synthetic correction、重新冻结与独立双审；完成前不得提交`GATE-PHASE5-REAL-RETRY-EXECUTION-V3`，`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 snapshot preflight correction started](checkpoints/CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-STARTED.md)
+- [Phase 5 snapshot preflight mode decision](decisions/DEC-0028-phase5-snapshot-preflight-mode.md)
 - [Phase 5 real retry Execution V3 preparation blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED.md)
 - [Phase 5 real retry correction accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED.md)
 - [Phase 5 real retry correction started](checkpoints/CP-20260725-PHASE5-REAL-RETRY-CORRECTION-STARTED.md)
