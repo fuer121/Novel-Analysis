@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 19
+source_version: 20
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-25T21:37:25+08:00
+updated_at: 2026-07-25T22:00:24+08:00
 updated_by: controller-agent
-current_phase: phase-5-snapshot-preflight-correction-accepted
+current_phase: phase-5-real-retry-execution-v3-gate-submitted
 last_checkpoint: CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED
-next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
+next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3-ACCEPTANCE
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Snapshot preflight correction accepted | `46/46 PASS`与独立双审通过；Execution V3 Gate尚未提交，全部真实资源继续locked |
+| Phase 5 | Execution V3 Gate submitted | Exact contract已提交但未接受；全部真实输入、Docker、database与retry继续locked |
 
 ## Active Work
 
@@ -48,6 +48,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
 | PHASE5-REAL-RETRY-CORRECTION | phase-5 | Candidate-owned preflight、snapshot validation ordering、synthetic refreeze与双审 | controller-agent | codex/phase5-real-retry-correction-accepted | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | superseded | DEC-0027 | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | full-unit ordering gap recorded by V3 preparation blocked checkpoint |
 | PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION | phase-5 | Freeze V3 config and audit complete preflight-to-sensitive-input ordering before Gate submission | controller-agent | codex/phase5-v3-gate-preparation-blocked | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | superseded | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED | replaced by accepted snapshot-preflight correction |
 | PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION | phase-5 | Add candidate-owned snapshot preflight without key or runtime resource access, then refreeze and review | controller-agent | codex/phase5-snapshot-preflight-correction | 8396047884bcdf4c3cb383d43363ce65651a07e2 | 8396047884bcdf4c3cb383d43363ce65651a07e2 | accepted | DEC-0028 | CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED | prepare a separate named Execution V3 Gate without accessing real resources |
+| PHASE5-REAL-RETRY-EXECUTION-V3 | phase-5 | Execute one real isolated rehearsal using accepted snapshot-preflight identity after exact named confirmation | controller-agent | codex/phase5-real-retry-execution-v3-gate | 6dad0cadce891ac70618ebdb881987de773e4bec | 6dad0cadce891ac70618ebdb881987de773e4bec | review | CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-GATE-SUBMITTED | merge Gate submission, then request exact named acceptance |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -142,14 +143,15 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
 
 ## Pending Feedback
 
-`PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION`已接受；等待总控另行准备named Execution V3 Gate，全部真实资源与任何retry继续locked
+`GATE-PHASE5-REAL-RETRY-EXECUTION-V3` exact contract已提交；等待PR合并后用户named acceptance，全部真实资源与任何retry继续locked
 
 ## Next Gate
 
-下一步为另行提交`GATE-PHASE5-REAL-RETRY-EXECUTION-V3`；Gate提交不等于接受或执行，`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步为合并Gate submission后获取`接受 GATE-PHASE5-REAL-RETRY-EXECUTION-V3`的明确确认；`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry Execution V3 Gate submitted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-GATE-SUBMITTED.md)
 - [Phase 5 snapshot preflight correction accepted](checkpoints/CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED.md)
 - [Phase 5 snapshot preflight correction started](checkpoints/CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-STARTED.md)
 - [Phase 5 snapshot preflight mode decision](decisions/DEC-0028-phase5-snapshot-preflight-mode.md)
