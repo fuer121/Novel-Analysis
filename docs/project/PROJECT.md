@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 4
+source_version: 5
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-25T09:25:15+08:00
+updated_at: 2026-07-25T11:00:09+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-identity-ready
-last_checkpoint: CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED
+current_phase: phase-5-real-retry-identity-v3-resource-ownership-blocked
+last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V3-RESOURCE-OWNERSHIP-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -43,7 +43,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | ready | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED | generate a fresh candidate around the accepted v2 artifact, then independent spec and quality review |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | 4f9c650fa1170dc2c23ac82adf672810ebc0b13b | 4f9c650fa1170dc2c23ac82adf672810ebc0b13b | blocked | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V3-RESOURCE-OWNERSHIP-BLOCKED | choose launcher-owned Docker lifecycle R1 or external ownership attestation R2 |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -117,17 +117,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - 用户已选择A1，stage interface v2进入synthetic implementation；保持same-descriptor verified-use与resource-match要求，不放宽Gate
 - Stage interface v2已通过独立规格与质量审查，新artifact SHA为`acedef876bc35821ac0e708660d3ddc1d373d30eb97dc15fdc9846f863cc71d5`；等待implementation PR CI与合并
 - Stage interface v2已在PR #181合并并通过post-merge verification；identity stage interface blocker已关闭
+- Identity v3已关闭wrapper stdin、非循环bootstrap、parent containment与manifest provenance primitive，但无法证明既有database URL对应资源归本次launcher所有；等待R1或R2决策
 
 ## Pending Feedback
 
-Identity preparation已恢复为ready，可重新生成无真实输入candidate并完成双审；第二次Execution confirmation与真实input继续locked
+Identity v3因database resource ownership无法证明而blocked；用户选择R1或R2前停止实现，第二次Execution confirmation与真实input继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前可基于accepted v2 artifact重新准备identity candidate；此前不得读取production snapshot、old key或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先选择launcher-owned Docker lifecycle R1或external ownership attestation R2；此前不得读取production snapshot、old key或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 real retry identity v3 resource ownership blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V3-RESOURCE-OWNERSHIP-BLOCKED.md)
 - [Phase 5 stage interface v2 merged](checkpoints/CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED.md)
 - [Phase 5 stage interface v2 accepted](checkpoints/CP-20260725-PHASE5-STAGE-INTERFACE-V2-ACCEPTED.md)
 - [Phase 5 stage interface v2 started](checkpoints/CP-20260725-PHASE5-STAGE-INTERFACE-V2-STARTED.md)
