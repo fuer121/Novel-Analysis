@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 1
+source_version: 2
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-25T01:27:18+08:00
+updated_at: 2026-07-25T08:40:56+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-identity-v2-interface-blocked
-last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED
+current_phase: phase-5-stage-interface-v2
+last_checkpoint: CP-20260725-PHASE5-STAGE-INTERFACE-V2-STARTED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -43,7 +43,8 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-identity-v2 | cab6a0a61276310cb4dfa8eb7556ae121356b1ed | cab6a0a61276310cb4dfa8eb7556ae121356b1ed | blocked | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED | choose stage interface Option A1 or Gate relaxation Option A2 |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | codex/phase5-identity-v2 | cab6a0a61276310cb4dfa8eb7556ae121356b1ed | cab6a0a61276310cb4dfa8eb7556ae121356b1ed | blocked | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED | wait for stage interface v2 acceptance |
+| PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 1a46d275285d24d4aa76ec25b1290b0a59c20e80 | 1a46d275285d24d4aa76ec25b1290b0a59c20e80 | in_progress | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-STARTED | implement with synthetic inputs, then independent spec and quality review |
 
 ## Phase Ledgers
 
@@ -76,6 +77,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - [DEC-0020 Phase 5 Local Isolated Capacity Benchmark](decisions/DEC-0020-phase5-local-isolated-capacity-benchmark.md)
 - [DEC-0021 Phase 5 Lean Completion Boundary](decisions/DEC-0021-phase5-lean-completion-boundary.md)
 - [DEC-0022 Phase 5 Single Artifact Rehearsal Stage](decisions/DEC-0022-phase5-single-artifact-rehearsal-stage.md)
+- [DEC-0023 Phase 5 Stage Verified Input And Resource Binding](decisions/DEC-0023-phase5-stage-verified-input-resource-binding.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -112,17 +114,20 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Single-artifact stage已通过规格、质量与总控验证，accepted artifact SHA为`6ea6bebe5cdfee41f9060a270e1a3af8773fc51a8692d097af0900a31d4666f0`；real retry identity仍需围绕该artifact重新生成和双审
 - Single-artifact stage已在PR #177合并并通过post-merge verification；旧candidate继续invalid，新candidate必须关闭accepted task contract中的全部quality findings
 - Identity v2在freeze前确认accepted stage仍以path check后重新open方式消费input且不回传resource IDs，无法满足same-descriptor与resource-match要求；candidate未freeze，等待A1或A2决策
+- 用户已选择A1，stage interface v2进入synthetic implementation；保持same-descriptor verified-use与resource-match要求，不放宽Gate
 
 ## Pending Feedback
 
-Identity v2因stage input与resource interface blocked，总控推荐A1最小修正stage interface；用户明确选择前停止实现，第二次Execution confirmation与真实input继续locked
+Stage interface v2已按A1解锁synthetic implementation与双审；identity v2、第二次Execution confirmation与真实input继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先选择A1 stage interface correction或A2 Gate relaxation；此前不得读取production snapshot、old key或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先完成A1 stage interface correction、artifact重建与双审；此前不得读取production snapshot、old key或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 stage interface v2 started](checkpoints/CP-20260725-PHASE5-STAGE-INTERFACE-V2-STARTED.md)
+- [Phase 5 stage verified input and resource binding decision](decisions/DEC-0023-phase5-stage-verified-input-resource-binding.md)
 - [Phase 5 real retry identity v2 interface blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V2-INTERFACE-BLOCKED.md)
 - [Phase 5 stage merged and identity restarted](checkpoints/CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED.md)
 - [Phase 5 real retry stage entry accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-STAGE-ENTRY-ACCEPTED.md)
