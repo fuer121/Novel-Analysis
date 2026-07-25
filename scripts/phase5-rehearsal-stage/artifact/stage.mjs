@@ -72947,9 +72947,11 @@ function safeFailure(error) {
 var resultSchema = { schemaVersion: "phase5-rehearsal-stage-result-v2" };
 async function executeStage(argv, dependencies = defaults) {
 	let parsed;
+	let expectedResourceId;
 	try {
 		parsed = parseArguments(argv);
 		const descriptorRequest = validateRequest(parsed.mode, readRequest(parsed.requestFd));
+		if (parsed.mode !== "initialize") expectedResourceId = descriptorRequest.resourceId;
 		const request = verifiedRequest(parsed.mode, descriptorRequest);
 		if (parsed.mode === "initialize") {
 			const details = await dependencies.initialize(request);
@@ -72978,6 +72980,7 @@ async function executeStage(argv, dependencies = defaults) {
 			...resultSchema,
 			mode: parsed.mode,
 			status: "failed",
+			...expectedResourceId ? { resourceId: expectedResourceId } : {},
 			code: failure.code
 		}).catch(() => void 0);
 		process.stderr.write(`phase5_stage_failed:${failure.code}\n`);

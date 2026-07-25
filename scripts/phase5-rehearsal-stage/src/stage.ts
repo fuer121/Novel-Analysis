@@ -346,9 +346,14 @@ export async function executeStage(
   dependencies: StageDependencies = defaults,
 ): Promise<number> {
   let parsed: ReturnType<typeof parseArguments> | undefined;
+  let expectedResourceId: string | undefined;
   try {
     parsed = parseArguments(argv);
     const descriptorRequest = validateRequest(parsed.mode, readRequest(parsed.requestFd));
+    if (parsed.mode !== "initialize") {
+      expectedResourceId = (descriptorRequest as MigrateDescriptorRequest | CapacityDescriptorRequest)
+        .resourceId;
+    }
     const request = verifiedRequest(parsed.mode, descriptorRequest);
     if (parsed.mode === "initialize") {
       const details = await dependencies.initialize(request as InitializeRequest);
@@ -382,6 +387,7 @@ export async function executeStage(
         ...resultSchema,
         mode: parsed.mode,
         status: "failed",
+        ...(expectedResourceId ? { resourceId: expectedResourceId } : {}),
         code: failure.code,
       }).catch(() => undefined);
     }

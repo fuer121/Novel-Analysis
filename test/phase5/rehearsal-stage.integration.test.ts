@@ -190,7 +190,37 @@ describe("Phase 5 rehearsal stage source contract", () => {
         schemaVersion: "phase5-rehearsal-stage-result-v2",
         mode: "capacity",
         status: "failed",
+        resourceId: "rid_expected_resource",
         code: "resource_mismatch",
+      });
+    });
+  });
+
+  it("binds the expected resource ID when the operation fails", async () => {
+    await withDescriptors({
+      databaseUrlBytes: "postgres://synthetic-only",
+      resourceId: "rid_failed_resource",
+    }, async (requestFd) => {
+      const writeResult = vi.fn(async () => undefined);
+      await expect(executeStage([
+        "--mode", "capacity",
+        "--request-fd", String(requestFd),
+        "--result-file", "/output/result",
+      ], {
+        initialize: vi.fn(),
+        migrate: vi.fn(),
+        capacity: vi.fn(async () => {
+          throw new Error("synthetic operation failure");
+        }),
+        writeResult,
+      })).resolves.toBe(1);
+
+      expect(writeResult).toHaveBeenCalledWith("/output/result", {
+        schemaVersion: "phase5-rehearsal-stage-result-v2",
+        mode: "capacity",
+        status: "failed",
+        resourceId: "rid_failed_resource",
+        code: "stage_failed",
       });
     });
   });
@@ -201,6 +231,7 @@ describe("Phase 5 rehearsal stage source contract", () => {
       resourceId: "postgres:secret",
     }, async (requestFd) => {
       const capacity = vi.fn();
+      const writeResult = vi.fn(async () => undefined);
       await expect(executeStage([
         "--mode", "capacity",
         "--request-fd", String(requestFd),
@@ -209,9 +240,15 @@ describe("Phase 5 rehearsal stage source contract", () => {
         initialize: vi.fn(),
         migrate: vi.fn(),
         capacity,
-        writeResult: vi.fn(async () => undefined),
+        writeResult,
       })).resolves.toBe(65);
       expect(capacity).not.toHaveBeenCalled();
+      expect(writeResult).toHaveBeenCalledWith("/output/result", {
+        schemaVersion: "phase5-rehearsal-stage-result-v2",
+        mode: "capacity",
+        status: "failed",
+        code: "invalid_request",
+      });
     });
   });
 
