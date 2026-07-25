@@ -1,4 +1,13 @@
-import { link, lstat, open, readFile, unlink } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import {
+  chmod,
+  link,
+  mkdtemp,
+  open,
+  rm,
+  unlink,
+} from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -8,9 +17,9 @@ import {
   migrateToLatest,
 } from "../../../packages/database/src/index.js";
 import {
-  runMigrationFromCli,
-  type MigrationCliArgs,
-} from "../../../packages/migration/src/cli.js";
+  runMigrationFromVerifiedInput,
+  type MigrationVerifiedInput,
+} from "../../../packages/migration/src/verified-input.js";
 import { PHASE5_SCALE_PROFILE } from "../../../test/phase5/fixtures/scale-profile.js";
 import {
   runPhase5Load,
@@ -22,24 +31,52 @@ const MODES = ["initialize", "migrate", "capacity"] as const;
 type StageMode = typeof MODES[number];
 
 type StageResult = Readonly<{
-  schemaVersion: "phase5-rehearsal-stage-result-v1";
+  schemaVersion: "phase5-rehearsal-stage-result-v2";
   mode: StageMode;
   status: "passed" | "failed";
+  resourceId?: string;
   code?: string;
   details?: unknown;
 }>;
 
-type InitializeRequest = Readonly<{ databaseUrlFile: string }>;
-type MigrateRequest = Readonly<{
-  sourceFile: string;
-  databaseUrlFile: string;
-  oldKeyFile: string;
-  targetKeyFile: string;
-  targetHmacKeyFile: string;
+type InitializeDescriptorRequest = Readonly<{ databaseUrlFd: number }>;
+type MigrateDescriptorRequest = Readonly<{
+  sourceFd: number;
+  databaseUrlFd: number;
+  oldKeyFd: number;
+  targetKeyFd: number;
+  targetHmacKeyFd: number;
   manifestFile: string;
+  resourceId: string;
 }>;
-type CapacityRequest = Readonly<{ databaseUrlFile: string }>;
-type StageRequest = InitializeRequest | MigrateRequest | CapacityRequest;
+type CapacityDescriptorRequest = Readonly<{
+  databaseUrlFd: number;
+  resourceId: string;
+}>;
+type DescriptorRequest =
+  | InitializeDescriptorRequest
+  | MigrateDescriptorRequest
+  | CapacityDescriptorRequest;
+
+type InitializeRequest = Readonly<{ databaseUrl: Buffer }>;
+type MigrateRequest = Readonly<{
+  source: Buffer;
+  databaseUrl: Buffer;
+  oldKey: Buffer;
+  targetKey: Buffer;
+  targetHmacKey: Buffer;
+  manifestFile: string;
+  resourceId: string;
+}>;
+type CapacityRequest = Readonly<{
+  databaseUrl: Buffer;
+  resourceId: string;
+}>;
+
+type ResourceBoundResult<T> = Readonly<{
+  resourceId: string;
+  report: T;
+}>;
 
 const INLINE_SECRET_OPTIONS = new Set([
   "--database-url", "--old-key", "--target-key", "--target-hmac-key",
@@ -54,15 +91,14 @@ class StageFailure extends Error {
 
 type StageDependencies = Readonly<{
   initialize(request: InitializeRequest): Promise<unknown>;
-  migrate(request: MigrateRequest): Promise<unknown>;
-  capacity(request: CapacityRequest): Promise<unknown>;
-  readRequest(path: string): Promise<unknown>;
+  migrate(request: MigrateRequest): Promise<ResourceBoundResult<unknown>>;
+  capacity(request: CapacityRequest): Promise<ResourceBoundResult<unknown>>;
   writeResult(path: string, result: StageResult): Promise<void>;
 }>;
 
 function parseArguments(argv: readonly string[]): {
   mode: StageMode;
-  requestFile: string;
+  requestFd: number;
   resultFile: string;
 } {
   const values = new Map<string, string>();
@@ -71,7 +107,7 @@ function parseArguments(argv: readonly string[]): {
     const value = argv[index + 1];
     if (!option?.startsWith("--")) throw new StageFailure("unknown_argument", 64);
     if (INLINE_SECRET_OPTIONS.has(option)) throw new StageFailure("inline_secret_forbidden", 64);
-    if (!["--mode", "--request-file", "--result-file"].includes(option)) {
+    if (!["--mode", "--request-fd", "--result-file"].includes(option)) {
       throw new StageFailure("unknown_argument", 64);
     }
     if (values.has(option)) throw new StageFailure("duplicate_argument", 64);
@@ -80,67 +116,148 @@ function parseArguments(argv: readonly string[]): {
   }
   const mode = values.get("--mode");
   if (!MODES.includes(mode as StageMode)) throw new StageFailure("unknown_mode", 64);
-  const requestFile = values.get("--request-file");
+  const requestFdValue = values.get("--request-fd");
   const resultFile = values.get("--result-file");
-  if (!requestFile || !resultFile) throw new StageFailure("missing_argument", 64);
-  if (!isAbsolute(requestFile) || !isAbsolute(resultFile)) {
-    throw new StageFailure("absolute_path_required", 64);
+  if (!requestFdValue || !resultFile) throw new StageFailure("missing_argument", 64);
+  const requestFd = Number(requestFdValue);
+  if (!Number.isSafeInteger(requestFd) || requestFd < 3) {
+    throw new StageFailure("invalid_descriptor", 64);
   }
-  return { mode: mode as StageMode, requestFile, resultFile };
+  if (!isAbsolute(resultFile)) throw new StageFailure("absolute_path_required", 64);
+  return { mode: mode as StageMode, requestFd, resultFile };
 }
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-function exactStringRecord(
-  value: unknown,
-  keys: readonly string[],
-): Record<string, string> {
-  if (!isRecord(value) || Object.keys(value).length !== keys.length) {
-    throw new StageFailure("invalid_request", 65);
-  }
-  const result: Record<string, string> = {};
-  for (const key of keys) {
-    if (typeof value[key] !== "string" || value[key].length === 0) {
+const isDescriptor = (value: unknown): value is number =>
+  Number.isSafeInteger(value) && (value as number) >= 3;
+
+const isOpaqueResourceId = (value: unknown): value is string =>
+  typeof value === "string"
+  && /^rid_[A-Za-z0-9_-]{8,96}$/.test(value);
+
+function validateRequest(mode: StageMode, value: unknown): DescriptorRequest {
+  if (!isRecord(value)) throw new StageFailure("invalid_request", 65);
+  if (mode === "initialize") {
+    if (Object.keys(value).length !== 1 || !isDescriptor(value.databaseUrlFd)) {
       throw new StageFailure("invalid_request", 65);
     }
-    if (!isAbsolute(value[key])) throw new StageFailure("invalid_request", 65);
-    result[key] = value[key];
+    return { databaseUrlFd: value.databaseUrlFd };
   }
-  return result;
+  if (mode === "capacity") {
+    if (Object.keys(value).length !== 2
+      || !isDescriptor(value.databaseUrlFd)
+      || !isOpaqueResourceId(value.resourceId)) {
+      throw new StageFailure("invalid_request", 65);
+    }
+    return {
+      databaseUrlFd: value.databaseUrlFd,
+      resourceId: value.resourceId,
+    };
+  }
+  const keys = [
+    "sourceFd", "databaseUrlFd", "oldKeyFd", "targetKeyFd",
+    "targetHmacKeyFd", "manifestFile", "resourceId",
+  ];
+  if (Object.keys(value).length !== keys.length
+    || !isDescriptor(value.sourceFd)
+    || !isDescriptor(value.databaseUrlFd)
+    || !isDescriptor(value.oldKeyFd)
+    || !isDescriptor(value.targetKeyFd)
+    || !isDescriptor(value.targetHmacKeyFd)
+    || typeof value.manifestFile !== "string"
+    || !isAbsolute(value.manifestFile)
+    || !isOpaqueResourceId(value.resourceId)) {
+    throw new StageFailure("invalid_request", 65);
+  }
+  return {
+    sourceFd: value.sourceFd,
+    databaseUrlFd: value.databaseUrlFd,
+    oldKeyFd: value.oldKeyFd,
+    targetKeyFd: value.targetKeyFd,
+    targetHmacKeyFd: value.targetHmacKeyFd,
+    manifestFile: value.manifestFile,
+    resourceId: value.resourceId,
+  };
 }
 
-function validateRequest(mode: StageMode, value: unknown): StageRequest {
-  if (mode === "initialize" || mode === "capacity") {
-    return exactStringRecord(value, ["databaseUrlFile"]) as InitializeRequest;
-  }
-  return exactStringRecord(value, [
-    "sourceFile", "databaseUrlFile", "oldKeyFile", "targetKeyFile",
-    "targetHmacKeyFile", "manifestFile",
-  ]) as unknown as MigrateRequest;
-}
-
-async function assertPrivateRegularFile(path: string): Promise<void> {
-  const stat = await lstat(path).catch(() => {
-    throw new StageFailure("invalid_private_file", 65);
-  });
-  if (!stat.isFile() || stat.isSymbolicLink()
-    || (typeof process.getuid === "function" && stat.uid !== process.getuid())
-    || (stat.mode & 0o777) !== 0o600) {
-    throw new StageFailure("invalid_private_file", 65);
+function readInheritedBytes(fd: number): Buffer {
+  try {
+    const bytes = readFileSync(fd);
+    if (bytes.length === 0) throw new StageFailure("invalid_descriptor", 65);
+    return bytes;
+  } catch (error) {
+    if (error instanceof StageFailure) throw error;
+    throw new StageFailure("invalid_descriptor", 65);
   }
 }
 
-async function readPrivateText(path: string): Promise<string> {
-  await assertPrivateRegularFile(path);
-  const value = (await readFile(path, "utf8")).trim();
-  if (!value) throw new StageFailure("invalid_private_file", 65);
+function readRequest(fd: number): unknown {
+  try {
+    return JSON.parse(readInheritedBytes(fd).toString("utf8"));
+  } catch (error) {
+    if (error instanceof StageFailure && error.code === "invalid_descriptor") throw error;
+    throw new StageFailure("invalid_request", 65);
+  }
+}
+
+function verifiedRequest(mode: StageMode, request: DescriptorRequest):
+  InitializeRequest | MigrateRequest | CapacityRequest {
+  if (mode === "initialize") {
+    return {
+      databaseUrl: readInheritedBytes((request as InitializeDescriptorRequest).databaseUrlFd),
+    };
+  }
+  if (mode === "capacity") {
+    const capacity = request as CapacityDescriptorRequest;
+    return {
+      databaseUrl: readInheritedBytes(capacity.databaseUrlFd),
+      resourceId: capacity.resourceId,
+    };
+  }
+  const migrate = request as MigrateDescriptorRequest;
+  return {
+    source: readInheritedBytes(migrate.sourceFd),
+    databaseUrl: readInheritedBytes(migrate.databaseUrlFd),
+    oldKey: readInheritedBytes(migrate.oldKeyFd),
+    targetKey: readInheritedBytes(migrate.targetKeyFd),
+    targetHmacKey: readInheritedBytes(migrate.targetHmacKeyFd),
+    manifestFile: migrate.manifestFile,
+    resourceId: migrate.resourceId,
+  };
+}
+
+export async function withPrivateSnapshotCopy<T>(
+  source: Buffer,
+  operation: (sourcePath: string) => Promise<T>,
+  parentDirectory = tmpdir(),
+): Promise<T> {
+  const directory = await mkdtemp(join(parentDirectory, "phase5-stage-snapshot-"));
+  const sourcePath = join(directory, "snapshot.sqlite");
+  try {
+    await chmod(directory, 0o700);
+    const handle = await open(sourcePath, "wx", 0o600);
+    try {
+      await handle.writeFile(source);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    return await operation(sourcePath);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+}
+
+const databaseUrl = (bytes: Buffer): string => {
+  const value = bytes.toString("utf8").trim();
+  if (!value) throw new StageFailure("invalid_descriptor", 65);
   return value;
-}
+};
 
 async function initializeDatabase(request: InitializeRequest): Promise<unknown> {
-  const databaseUrl = await readPrivateText(request.databaseUrlFile);
-  const database = createDatabase(databaseUrl);
+  const database = createDatabase(databaseUrl(request.databaseUrl));
   try {
     const result = await migrateToLatest(database);
     if (result.error) throw result.error;
@@ -150,41 +267,36 @@ async function initializeDatabase(request: InitializeRequest): Promise<unknown> 
   }
 }
 
-async function migrateDatabase(request: MigrateRequest): Promise<unknown> {
-  for (const path of [request.sourceFile, request.oldKeyFile, request.targetKeyFile, request.targetHmacKeyFile]) {
-    await assertPrivateRegularFile(path);
-  }
-  const args: MigrationCliArgs = {
-    sourcePath: request.sourceFile,
-    databaseUrl: await readPrivateText(request.databaseUrlFile),
-    oldKeyFile: request.oldKeyFile,
-    targetKeyFile: request.targetKeyFile,
-    targetHmacKeyFile: request.targetHmacKeyFile,
+async function migrateDatabase(
+  request: MigrateRequest,
+): Promise<ResourceBoundResult<unknown>> {
+  const migrationInput: Omit<MigrationVerifiedInput, "sourcePath"> = {
+    databaseUrl: databaseUrl(request.databaseUrl),
+    oldMasterKey: request.oldKey,
+    targetKey: request.targetKey,
+    targetHmacKey: request.targetHmacKey,
     manifestPath: request.manifestFile,
   };
-  return runMigrationFromCli(args);
+  const report = await withPrivateSnapshotCopy(
+    request.source,
+    (sourcePath) => runMigrationFromVerifiedInput({ ...migrationInput, sourcePath }),
+  );
+  return { resourceId: request.resourceId, report };
 }
 
-async function runCapacity(request: CapacityRequest): Promise<Phase5LoadReport> {
-  process.env.TEST_DATABASE_URL = await readPrivateText(request.databaseUrlFile);
+async function runCapacity(
+  request: CapacityRequest,
+): Promise<ResourceBoundResult<Phase5LoadReport>> {
+  process.env.TEST_DATABASE_URL = databaseUrl(request.databaseUrl);
   let harness: Awaited<ReturnType<typeof createPhase5ScaleHarness>> | undefined;
   try {
     harness = await createPhase5ScaleHarness(PHASE5_SCALE_PROFILE);
     const report = await runPhase5Load(harness, PHASE5_SCALE_PROFILE);
     if (report.status !== "PASS") throw new StageFailure("capacity_contract_failed", 1);
-    return report;
+    return { resourceId: request.resourceId, report };
   } finally {
     delete process.env.TEST_DATABASE_URL;
     if (harness) await harness.stop();
-  }
-}
-
-async function readRequest(path: string): Promise<unknown> {
-  await assertPrivateRegularFile(path);
-  try {
-    return JSON.parse(await readFile(path, "utf8"));
-  } catch {
-    throw new StageFailure("invalid_request", 65);
   }
 }
 
@@ -217,7 +329,6 @@ const defaults: StageDependencies = {
   initialize: initializeDatabase,
   migrate: migrateDatabase,
   capacity: runCapacity,
-  readRequest,
   writeResult,
 };
 
@@ -226,33 +337,57 @@ function safeFailure(error: unknown): StageFailure {
   return new StageFailure("stage_failed", 1);
 }
 
+const resultSchema = {
+  schemaVersion: "phase5-rehearsal-stage-result-v2" as const,
+};
+
 export async function executeStage(
   argv: readonly string[],
   dependencies: StageDependencies = defaults,
 ): Promise<number> {
   let parsed: ReturnType<typeof parseArguments> | undefined;
+  let expectedResourceId: string | undefined;
   try {
     parsed = parseArguments(argv);
-    const request = validateRequest(parsed.mode, await dependencies.readRequest(parsed.requestFile));
-    const details = parsed.mode === "initialize"
-      ? await dependencies.initialize(request as InitializeRequest)
-      : parsed.mode === "migrate"
-        ? await dependencies.migrate(request as MigrateRequest)
-        : await dependencies.capacity(request as CapacityRequest);
-    await dependencies.writeResult(parsed.resultFile, {
-      schemaVersion: "phase5-rehearsal-stage-result-v1",
-      mode: parsed.mode,
-      status: "passed",
-      details,
-    });
+    const descriptorRequest = validateRequest(parsed.mode, readRequest(parsed.requestFd));
+    if (parsed.mode !== "initialize") {
+      expectedResourceId = (descriptorRequest as MigrateDescriptorRequest | CapacityDescriptorRequest)
+        .resourceId;
+    }
+    const request = verifiedRequest(parsed.mode, descriptorRequest);
+    if (parsed.mode === "initialize") {
+      const details = await dependencies.initialize(request as InitializeRequest);
+      await dependencies.writeResult(parsed.resultFile, {
+        ...resultSchema,
+        mode: parsed.mode,
+        status: "passed",
+        details,
+      });
+    } else {
+      const resourceRequest = request as MigrateRequest | CapacityRequest;
+      const details = parsed.mode === "migrate"
+        ? await dependencies.migrate(resourceRequest as MigrateRequest)
+        : await dependencies.capacity(resourceRequest as CapacityRequest);
+      if (details.resourceId !== resourceRequest.resourceId) {
+        throw new StageFailure("resource_mismatch", 65);
+      }
+      await dependencies.writeResult(parsed.resultFile, {
+        ...resultSchema,
+        mode: parsed.mode,
+        status: "passed",
+        resourceId: resourceRequest.resourceId,
+        details: details.report,
+      });
+    }
     return 0;
   } catch (error) {
     const failure = safeFailure(error);
     if (parsed) {
       await dependencies.writeResult(parsed.resultFile, {
-        schemaVersion: "phase5-rehearsal-stage-result-v1",
+        ...resultSchema,
         mode: parsed.mode,
         status: "failed",
+        ...(expectedResourceId ? { resourceId: expectedResourceId } : {}),
         code: failure.code,
       }).catch(() => undefined);
     }

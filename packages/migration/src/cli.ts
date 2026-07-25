@@ -1,13 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { basename } from "node:path";
 import { pathToFileURL } from "node:url";
-import {
-  createContentCipher,
-  createDatabase,
-  destroyDatabase,
-} from "@novel-analysis/database";
-import { runMigration, type MigrationRunResult } from "./run.js";
+import type { MigrationRunResult } from "./run.js";
+import { runMigrationFromVerifiedInput } from "./verified-input.js";
 import { MigrationHardFailure } from "./validate.js";
 
 const REQUIRED_OPTIONS = [
@@ -32,6 +27,11 @@ export type MigrationCliArgs = Readonly<{
   targetHmacKeyFile: string;
   manifestPath: string;
 }>;
+
+export {
+  runMigrationFromVerifiedInput,
+  type MigrationVerifiedInput,
+} from "./verified-input.js";
 
 const propertyByOption: Record<typeof REQUIRED_OPTIONS[number], keyof MigrationCliArgs> = {
   "--source": "sourcePath",
@@ -117,45 +117,20 @@ const readKey = async (filePath: string): Promise<Buffer> => {
   return value;
 };
 
-const sameKey = (left: Buffer, right: Buffer): boolean =>
-  left.length === right.length && timingSafeEqual(left, right);
-
 export async function runMigrationFromCli(args: MigrationCliArgs): Promise<MigrationRunResult> {
   const [oldMasterKey, targetKey, targetHmacKey] = await Promise.all([
     readKey(args.oldKeyFile),
     readKey(args.targetKeyFile),
     readKey(args.targetHmacKeyFile),
   ]);
-  if (sameKey(oldMasterKey, targetKey)
-    || sameKey(oldMasterKey, targetHmacKey)
-    || sameKey(targetKey, targetHmacKey)) {
-    throw new Error("migration_keys_must_be_distinct");
-  }
-  const database = createDatabase(args.databaseUrl);
-  try {
-    const admins = await database.selectFrom("users")
-      .select("id")
-      .where("role", "=", "admin")
-      .where("status", "=", "active")
-      .limit(2)
-      .execute();
-    if (admins.length !== 1) throw new Error("migration_admin_required");
-    return await runMigration({
-      sourcePath: args.sourcePath,
-      database,
-      createdBy: admins[0]!.id,
-      oldMasterKey,
-      targetCipher: createContentCipher({
-        activeKeyVersion: "migration-v1",
-        keys: { "migration-v1": targetKey },
-      }),
-      targetHmacKey,
-      manifestPath: args.manifestPath,
-      targetSchemaVersion: "007_advanced_analysis",
-    });
-  } finally {
-    await destroyDatabase(database);
-  }
+  return runMigrationFromVerifiedInput({
+    sourcePath: args.sourcePath,
+    databaseUrl: args.databaseUrl,
+    oldMasterKey,
+    targetKey,
+    targetHmacKey,
+    manifestPath: args.manifestPath,
+  });
 }
 
 if (process.argv[1]

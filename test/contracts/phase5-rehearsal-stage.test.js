@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { builtinModules } from "node:module";
@@ -11,16 +19,19 @@ const root = process.cwd();
 const directory = join(root, "scripts", "phase5-rehearsal-stage");
 const artifact = join(directory, "artifact", "stage.mjs");
 
-const run = (args) => spawnSync(process.execPath, [artifact, ...args], {
+const run = (args, inheritedFd) => spawnSync(process.execPath, [artifact, ...args], {
   cwd: root,
   encoding: "utf8",
   env: {},
+  stdio: inheritedFd === undefined
+    ? ["ignore", "pipe", "pipe"]
+    : ["ignore", "pipe", "pipe", inheritedFd],
 });
 
 test("stage artifact rejects unknown modes and arguments without leaking values", () => {
   for (const args of [
-    ["--mode", "other", "--request-file", "/private/secret.json", "--result-file", "/private/result.json"],
-    ["--mode", "initialize", "--request-file", "/private/secret.json", "--result-file", "/private/result.json", "--extra", "credential-value"],
+    ["--mode", "other", "--request-fd", "3", "--result-file", "/private/result.json"],
+    ["--mode", "initialize", "--request-fd", "3", "--result-file", "/private/result.json", "--extra", "credential-value"],
   ]) {
     const result = run(args);
     assert.equal(result.status, 64);
@@ -33,7 +44,7 @@ test("stage artifact rejects unknown modes and arguments without leaking values"
 test("stage artifact rejects inline secrets and only reports sanitized codes", () => {
   const result = run([
     "--mode", "migrate",
-    "--request-file", "/private/request.json",
+    "--request-fd", "3",
     "--result-file", "/private/result.json",
     "--old-key", "plaintext-key",
   ]);
@@ -50,20 +61,25 @@ test("all artifact modes fail closed on malformed synthetic requests", () => {
       const request = join(temporary, "request.json");
       const resultPath = join(temporary, "result.json");
       writeFileSync(request, "not-json", { mode: 0o600 });
-      const result = run([
-        "--mode", mode,
-        "--request-file", request,
-        "--result-file", resultPath,
-      ]);
-      assert.equal(result.status, 65);
-      assert.equal(result.stdout, "");
-      assert.equal(result.stderr, "phase5_stage_failed:invalid_request\n");
-      assert.deepEqual(JSON.parse(readFileSync(resultPath, "utf8")), {
-        schemaVersion: "phase5-rehearsal-stage-result-v1",
-        mode,
-        status: "failed",
-        code: "invalid_request",
-      });
+      const requestFd = openSync(request, "r");
+      try {
+        const result = run([
+          "--mode", mode,
+          "--request-fd", "3",
+          "--result-file", resultPath,
+        ], requestFd);
+        assert.equal(result.status, 65);
+        assert.equal(result.stdout, "");
+        assert.equal(result.stderr, "phase5_stage_failed:invalid_request\n");
+        assert.deepEqual(JSON.parse(readFileSync(resultPath, "utf8")), {
+          schemaVersion: "phase5-rehearsal-stage-result-v2",
+          mode,
+          status: "failed",
+          code: "invalid_request",
+        });
+      } finally {
+        closeSync(requestFd);
+      }
     } finally {
       rmSync(temporary, { recursive: true, force: true });
     }
@@ -72,6 +88,10 @@ test("all artifact modes fail closed on malformed synthetic requests", () => {
 
 test("committed artifact contains the accepted migration and capacity contracts", () => {
   const bytes = readFileSync(artifact, "utf8");
+  assert.match(bytes, /phase5-rehearsal-stage-result-v2/);
+  assert.match(bytes, /--request-fd/);
+  assert.doesNotMatch(bytes, /--request-file/);
+  assert.match(bytes, /resource_mismatch/);
   for (const name of [
     "book-count", "chapter-count", "metadata", "source-integrity",
     "content-digest", "target-decrypt", "target-hmac", "scope-exclusion",
