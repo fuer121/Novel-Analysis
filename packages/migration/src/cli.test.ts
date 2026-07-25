@@ -1,5 +1,9 @@
 import { describe, expect, test, vi } from "vitest";
-import { executeMigrationCli, parseMigrationCliArgs } from "./cli.js";
+import {
+  executeMigrationCli,
+  parseMigrationCliArgs,
+  runMigrationFromVerifiedInput,
+} from "./cli.js";
 
 const complete = [
   "--source", "/tmp/source.sqlite",
@@ -69,5 +73,24 @@ describe("migration CLI", () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toHaveBeenCalledWith(`${JSON.stringify(result)}\n`);
+  });
+
+  test("verified input rejects invalid and repeated key bytes before database access", async () => {
+    const completeVerified = {
+      sourcePath: "/tmp/source.sqlite",
+      databaseUrl: "postgres://localhost/test",
+      oldMasterKey: Buffer.alloc(32, 1),
+      targetKey: Buffer.alloc(32, 2),
+      targetHmacKey: Buffer.alloc(32, 3),
+      manifestPath: "/tmp/manifest.json",
+    };
+    await expect(runMigrationFromVerifiedInput({
+      ...completeVerified,
+      oldMasterKey: Buffer.alloc(31),
+    })).rejects.toThrow("invalid_key_file");
+    await expect(runMigrationFromVerifiedInput({
+      ...completeVerified,
+      targetKey: completeVerified.oldMasterKey,
+    })).rejects.toThrow("migration_keys_must_be_distinct");
   });
 });

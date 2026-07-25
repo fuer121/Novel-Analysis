@@ -1,13 +1,13 @@
 import { createRequire } from "node:module";
-import { access, link, lstat, open, readFile, unlink } from "node:fs/promises";
+import { constants, readFileSync, statSync } from "node:fs";
+import { access, chmod, link, mkdtemp, open, rm, unlink } from "node:fs/promises";
+import { cpus, tmpdir, totalmem } from "node:os";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import process$1 from "node:process";
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
-import { constants, readFileSync, statSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { performance as performance$1 } from "node:perf_hooks";
-import { cpus, totalmem } from "node:os";
 import EventEmitter from "node:events";
 import assert, { notStrictEqual } from "node:assert";
 import { setTimeout as setTimeout$1 } from "node:timers/promises";
@@ -27057,92 +27057,15 @@ var runMigration = createMigrationRunner({
 	publishManifest: createManifestPublisher()
 });
 //#endregion
-//#region packages/migration/src/cli.ts
-var REQUIRED_OPTIONS = [
-	"--source",
-	"--database-url",
-	"--old-key-file",
-	"--target-key-file",
-	"--target-hmac-key-file",
-	"--manifest"
-];
-var INLINE_KEY_OPTIONS = new Set([
-	"--old-key",
-	"--target-key",
-	"--target-hmac-key",
-	"--old-master-key",
-	"--content-key",
-	"--hmac-key"
-]);
-var propertyByOption = {
-	"--source": "sourcePath",
-	"--database-url": "databaseUrl",
-	"--old-key-file": "oldKeyFile",
-	"--target-key-file": "targetKeyFile",
-	"--target-hmac-key-file": "targetHmacKeyFile",
-	"--manifest": "manifestPath"
-};
-function parseMigrationCliArgs(argv) {
-	const values = /* @__PURE__ */ new Map();
-	for (let index = 0; index < argv.length; index += 2) {
-		const option = argv[index];
-		const value = argv[index + 1];
-		if (!option?.startsWith("--")) throw new Error("unexpected_positional_argument");
-		if (INLINE_KEY_OPTIONS.has(option)) throw new Error("inline_keys_forbidden");
-		if (!REQUIRED_OPTIONS.includes(option)) throw new Error(`unknown_argument:${option}`);
-		if (values.has(option)) throw new Error(`duplicate_argument:${option}`);
-		if (value === void 0 || value.startsWith("--") || value.length === 0) throw new Error(`missing_argument_value:${option}`);
-		values.set(option, value);
-	}
-	for (const option of REQUIRED_OPTIONS) if (!values.has(option)) throw new Error(`missing_required_argument:${option}`);
-	return Object.freeze(Object.fromEntries(REQUIRED_OPTIONS.map((option) => [propertyByOption[option], values.get(option)])));
-}
-var safeErrorCode = (error) => {
-	if (error instanceof MigrationHardFailure) return error.message;
-	if (error instanceof Error && (error.message.startsWith("missing_required_argument:") || error.message.startsWith("missing_argument_value:") || error.message.startsWith("unknown_argument:") || error.message.startsWith("duplicate_argument:") || [
-		"unexpected_positional_argument",
-		"inline_keys_forbidden",
-		"manifest_exists",
-		"target_not_empty",
-		"target_book_present",
-		"source_decrypt_failed",
-		"source_hmac_mismatch",
-		"target_encrypt_failed",
-		"forced_mid_book_failure",
-		"invalid_key_file",
-		"migration_admin_required",
-		"migration_keys_must_be_distinct"
-	].includes(error.message))) return error.message;
-	return "unexpected_error";
-};
-async function executeMigrationCli(argv, overrides = {}) {
-	const dependencies = {
-		run: runMigrationFromCli,
-		stdout: (value) => process.stdout.write(value),
-		stderr: (value) => process.stderr.write(value),
-		...overrides
-	};
-	try {
-		const result = await dependencies.run(parseMigrationCliArgs(argv));
-		dependencies.stdout(`${JSON.stringify(result)}\n`);
-		return 0;
-	} catch (error) {
-		dependencies.stderr(`migration_failed:${safeErrorCode(error)}\n`);
-		return 1;
-	}
-}
-var readKey = async (filePath) => {
-	const value = await readFile(filePath);
-	if (value.length !== 32) throw new Error("invalid_key_file");
-	return value;
-};
+//#region packages/migration/src/verified-input.ts
 var sameKey = (left, right) => left.length === right.length && timingSafeEqual(left, right);
-async function runMigrationFromCli(args) {
-	const [oldMasterKey, targetKey, targetHmacKey] = await Promise.all([
-		readKey(args.oldKeyFile),
-		readKey(args.targetKeyFile),
-		readKey(args.targetHmacKeyFile)
-	]);
+async function runMigrationFromVerifiedInput(args) {
+	const { oldMasterKey, targetKey, targetHmacKey } = args;
+	if ([
+		oldMasterKey,
+		targetKey,
+		targetHmacKey
+	].some((key) => key.length !== 32)) throw new Error("invalid_key_file");
 	if (sameKey(oldMasterKey, targetKey) || sameKey(oldMasterKey, targetHmacKey) || sameKey(targetKey, targetHmacKey)) throw new Error("migration_keys_must_be_distinct");
 	const database = createDatabase(args.databaseUrl);
 	try {
@@ -27165,7 +27088,6 @@ async function runMigrationFromCli(args) {
 		await destroyDatabase(database);
 	}
 }
-if (process.argv[1] && basename(process.argv[1]) === "cli.js" && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = await executeMigrationCli(process.argv.slice(2));
 //#endregion
 //#region test/phase5/fixtures/scale-profile.ts
 var PHASE5_SCALE_PROFILE = {
@@ -72836,7 +72758,7 @@ function parseArguments(argv) {
 		if (INLINE_SECRET_OPTIONS.has(option)) throw new StageFailure("inline_secret_forbidden", 64);
 		if (![
 			"--mode",
-			"--request-file",
+			"--request-fd",
 			"--result-file"
 		].includes(option)) throw new StageFailure("unknown_argument", 64);
 		if (values.has(option)) throw new StageFailure("duplicate_argument", 64);
@@ -72845,52 +72767,110 @@ function parseArguments(argv) {
 	}
 	const mode = values.get("--mode");
 	if (!MODES.includes(mode)) throw new StageFailure("unknown_mode", 64);
-	const requestFile = values.get("--request-file");
+	const requestFdValue = values.get("--request-fd");
 	const resultFile = values.get("--result-file");
-	if (!requestFile || !resultFile) throw new StageFailure("missing_argument", 64);
-	if (!isAbsolute(requestFile) || !isAbsolute(resultFile)) throw new StageFailure("absolute_path_required", 64);
+	if (!requestFdValue || !resultFile) throw new StageFailure("missing_argument", 64);
+	const requestFd = Number(requestFdValue);
+	if (!Number.isSafeInteger(requestFd) || requestFd < 3) throw new StageFailure("invalid_descriptor", 64);
+	if (!isAbsolute(resultFile)) throw new StageFailure("absolute_path_required", 64);
 	return {
 		mode,
-		requestFile,
+		requestFd,
 		resultFile
 	};
 }
 var isRecord = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
-function exactStringRecord(value, keys) {
-	if (!isRecord(value) || Object.keys(value).length !== keys.length) throw new StageFailure("invalid_request", 65);
-	const result = {};
-	for (const key of keys) {
-		if (typeof value[key] !== "string" || value[key].length === 0) throw new StageFailure("invalid_request", 65);
-		if (!isAbsolute(value[key])) throw new StageFailure("invalid_request", 65);
-		result[key] = value[key];
-	}
-	return result;
-}
+var isDescriptor = (value) => Number.isSafeInteger(value) && value >= 3;
+var isOpaqueResourceId = (value) => typeof value === "string" && /^rid_[A-Za-z0-9_-]{8,96}$/.test(value);
 function validateRequest(mode, value) {
-	if (mode === "initialize" || mode === "capacity") return exactStringRecord(value, ["databaseUrlFile"]);
-	return exactStringRecord(value, [
-		"sourceFile",
-		"databaseUrlFile",
-		"oldKeyFile",
-		"targetKeyFile",
-		"targetHmacKeyFile",
-		"manifestFile"
-	]);
+	if (!isRecord(value)) throw new StageFailure("invalid_request", 65);
+	if (mode === "initialize") {
+		if (Object.keys(value).length !== 1 || !isDescriptor(value.databaseUrlFd)) throw new StageFailure("invalid_request", 65);
+		return { databaseUrlFd: value.databaseUrlFd };
+	}
+	if (mode === "capacity") {
+		if (Object.keys(value).length !== 2 || !isDescriptor(value.databaseUrlFd) || !isOpaqueResourceId(value.resourceId)) throw new StageFailure("invalid_request", 65);
+		return {
+			databaseUrlFd: value.databaseUrlFd,
+			resourceId: value.resourceId
+		};
+	}
+	if (Object.keys(value).length !== 7 || !isDescriptor(value.sourceFd) || !isDescriptor(value.databaseUrlFd) || !isDescriptor(value.oldKeyFd) || !isDescriptor(value.targetKeyFd) || !isDescriptor(value.targetHmacKeyFd) || typeof value.manifestFile !== "string" || !isAbsolute(value.manifestFile) || !isOpaqueResourceId(value.resourceId)) throw new StageFailure("invalid_request", 65);
+	return {
+		sourceFd: value.sourceFd,
+		databaseUrlFd: value.databaseUrlFd,
+		oldKeyFd: value.oldKeyFd,
+		targetKeyFd: value.targetKeyFd,
+		targetHmacKeyFd: value.targetHmacKeyFd,
+		manifestFile: value.manifestFile,
+		resourceId: value.resourceId
+	};
 }
-async function assertPrivateRegularFile(path) {
-	const stat = await lstat(path).catch(() => {
-		throw new StageFailure("invalid_private_file", 65);
-	});
-	if (!stat.isFile() || stat.isSymbolicLink() || typeof process.getuid === "function" && stat.uid !== process.getuid() || (stat.mode & 511) !== 384) throw new StageFailure("invalid_private_file", 65);
+function readInheritedBytes(fd) {
+	try {
+		const bytes = readFileSync(fd);
+		if (bytes.length === 0) throw new StageFailure("invalid_descriptor", 65);
+		return bytes;
+	} catch (error) {
+		if (error instanceof StageFailure) throw error;
+		throw new StageFailure("invalid_descriptor", 65);
+	}
 }
-async function readPrivateText(path) {
-	await assertPrivateRegularFile(path);
-	const value = (await readFile(path, "utf8")).trim();
-	if (!value) throw new StageFailure("invalid_private_file", 65);
+function readRequest(fd) {
+	try {
+		return JSON.parse(readInheritedBytes(fd).toString("utf8"));
+	} catch (error) {
+		if (error instanceof StageFailure && error.code === "invalid_descriptor") throw error;
+		throw new StageFailure("invalid_request", 65);
+	}
+}
+function verifiedRequest(mode, request) {
+	if (mode === "initialize") return { databaseUrl: readInheritedBytes(request.databaseUrlFd) };
+	if (mode === "capacity") {
+		const capacity = request;
+		return {
+			databaseUrl: readInheritedBytes(capacity.databaseUrlFd),
+			resourceId: capacity.resourceId
+		};
+	}
+	const migrate = request;
+	return {
+		source: readInheritedBytes(migrate.sourceFd),
+		databaseUrl: readInheritedBytes(migrate.databaseUrlFd),
+		oldKey: readInheritedBytes(migrate.oldKeyFd),
+		targetKey: readInheritedBytes(migrate.targetKeyFd),
+		targetHmacKey: readInheritedBytes(migrate.targetHmacKeyFd),
+		manifestFile: migrate.manifestFile,
+		resourceId: migrate.resourceId
+	};
+}
+async function withPrivateSnapshotCopy(source, operation, parentDirectory = tmpdir()) {
+	const directory = await mkdtemp(join(parentDirectory, "phase5-stage-snapshot-"));
+	const sourcePath = join(directory, "snapshot.sqlite");
+	try {
+		await chmod(directory, 448);
+		const handle = await open(sourcePath, "wx", 384);
+		try {
+			await handle.writeFile(source);
+			await handle.sync();
+		} finally {
+			await handle.close();
+		}
+		return await operation(sourcePath);
+	} finally {
+		await rm(directory, {
+			recursive: true,
+			force: true
+		});
+	}
+}
+var databaseUrl = (bytes) => {
+	const value = bytes.toString("utf8").trim();
+	if (!value) throw new StageFailure("invalid_descriptor", 65);
 	return value;
-}
+};
 async function initializeDatabase(request) {
-	const database = createDatabase(await readPrivateText(request.databaseUrlFile));
+	const database = createDatabase(databaseUrl(request.databaseUrl));
 	try {
 		const result = await migrateToLatest(database);
 		if (result.error) throw result.error;
@@ -72900,40 +72880,36 @@ async function initializeDatabase(request) {
 	}
 }
 async function migrateDatabase(request) {
-	for (const path of [
-		request.sourceFile,
-		request.oldKeyFile,
-		request.targetKeyFile,
-		request.targetHmacKeyFile
-	]) await assertPrivateRegularFile(path);
-	return runMigrationFromCli({
-		sourcePath: request.sourceFile,
-		databaseUrl: await readPrivateText(request.databaseUrlFile),
-		oldKeyFile: request.oldKeyFile,
-		targetKeyFile: request.targetKeyFile,
-		targetHmacKeyFile: request.targetHmacKeyFile,
+	const migrationInput = {
+		databaseUrl: databaseUrl(request.databaseUrl),
+		oldMasterKey: request.oldKey,
+		targetKey: request.targetKey,
+		targetHmacKey: request.targetHmacKey,
 		manifestPath: request.manifestFile
-	});
+	};
+	const report = await withPrivateSnapshotCopy(request.source, (sourcePath) => runMigrationFromVerifiedInput({
+		...migrationInput,
+		sourcePath
+	}));
+	return {
+		resourceId: request.resourceId,
+		report
+	};
 }
 async function runCapacity(request) {
-	process.env.TEST_DATABASE_URL = await readPrivateText(request.databaseUrlFile);
+	process.env.TEST_DATABASE_URL = databaseUrl(request.databaseUrl);
 	let harness;
 	try {
 		harness = await createPhase5ScaleHarness(PHASE5_SCALE_PROFILE);
 		const report = await runPhase5Load(harness, PHASE5_SCALE_PROFILE);
 		if (report.status !== "PASS") throw new StageFailure("capacity_contract_failed", 1);
-		return report;
+		return {
+			resourceId: request.resourceId,
+			report
+		};
 	} finally {
 		delete process.env.TEST_DATABASE_URL;
 		if (harness) await harness.stop();
-	}
-}
-async function readRequest(path) {
-	await assertPrivateRegularFile(path);
-	try {
-		return JSON.parse(await readFile(path, "utf8"));
-	} catch {
-		throw new StageFailure("invalid_request", 65);
 	}
 }
 async function writeResult(path, result) {
@@ -72962,30 +72938,44 @@ var defaults = {
 	initialize: initializeDatabase,
 	migrate: migrateDatabase,
 	capacity: runCapacity,
-	readRequest,
 	writeResult
 };
 function safeFailure(error) {
 	if (error instanceof StageFailure) return error;
 	return new StageFailure("stage_failed", 1);
 }
+var resultSchema = { schemaVersion: "phase5-rehearsal-stage-result-v2" };
 async function executeStage(argv, dependencies = defaults) {
 	let parsed;
 	try {
 		parsed = parseArguments(argv);
-		const request = validateRequest(parsed.mode, await dependencies.readRequest(parsed.requestFile));
-		const details = parsed.mode === "initialize" ? await dependencies.initialize(request) : parsed.mode === "migrate" ? await dependencies.migrate(request) : await dependencies.capacity(request);
-		await dependencies.writeResult(parsed.resultFile, {
-			schemaVersion: "phase5-rehearsal-stage-result-v1",
-			mode: parsed.mode,
-			status: "passed",
-			details
-		});
+		const descriptorRequest = validateRequest(parsed.mode, readRequest(parsed.requestFd));
+		const request = verifiedRequest(parsed.mode, descriptorRequest);
+		if (parsed.mode === "initialize") {
+			const details = await dependencies.initialize(request);
+			await dependencies.writeResult(parsed.resultFile, {
+				...resultSchema,
+				mode: parsed.mode,
+				status: "passed",
+				details
+			});
+		} else {
+			const resourceRequest = request;
+			const details = parsed.mode === "migrate" ? await dependencies.migrate(resourceRequest) : await dependencies.capacity(resourceRequest);
+			if (details.resourceId !== resourceRequest.resourceId) throw new StageFailure("resource_mismatch", 65);
+			await dependencies.writeResult(parsed.resultFile, {
+				...resultSchema,
+				mode: parsed.mode,
+				status: "passed",
+				resourceId: resourceRequest.resourceId,
+				details: details.report
+			});
+		}
 		return 0;
 	} catch (error) {
 		const failure = safeFailure(error);
 		if (parsed) await dependencies.writeResult(parsed.resultFile, {
-			schemaVersion: "phase5-rehearsal-stage-result-v1",
+			...resultSchema,
 			mode: parsed.mode,
 			status: "failed",
 			code: failure.code
@@ -72996,4 +72986,4 @@ async function executeStage(argv, dependencies = defaults) {
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = await executeStage(process.argv.slice(2));
 //#endregion
-export { executeStage };
+export { executeStage, withPrivateSnapshotCopy };
