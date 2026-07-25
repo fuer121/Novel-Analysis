@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 24
+source_version: 25
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-25T22:36:56+08:00
+updated_at: 2026-07-25T22:43:24+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-execution-v3-ready
-last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-ORDERING-CORRECTION-ACCEPTED
-next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3-RESULT
+current_phase: phase-5-real-retry-execution-v3-preflight-blocked
+last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED
+next_gate: GATE-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3-RESULT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Execution V3 ready | Ordering correction已明确接受；原唯一attempt恢复可执行，Dify、飞书、部署与切换继续locked |
+| Phase 5 | Execution V3 preflight blocked | Unique attempt在candidate preflight exit `70`并消耗；未读取真实input或连接Docker，自动retry禁止 |
 
 ## Active Work
 
@@ -48,7 +48,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3-RESULT
 | PHASE5-REAL-RETRY-CORRECTION | phase-5 | Candidate-owned preflight、snapshot validation ordering、synthetic refreeze与双审 | controller-agent | codex/phase5-real-retry-correction-accepted | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | superseded | DEC-0027 | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | full-unit ordering gap recorded by V3 preparation blocked checkpoint |
 | PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION | phase-5 | Freeze V3 config and audit complete preflight-to-sensitive-input ordering before Gate submission | controller-agent | codex/phase5-v3-gate-preparation-blocked | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | superseded | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED | replaced by accepted snapshot-preflight correction |
 | PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION | phase-5 | Add candidate-owned snapshot preflight without key or runtime resource access, then refreeze and review | controller-agent | codex/phase5-snapshot-preflight-correction | 8396047884bcdf4c3cb383d43363ce65651a07e2 | 8396047884bcdf4c3cb383d43363ce65651a07e2 | accepted | DEC-0028 | CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED | prepare a separate named Execution V3 Gate without accessing real resources |
-| PHASE5-REAL-RETRY-EXECUTION-V3 | phase-5 | Execute one real isolated rehearsal using accepted snapshot-preflight identity after exact named confirmation | controller-agent | codex/phase5-real-retry-v3-ordering-accepted | 1de7e874e5b895674acfed051d608e6aa8409bb9 | 1de7e874e5b895674acfed051d608e6aa8409bb9 | ready | DEC-0029 | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-ORDERING-CORRECTION-ACCEPTED | execute exactly one complete attempt, then independently review result |
+| PHASE5-REAL-RETRY-EXECUTION-V3 | phase-5 | Execute one real isolated rehearsal using accepted snapshot-preflight identity after exact named confirmation | controller-agent | codex/phase5-real-retry-v3-preflight-blocked | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | blocked | DEC-0029 | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | design synthetic sanitized preflight diagnostics before any new Gate |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -145,14 +145,15 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3-RESULT
 
 ## Pending Feedback
 
-Option A ordering correction已接受；唯一attempt可按corrected sequence执行，任一hard stop消耗授权且禁止自动retry
+Execution V3 unique attempt已在candidate preflight exit `70`并消耗；静态identity矩阵全部match但zero-output设计无法精确归因，禁止retry
 
 ## Next Gate
 
-下一步为执行唯一一次Execution V3 attempt并完成result双审；`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步为synthetic sanitized preflight diagnostic correction与双审；任何新真实attempt必须另行Gate，`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry Execution V3 preflight blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED.md)
 - [Phase 5 real retry Execution V3 ordering correction accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-ORDERING-CORRECTION-ACCEPTED.md)
 - [Phase 5 real retry Execution V3 ordering correction submitted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-ORDERING-CORRECTION-SUBMITTED.md)
 - [Phase 5 real retry V3 resource ordering decision](decisions/DEC-0029-phase5-real-retry-v3-resource-ordering.md)
