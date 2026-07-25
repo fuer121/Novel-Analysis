@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 16
-baseline_commit: 68bcfb4b1d437ccb750b6326d81c37d3b21db962
+source_version: 17
+baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-25T18:45:00+08:00
+updated_at: 2026-07-25T19:20:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-correction-accepted
-last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED
-next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
+current_phase: phase-5-real-retry-execution-v3-preparation-blocked
+last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED
+next_gate: GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION
 ---
 
 # Novel Analysis Refactor Project Source
@@ -20,7 +20,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `68bcfb4b1d437ccb750b6326d81c37d3b21db962` |
+| Accepted implementation baseline | `d7c4697c3053311e0b1d4680ecfda2a2a7f1e267` |
 | Latest merged implementation | PR #150 `https://github.com/fuer121/Novel-Analysis/pull/150` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | real retry correction accepted | Candidate-owned preflight correction已通过36/36、规格与质量双审；允许另行提交新named Gate，全部真实资源继续locked |
+| Phase 5 | Execution V3 preparation blocked | Config已安全冻结，但完整执行单元仍需在snapshot validation前准备keys；Gate未提交，全部真实资源继续locked |
 
 ## Active Work
 
@@ -45,7 +45,8 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
 | PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | 26951ddfc5d8b048ebe421298168043fdf5b6925 | 26951ddfc5d8b048ebe421298168043fdf5b6925 | superseded | DEC-0026 | CP-20260725-PHASE5-IDENTITY-V3-V2-ACCEPTED | replaced by PHASE5-REAL-RETRY-CORRECTION |
 | PHASE5-REAL-RETRY-EXECUTION-V2 | phase-5 | Execute one real isolated rehearsal using only accepted V2 bytes after explicit confirmation | controller-agent | codex/phase5-real-retry-execution-v2-blocked | de143a8e2fd6aa7159e5a5c31d02bc20b9eb2afb | de143a8e2fd6aa7159e5a5c31d02bc20b9eb2afb | blocked | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-BLOCKED | correct controller preflight implementation and identity-before-snapshot ordering before any retry |
-| PHASE5-REAL-RETRY-CORRECTION | phase-5 | Candidate-owned preflight、snapshot validation ordering、synthetic refreeze与双审 | controller-agent | codex/phase5-real-retry-correction-accepted | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | accepted | DEC-0027 | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | submit a separate named real retry Execution V3 Gate |
+| PHASE5-REAL-RETRY-CORRECTION | phase-5 | Candidate-owned preflight、snapshot validation ordering、synthetic refreeze与双审 | controller-agent | codex/phase5-real-retry-correction-accepted | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | 68bcfb4b1d437ccb750b6326d81c37d3b21db962 | superseded | DEC-0027 | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | full-unit ordering gap recorded by V3 preparation blocked checkpoint |
+| PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION | phase-5 | Freeze V3 config and audit complete preflight-to-sensitive-input ordering before Gate submission | controller-agent | codex/phase5-v3-gate-preparation-blocked | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | blocked | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED | choose snapshot-preflight correction strategy |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -134,17 +135,19 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V3
 - 用户已明确接受`GATE-PHASE5-REAL-RETRY-EXECUTION-V2`，唯一一次attempt已授权；任一hard stop消耗授权且禁止自动retry
 - Execution V2 attempt因controller临时stage checker的默认buffer误判及identity-before-snapshot顺序违规而BLOCKED；anchor与stage实际匹配，授权已消耗且cleanup完成
 - Candidate-owned correction已通过36/36与独立双审；恶意同UID ABA不在既有owner-only信任模型，普通tool update由每次调用前后guard转为BLOCKED并cleanup
+- Execution V3 config已冻结，但candidate启动前必须准备key files，导致完整执行单元仍无法证明snapshot validation先于old-key access与target-key generation；Gate未提交
 
 ## Pending Feedback
 
-Candidate-owned correction已accepted；建议另行提交`GATE-PHASE5-REAL-RETRY-EXECUTION-V3`，提交前全部真实资源与任何retry继续locked
+Execution V3 Gate preparation已BLOCKED；等待用户选择Option A candidate-owned snapshot-preflight或Option B candidate-owned key acquisition，全部真实资源与任何retry继续locked
 
 ## Next Gate
 
-`GATE-PHASE5-REAL-RETRY-EXECUTION-V3`尚未提交或确认；必须单独冻结config SHA、列明一次attempt边界并获得用户明确确认，`GATE-PHASE5-FEISHU-UAT`继续locked
+`GATE-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION`等待用户决策；完成synthetic correction与独立双审前不得提交`GATE-PHASE5-REAL-RETRY-EXECUTION-V3`，`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry Execution V3 preparation blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED.md)
 - [Phase 5 real retry correction accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED.md)
 - [Phase 5 real retry correction started](checkpoints/CP-20260725-PHASE5-REAL-RETRY-CORRECTION-STARTED.md)
 - [Phase 5 candidate owned preflight decision](decisions/DEC-0027-phase5-candidate-owned-preflight.md)
