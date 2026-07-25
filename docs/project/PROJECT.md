@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 14
-baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
+source_version: 15
+baseline_commit: 6752edd91a99ad0e87da1fc838ebfca7507c6b59
 baseline_status: current
-updated_at: 2026-07-25T16:52:00+08:00
+updated_at: 2026-07-25T17:30:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-execution-v2-blocked
-last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-BLOCKED
-next_gate: GATE-PHASE5-REAL-RETRY-CORRECTION
+current_phase: phase-5-real-retry-correction
+last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-CORRECTION-STARTED
+next_gate: GATE-PHASE5-REAL-RETRY-CORRECTION-ACCEPTANCE
 ---
 
 # Novel Analysis Refactor Project Source
@@ -20,7 +20,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-CORRECTION
 | --- | --- |
 | Repository | fuer121/Novel-Analysis |
 | Branch | main |
-| Accepted implementation baseline | `069e3f399d6ac06eec9b64fdb85436ad6cc9f846` |
+| Accepted implementation baseline | `6752edd91a99ad0e87da1fc838ebfca7507c6b59` |
 | Latest merged implementation | PR #150 `https://github.com/fuer121/Novel-Analysis/pull/150` |
 | CI | passed |
 | Legacy application | 旧应用只是兼容基线，不是重构前端 |
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-CORRECTION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | real retry Execution V2 blocked | 第二次Execution confirmation已通过并消耗；attempt因controller preflight protocol failure blocked，全部真实资源重新locked |
+| Phase 5 | real retry correction active | Execution V2已blocked并消耗；方案A已确认，仅解锁candidate-owned preflight synthetic correction，全部真实资源继续locked |
 
 ## Active Work
 
@@ -45,6 +45,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-CORRECTION
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
 | PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | 26951ddfc5d8b048ebe421298168043fdf5b6925 | 26951ddfc5d8b048ebe421298168043fdf5b6925 | accepted | DEC-0026 | CP-20260725-PHASE5-IDENTITY-V3-V2-ACCEPTED | submit a new explicit real retry Gate using only the accepted frozen bytes |
 | PHASE5-REAL-RETRY-EXECUTION-V2 | phase-5 | Execute one real isolated rehearsal using only accepted V2 bytes after explicit confirmation | controller-agent | codex/phase5-real-retry-execution-v2-blocked | de143a8e2fd6aa7159e5a5c31d02bc20b9eb2afb | de143a8e2fd6aa7159e5a5c31d02bc20b9eb2afb | blocked | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-BLOCKED | correct controller preflight implementation and identity-before-snapshot ordering before any retry |
+| PHASE5-REAL-RETRY-CORRECTION | phase-5 | Candidate-owned preflight、snapshot validation ordering、synthetic refreeze与双审 | controller-agent | codex/phase5-real-retry-correction | 6752edd91a99ad0e87da1fc838ebfca7507c6b59 | 6752edd91a99ad0e87da1fc838ebfca7507c6b59 | in_progress | DEC-0027 | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-STARTED | implement and verify synthetic correction without real resources |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -82,6 +83,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-CORRECTION
 - [DEC-0024 Phase 5 Launcher Owned PostgreSQL Lifecycle](decisions/DEC-0024-phase5-launcher-owned-postgres-lifecycle.md)
 - [DEC-0025 Phase 5 Docker Resource Kind Identities](decisions/DEC-0025-phase5-docker-resource-kind-identities.md)
 - [DEC-0026 Phase 5 Container Owned Ephemeral Storage](decisions/DEC-0026-phase5-container-owned-ephemeral-storage.md)
+- [DEC-0027 Phase 5 Candidate Owned Preflight](decisions/DEC-0027-phase5-candidate-owned-preflight.md)
 - [已批准重构设计](../superpowers/specs/2026-07-16-novel-analysis-refactor-design.md)
 - 完整重构完成后再切换，不长期双维护旧应用与重构应用
 - 目标场景为 5-20 人 LAN 使用，采用飞书登录、共享书库以及管理员和成员角色
@@ -134,14 +136,16 @@ next_gate: GATE-PHASE5-REAL-RETRY-CORRECTION
 
 ## Pending Feedback
 
-Real retry Execution V2 attempt已BLOCKED并消耗授权；等待controller preflight orchestration correction，全部真实资源重新locked
+方案A已确认，candidate-owned preflight synthetic correction进行中；全部真实资源与任何retry继续locked
 
 ## Next Gate
 
-Real Retry Execution V2因controller preflight误判与ordering violation而BLOCKED；任何retry前必须完成新的synthetic correction、独立双审与named Gate；`GATE-PHASE5-FEISHU-UAT`继续locked
+`GATE-PHASE5-REAL-RETRY-CORRECTION-ACCEPTANCE`：必须完成candidate-owned preflight、snapshot-before-key ordering、full synthetic、冻结SHA与独立双审；通过后仍只能提交新的named real retry Gate，`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry correction started](checkpoints/CP-20260725-PHASE5-REAL-RETRY-CORRECTION-STARTED.md)
+- [Phase 5 candidate owned preflight decision](decisions/DEC-0027-phase5-candidate-owned-preflight.md)
 - [Phase 5 real retry Execution V2 blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-BLOCKED.md)
 - [Phase 5 real retry Execution V2 Gate accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-ACCEPTED.md)
 - [Phase 5 real retry Execution V2 Gate submitted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-SUBMITTED.md)
