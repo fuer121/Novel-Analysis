@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 6
+source_version: 7
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-25T11:32:06+08:00
+updated_at: 2026-07-25T12:16:15+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-identity-v3-r1
-last_checkpoint: CP-20260725-PHASE5-IDENTITY-V3-R1-RESTARTED
+current_phase: phase-5-real-retry-identity-v3-r1-volume-identity-blocked
+last_checkpoint: CP-20260725-PHASE5-IDENTITY-V3-R1-VOLUME-IDENTITY-BLOCKED
 next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
@@ -43,7 +43,7 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 | Task | Phase | Scope | Owner | Branch | Base | Head | Status | Depends On | Checkpoint | Next Action |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
-| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | 98a686e5179e005f2e49cfda4d4183cfcfb9b207 | 98a686e5179e005f2e49cfda4d4183cfcfb9b207 | in_progress | DEC-0024 | CP-20260725-PHASE5-IDENTITY-V3-R1-RESTARTED | implement R1 with synthetic Docker stubs, freeze candidate and complete independent reviews |
+| PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | ee74fc4ca32f929735fcae9ecd4664cc73e97494 | ee74fc4ca32f929735fcae9ecd4664cc73e97494 | blocked | DEC-0024 | CP-20260725-PHASE5-IDENTITY-V3-R1-VOLUME-IDENTITY-BLOCKED | choose named-volume composite identity V1 or container-owned ephemeral storage V2 |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -120,17 +120,19 @@ next_gate: GATE-PHASE5-FEISHU-UAT
 - Stage interface v2已在PR #181合并并通过post-merge verification；identity stage interface blocker已关闭
 - Identity v3已关闭wrapper stdin、非循环bootstrap、parent containment与manifest provenance primitive，但无法证明既有database URL对应资源归本次launcher所有；等待R1或R2决策
 - 用户已选择R1，launcher-owned PostgreSQL lifecycle进入synthetic stub implementation；真实Docker与database继续locked
+- R1 candidate已关闭原规格findings，但synthetic fixture错误假设Docker volume具有`Id`；等待V1或V2 volume identity决策
 
 ## Pending Feedback
 
-Identity v3已按R1重启synthetic implementation；第二次Execution confirmation、真实input、Docker与database继续locked
+Identity v3 R1因volume identity schema不成立而blocked；用户选择V1或V2前停止实现，真实input、Docker与database继续locked
 
 ## Next Gate
 
-下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先完成R1 candidate freeze与独立双审；此前不得读取production snapshot、old key、连接Docker或执行真实rehearsal
+下一阶段门禁仍为`GATE-PHASE5-FEISHU-UAT`并保持locked；当前先选择named-volume composite identity V1或container-owned ephemeral storage V2；此前不得读取production snapshot、old key、连接Docker或执行真实rehearsal
 
 ## Evidence Index
 
+- [Phase 5 identity v3 R1 volume identity blocked](checkpoints/CP-20260725-PHASE5-IDENTITY-V3-R1-VOLUME-IDENTITY-BLOCKED.md)
 - [Phase 5 identity v3 R1 restarted](checkpoints/CP-20260725-PHASE5-IDENTITY-V3-R1-RESTARTED.md)
 - [Phase 5 launcher owned PostgreSQL lifecycle decision](decisions/DEC-0024-phase5-launcher-owned-postgres-lifecycle.md)
 - [Phase 5 real retry identity v3 resource ownership blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-IDENTITY-V3-RESOURCE-OWNERSHIP-BLOCKED.md)
