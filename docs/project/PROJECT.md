@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 12
+source_version: 13
 baseline_commit: 069e3f399d6ac06eec9b64fdb85436ad6cc9f846
 baseline_status: current
-updated_at: 2026-07-25T16:05:00+08:00
+updated_at: 2026-07-25T16:42:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-execution-v2-gate-submitted
-last_checkpoint: CP-20260725-PHASE5-IDENTITY-V3-V2-ACCEPTED
-next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V2
+current_phase: phase-5-real-retry-execution-v2-authorized
+last_checkpoint: CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-ACCEPTED
+next_gate: GATE-PHASE5-FEISHU-UAT
 ---
 
 # Novel Analysis Refactor Project Source
@@ -44,7 +44,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V2
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | PHASE5-REAL-RETRY-STAGE-ENTRY | phase-5 | Build a committed single-file Node ESM rehearsal stage artifact | controller-agent | codex/phase5-real-retry-stage-entry-impl | f82fcf9cb4be73fed356299565b2a22b2ed71d10 | 72e0d29bb5fade441530e79736deb53c735d794a | merged | DEC-0022 | CP-20260725-PHASE5-STAGE-MERGED-IDENTITY-RESTARTED | none |
 | PHASE5-REAL-RETRY-IDENTITY | phase-5 | Prepare, test, freeze and review exact real retry execution identity without real inputs | controller-agent | unassigned | 26951ddfc5d8b048ebe421298168043fdf5b6925 | 26951ddfc5d8b048ebe421298168043fdf5b6925 | accepted | DEC-0026 | CP-20260725-PHASE5-IDENTITY-V3-V2-ACCEPTED | submit a new explicit real retry Gate using only the accepted frozen bytes |
-| PHASE5-REAL-RETRY-EXECUTION-V2 | phase-5 | Execute one real isolated rehearsal using only accepted V2 bytes after explicit confirmation | controller-agent | codex/phase5-real-retry-execution-v2-gate | e838fc2d5d76acdd09b9e748a1aa7f283c666e71 | e838fc2d5d76acdd09b9e748a1aa7f283c666e71 | review | CP-20260725-PHASE5-IDENTITY-V3-V2-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-SUBMITTED | obtain explicit acceptance of GATE-PHASE5-REAL-RETRY-EXECUTION-V2 |
+| PHASE5-REAL-RETRY-EXECUTION-V2 | phase-5 | Execute one real isolated rehearsal using only accepted V2 bytes after explicit confirmation | controller-agent | unassigned | 9f92eb73e372c7b1e29c911ac4a466f8f9e55f73 | 9f92eb73e372c7b1e29c911ac4a466f8f9e55f73 | ready | CP-20260725-PHASE5-IDENTITY-V3-V2-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-ACCEPTED | execute exactly one accepted real retry unit and submit result for independent review |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -129,17 +129,19 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V2
 - 用户确认放弃V1并切换到V2，container-owned anonymous storage与immutable container ID cleanup进入单一synthetic correction
 - V2 frozen identity已关闭container storage、sentinel、durability与rollback findings，通过独立规格和质量双审；真实retry仍需新的明确Gate授权
 - Real retry Execution V2 Gate已submitted；只有用户明确接受Gate名称才授权唯一一次真实attempt
+- 用户已明确接受`GATE-PHASE5-REAL-RETRY-EXECUTION-V2`，唯一一次attempt已授权；任一hard stop消耗授权且禁止自动retry
 
 ## Pending Feedback
 
-Real retry Execution V2 Gate已submitted；等待用户明确接受Gate，真实input、Docker与database继续locked
+Real retry Execution V2 Gate已accepted；完成accepted checkpoint合并后执行唯一一次完整execution unit，Dify、飞书、部署与切换继续locked
 
 ## Next Gate
 
-当前等待`GATE-PHASE5-REAL-RETRY-EXECUTION-V2`明确确认；确认前不得读取production snapshot、old key、连接Docker或执行真实rehearsal；`GATE-PHASE5-FEISHU-UAT`继续locked
+唯一一次Real Retry Execution V2 attempt已授权，执行结束后必须完成独立result双审与checkpoint；`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry Execution V2 Gate accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-ACCEPTED.md)
 - [Phase 5 real retry Execution V2 Gate submitted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V2-GATE-SUBMITTED.md)
 - [Phase 5 identity v3 V2 accepted](checkpoints/CP-20260725-PHASE5-IDENTITY-V3-V2-ACCEPTED.md)
 - [Phase 5 identity v3 V2 restarted](checkpoints/CP-20260725-PHASE5-IDENTITY-V3-V2-RESTARTED.md)
