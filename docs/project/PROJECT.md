@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 26
+source_version: 27
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-25T23:05:50+08:00
+updated_at: 2026-07-26T10:11:18+08:00
 updated_by: controller-agent
-current_phase: phase-5-preflight-diagnostic-correction
-last_checkpoint: CP-20260725-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-STARTED
-next_gate: GATE-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION
+current_phase: phase-5-preflight-diagnostic-correction-accepted
+last_checkpoint: CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED
+next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V4-SUBMISSION
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Execution V3 preflight blocked | Unique attempt在candidate preflight exit `70`并消耗；未读取真实input或连接Docker，自动retry禁止 |
+| Phase 5 | Preflight diagnostic correction accepted | Synthetic diagnostic candidate通过`57/57`、规格与质量双审；任何真实retry仍需新的named Gate |
 
 ## Active Work
 
@@ -49,7 +49,7 @@ next_gate: GATE-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION
 | PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION | phase-5 | Freeze V3 config and audit complete preflight-to-sensitive-input ordering before Gate submission | controller-agent | codex/phase5-v3-gate-preparation-blocked | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | d7c4697c3053311e0b1d4680ecfda2a2a7f1e267 | superseded | CP-20260725-PHASE5-REAL-RETRY-CORRECTION-ACCEPTED | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREPARATION-BLOCKED | replaced by accepted snapshot-preflight correction |
 | PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION | phase-5 | Add candidate-owned snapshot preflight without key or runtime resource access, then refreeze and review | controller-agent | codex/phase5-snapshot-preflight-correction | 8396047884bcdf4c3cb383d43363ce65651a07e2 | 8396047884bcdf4c3cb383d43363ce65651a07e2 | accepted | DEC-0028 | CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED | prepare a separate named Execution V3 Gate without accessing real resources |
 | PHASE5-REAL-RETRY-EXECUTION-V3 | phase-5 | Execute one real isolated rehearsal using accepted snapshot-preflight identity after exact named confirmation | controller-agent | codex/phase5-real-retry-v3-preflight-blocked | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | blocked | DEC-0029 | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | design synthetic sanitized preflight diagnostics before any new Gate |
-| PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION | phase-5 | Add deterministic sanitized preflight stage and reason codes in a new synthetic-only candidate | controller-agent | codex/phase5-preflight-diagnostic-correction | 776267c1d5c56a35c61753df7d7d1b43405e2f40 | 776267c1d5c56a35c61753df7d7d1b43405e2f40 | in_progress | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | CP-20260725-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-STARTED | implement RED/GREEN synthetic diagnostics, refreeze and complete independent reviews |
+| PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION | phase-5 | Add deterministic sanitized preflight stage and reason codes in a new synthetic-only candidate | controller-agent | codex/phase5-preflight-diagnostic-correction | 776267c1d5c56a35c61753df7d7d1b43405e2f40 | 641d2b5bb055a4e7f3682aebd062369e022a9336 | accepted | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED | request user decision before submitting any new named real retry Gate |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -143,17 +143,19 @@ next_gate: GATE-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION
 - Execution V3 config已冻结，但candidate启动前必须准备key files，导致完整执行单元仍无法证明snapshot validation先于old-key access与target-key generation；Gate未提交
 - Snapshot preflight correction已通过`46/46`、规格与质量双审，恢复standalone sidecar absence与exact `PRAGMA integrity_check`；Execution V3 Gate仍未提交
 - Execution V3 accepted Gate要求snapshot前验证六个resource name absence，但candidate只在snapshot与key后生成runId且anonymous storage name仅在create后存在；attempt未开始且未消耗
+- Preflight diagnostic correction已通过`57/57`与独立双审，固定allowlist、合法链形、截断拒绝、status一致性与synthetic cleanup均已验证；真实retry继续locked
 
 ## Pending Feedback
 
-Synthetic preflight diagnostic correction已启动；真实input、Docker、database、retry与后续环境Gate保持locked
+Synthetic preflight diagnostic correction已accepted；等待用户决定是否允许提交新的named real retry Gate
 
 ## Next Gate
 
-当前Gate仅允许synthetic sanitized preflight diagnostic correction与双审；任何新真实attempt必须另行Gate，`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为`GATE-PHASE5-REAL-RETRY-EXECUTION-V4`提交决策；Gate未提交且未接受，`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 preflight diagnostic correction accepted](checkpoints/CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED.md)
 - [Phase 5 preflight diagnostic correction started](checkpoints/CP-20260725-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-STARTED.md)
 - [Phase 5 real retry Execution V3 preflight blocked](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED.md)
 - [Phase 5 real retry Execution V3 ordering correction accepted](checkpoints/CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-ORDERING-CORRECTION-ACCEPTED.md)
