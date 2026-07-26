@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 30
+source_version: 31
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T12:20:00+08:00
+updated_at: 2026-07-26T12:40:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-execution-v4-blocked
+current_phase: phase-5-real-retry-v4-blocked-disposition-submitted
 last_checkpoint: CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED
-next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION
+next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTANCE
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Real retry Execution V4 blocked | Snapshot-preflight exit `70`，唯一attempt已消耗并完成cleanup；任何诊断或retry均需新Gate |
+| Phase 5 | V4 blocked disposition submitted | Synthetic-only诊断细化方案已提交；接受前不启动修正且任何真实诊断或retry继续locked |
 
 ## Active Work
 
@@ -51,6 +51,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION
 | PHASE5-REAL-RETRY-EXECUTION-V3 | phase-5 | Execute one real isolated rehearsal using accepted snapshot-preflight identity after exact named confirmation | controller-agent | codex/phase5-real-retry-v3-preflight-blocked | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | blocked | DEC-0029 | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | design synthetic sanitized preflight diagnostics before any new Gate |
 | PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION | phase-5 | Add deterministic sanitized preflight stage and reason codes in a new synthetic-only candidate | controller-agent | codex/phase5-preflight-diagnostic-correction | 776267c1d5c56a35c61753df7d7d1b43405e2f40 | 641d2b5bb055a4e7f3682aebd062369e022a9336 | accepted | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED | request user decision before submitting any new named real retry Gate |
 | PHASE5-REAL-RETRY-EXECUTION-V4 | phase-5 | Execute one real isolated rehearsal using accepted diagnostic candidate | controller-agent | codex/phase5-real-retry-v4-blocked | 5151da73ba181e2d644799ad3ee1695f3919fe1b | 5151da73ba181e2d644799ad3ee1695f3919fe1b | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | request a separate blocked-disposition decision; no retry |
+| PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only fixed diagnostic reason refinement contract | controller-agent | codex/phase5-v4-blocked-disposition | 6a16b9e131e4ba7d92522bc02b11c87bc6b2b166 | 6a16b9e131e4ba7d92522bc02b11c87bc6b2b166 | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-SUBMITTED | merge submission, then request exact named acceptance |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -148,14 +149,15 @@ next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION
 
 ## Pending Feedback
 
-V4唯一attempt已在snapshot-preflight hard stop后BLOCKED并完成双审；等待用户决定是否允许提交独立blocked-disposition方案
+Synthetic-only blocked-disposition方案已提交；等待合并后由用户明确接受或拒绝
 
 ## Next Gate
 
-下一步仅为`GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION`决策；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为`GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION`明确接受；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry V4 blocked disposition submitted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 real retry Execution V4 blocked](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED.md)
 - [Phase 5 real retry Execution V4 Gate accepted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED.md)
 - [Phase 5 real retry Execution V4 Gate submitted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-SUBMITTED.md)
