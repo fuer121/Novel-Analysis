@@ -1,11 +1,11 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 43
+source_version: 44
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T22:32:24+08:00
+updated_at: 2026-07-26T23:03:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v2
+current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v2-blocked-disposition
 last_checkpoint: CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-DEADLINE-CUSTODY-SCHEDULED
 next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION
 ---
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Controller protocol correction V2 blocked; deadline custody scheduled | Independent pre-cleanup reviews发现2个consolidated Important blocking findings；一次性deadline cleanup恢复已激活，任何真实config、snapshot、diagnostic或retry继续locked |
+| Phase 5 | Controller protocol correction V2 blocked disposition submitted | Synthetic-only V3 correction contract已提交；V2 deadline custody继续，任何真实config、snapshot、diagnostic、UAT、部署或retry保持locked |
 
 ## Active Work
 
@@ -58,6 +58,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION | phase-5 | Correct invocation、raw evidence custody与五维fresh-absence protocol using synthetic inputs only | controller-agent | repository-external protocol | d35b3f92663f90c146245b999125ce089d215ebc | d35b3f92663f90c146245b999125ce089d215ebc | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED | replaced by V2 blocked disposition; no rerun |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V2 correction contract for all blocking protocol findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v2-gate-accepted | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | accepted | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED | start synthetic-only V2 correction |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2 | phase-5 | Close all blocking controller protocol findings using synthetic inputs only | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v2-custody-checkpoint | ab1a039ee8e1e4ce108b83b4ac2a98b3e746d57e | ab1a039ee8e1e4ce108b83b4ac2a98b3e746d57e | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-DEADLINE-CUSTODY-SCHEDULED | preserve exact raw custody until scheduled hard-deadline cleanup; no V3 |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V3 correction contract for the two blocking V2 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v3-disposition | e7fd51eea4789d968bec416fd53a7be2f15c96a8 | e7fd51eea4789d968bec416fd53a7be2f15c96a8 | ready | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-DEADLINE-CUSTODY-SCHEDULED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION-SUBMITTED | request exact named confirmation after submission PR merge |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -161,10 +162,11 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 - Controller protocol correction V2已通过`63/63` accepted baseline、`34/34` focused protocol、exact frozen identity与唯一synthetic exit `0`，但独立规格与质量pre-cleanup review发现不可延长24小时deadline未被强制及descriptor-close后raw seal顺序存在异常窗口，均为Important且blocking
 - V2两项failed verdict已由frozen registrar登记；三项exact-zero `0400` raw sinks与private reference必须保持custody至`2026-07-27T20:33:34.789+08:00`，deadline到达时无条件exact-target cleanup并保持`BLOCKED`
 - V2 blocked result已通过PR #220合并并完成post-merge verification；一次性current-task heartbeat `phase-5-v2-custody-cleanup`已激活，将在deadline后恢复frozen cleanup与五维fresh absence核验
+- V2 blocked disposition已提交synthetic-only V3 correction contract，仅关闭不可延长deadline与descriptor-close后raw seal ordering两个finding；在named confirmation前不得启动V3
 
 ## Pending Feedback
 
-无；controller protocol correction V2结果为`BLOCKED`，hard-deadline custody恢复已调度，等待独立blocked disposition
+等待用户在submission PR通过CI并合并后明确确认`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION`
 
 ## Next Gate
 
@@ -172,6 +174,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 
 ## Evidence Index
 
+- [Phase 5 read-only snapshot diagnostic controller protocol correction V2 blocked disposition submitted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V2 deadline custody scheduled](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-DEADLINE-CUSTODY-SCHEDULED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V2 blocked](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V2 Gate accepted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED.md)
