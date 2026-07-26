@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 29
+source_version: 30
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T11:55:00+08:00
+updated_at: 2026-07-26T12:20:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-execution-v4-gate-accepted
-last_checkpoint: CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED
-next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V4-RESULT
+current_phase: phase-5-real-retry-execution-v4-blocked
+last_checkpoint: CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED
+next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V4-RESULT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Real retry Execution V4 Gate accepted | 唯一一次真实isolated rehearsal attempt已授权；Dify、飞书UAT、部署与切换继续locked |
+| Phase 5 | Real retry Execution V4 blocked | Snapshot-preflight exit `70`，唯一attempt已消耗并完成cleanup；任何诊断或retry均需新Gate |
 
 ## Active Work
 
@@ -50,7 +50,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V4-RESULT
 | PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION | phase-5 | Add candidate-owned snapshot preflight without key or runtime resource access, then refreeze and review | controller-agent | codex/phase5-snapshot-preflight-correction | 8396047884bcdf4c3cb383d43363ce65651a07e2 | 8396047884bcdf4c3cb383d43363ce65651a07e2 | accepted | DEC-0028 | CP-20260725-PHASE5-SNAPSHOT-PREFLIGHT-CORRECTION-ACCEPTED | prepare a separate named Execution V3 Gate without accessing real resources |
 | PHASE5-REAL-RETRY-EXECUTION-V3 | phase-5 | Execute one real isolated rehearsal using accepted snapshot-preflight identity after exact named confirmation | controller-agent | codex/phase5-real-retry-v3-preflight-blocked | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | blocked | DEC-0029 | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | design synthetic sanitized preflight diagnostics before any new Gate |
 | PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION | phase-5 | Add deterministic sanitized preflight stage and reason codes in a new synthetic-only candidate | controller-agent | codex/phase5-preflight-diagnostic-correction | 776267c1d5c56a35c61753df7d7d1b43405e2f40 | 641d2b5bb055a4e7f3682aebd062369e022a9336 | accepted | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED | request user decision before submitting any new named real retry Gate |
-| PHASE5-REAL-RETRY-EXECUTION-V4 | phase-5 | Execute one real isolated rehearsal using accepted diagnostic candidate | controller-agent | codex/phase5-real-retry-execution-v4-accepted | c8bcad6ef20be9369d1f00ed27b01dff3e37b0c5 | c8bcad6ef20be9369d1f00ed27b01dff3e37b0c5 | ready | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | merge accepted Gate checkpoint, then execute exactly one attempt |
+| PHASE5-REAL-RETRY-EXECUTION-V4 | phase-5 | Execute one real isolated rehearsal using accepted diagnostic candidate | controller-agent | codex/phase5-real-retry-v4-blocked | 5151da73ba181e2d644799ad3ee1695f3919fe1b | 5151da73ba181e2d644799ad3ee1695f3919fe1b | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | request a separate blocked-disposition decision; no retry |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -148,14 +148,15 @@ next_gate: GATE-PHASE5-REAL-RETRY-EXECUTION-V4-RESULT
 
 ## Pending Feedback
 
-用户已明确接受`GATE-PHASE5-REAL-RETRY-EXECUTION-V4`；等待唯一一次attempt执行与独立结果审查
+V4唯一attempt已在snapshot-preflight hard stop后BLOCKED并完成双审；等待用户决定是否允许提交独立blocked-disposition方案
 
 ## Next Gate
 
-下一步仅为执行V4 Gate定义的唯一一次真实isolated rehearsal并形成result checkpoint；`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为`GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION`决策；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry Execution V4 blocked](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED.md)
 - [Phase 5 real retry Execution V4 Gate accepted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED.md)
 - [Phase 5 real retry Execution V4 Gate submitted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-SUBMITTED.md)
 - [Phase 5 preflight diagnostic correction accepted](checkpoints/CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED.md)
