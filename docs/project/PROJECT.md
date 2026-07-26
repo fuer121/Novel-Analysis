@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 35
+source_version: 36
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T16:30:01+08:00
+updated_at: 2026-07-26T17:02:04+08:00
 updated_by: controller-agent
-current_phase: phase-5-readonly-snapshot-diagnostic-gate-accepted
-last_checkpoint: CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED
-next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-RESULT
+current_phase: phase-5-readonly-snapshot-diagnostic-blocked
+last_checkpoint: CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED
+next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-SUBMISSION
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-RESULT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Read-only snapshot diagnostic Gate accepted | 一次candidate-owned只读诊断已授权但尚未执行；真实retry、飞书UAT、部署与切换继续locked |
+| Phase 5 | Read-only snapshot diagnostic blocked | 唯一attempt在wrapper启动前因exit `126`与ordinary stderr hard stop结束；授权已消耗，双审blocked |
 
 ## Active Work
 
@@ -53,7 +53,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-RESULT
 | PHASE5-REAL-RETRY-EXECUTION-V4 | phase-5 | Execute one real isolated rehearsal using accepted diagnostic candidate | controller-agent | codex/phase5-real-retry-v4-blocked | 5151da73ba181e2d644799ad3ee1695f3919fe1b | 5151da73ba181e2d644799ad3ee1695f3919fe1b | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | request a separate blocked-disposition decision; no retry |
 | PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only fixed diagnostic reason refinement contract | controller-agent | codex/phase5-v4-disposition-accepted | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | accepted | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only diagnostic refinement |
 | PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT | phase-5 | Refine fixed snapshot-preflight diagnostics using synthetic inputs only | controller-agent | repository-external candidate | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | accepted | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED | submit a separate read-only real snapshot diagnostic Gate |
-| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC | phase-5 | Run one candidate-owned read-only diagnostic against accepted real config and canonical snapshot | controller-agent | codex/phase5-readonly-snapshot-diagnostic-gate-accepted | fa289983bfeacfd55311e6610b39b88952f91baf | fa289983bfeacfd55311e6610b39b88952f91baf | ready | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED | merge accepted Gate checkpoint, then execute exactly one diagnostic unit |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC | phase-5 | Run one candidate-owned read-only diagnostic against accepted real config and canonical snapshot | controller-agent | codex/phase5-readonly-snapshot-diagnostic-blocked | eb35a45e90de0d67d133581c0db9c39415920acf | eb35a45e90de0d67d133581c0db9c39415920acf | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED | request a separate blocked-disposition decision; no retry |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -148,18 +148,20 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-RESULT
 - Snapshot preflight correction已通过`46/46`、规格与质量双审，恢复standalone sidecar absence与exact `PRAGMA integrity_check`；Execution V3 Gate仍未提交
 - Execution V3 accepted Gate要求snapshot前验证六个resource name absence，但candidate只在snapshot与key后生成runId且anonymous storage name仅在create后存在；attempt未开始且未消耗
 - Preflight diagnostic correction已通过`57/57`与独立双审，固定allowlist、合法链形、截断拒绝、status一致性与synthetic cleanup均已验证；真实retry继续locked
-- Read-only snapshot diagnostic Gate已accepted；一次candidate preflight与一次snapshot-preflight组成的diagnostic unit已授权，PASS、FAIL或hard stop都会消耗授权且禁止自动retry
+- Read-only snapshot diagnostic唯一attempt在accepted wrapper启动前因direct execution of `0600` member返回`126`并产生ordinary stderr而BLOCKED；snapshot未访问、授权已消耗且禁止retry
+- Diagnostic raw stderr在独立review前已销毁，无法排除私有路径输出；process、key、TCP与runtime fresh absence证据不完整，规格与质量review均为BLOCKED
 
 ## Pending Feedback
 
-`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC`已accepted；等待accepted checkpoint完成CI与合并后执行一次只读diagnostic unit
+Read-only snapshot diagnostic结果为`BLOCKED`；等待用户决定是否允许提交独立的blocked-disposition Gate，本checkpoint不授权修正或retry
 
 ## Next Gate
 
-下一步仅为`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-RESULT`；完成一次diagnostic unit、cleanup与独立双审后记录sanitized PASS或BLOCKED结果，任何retry与`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION`提交决策；任何read-only diagnostic retry、真实retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 read-only snapshot diagnostic blocked](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic Gate accepted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED.md)
 - [Phase 5 read-only snapshot diagnostic Gate submitted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-SUBMITTED.md)
 - [Phase 5 snapshot diagnostic refinement accepted](checkpoints/CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED.md)
