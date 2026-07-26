@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 40
+source_version: 41
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T19:28:41+08:00
+updated_at: 2026-07-26T19:51:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v2-disposition
-last_checkpoint: CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED
-next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2
+current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v2
+last_checkpoint: CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED
+next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-RESULT
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Controller protocol correction V2 disposition submitted | Blocked raw custody已在deadline前销毁并fresh file absence；等待用户决定synthetic-only V2 Gate，任何真实diagnostic或retry继续locked |
+| Phase 5 | Controller protocol correction V2 Gate accepted | Repository-external synthetic-only V2 correction已解锁；任何真实config、snapshot、diagnostic或retry继续locked |
 
 ## Active Work
 
@@ -56,7 +56,8 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC | phase-5 | Run one candidate-owned read-only diagnostic against accepted real config and canonical snapshot | controller-agent | codex/phase5-readonly-snapshot-diagnostic-blocked | eb35a45e90de0d67d133581c0db9c39415920acf | eb35a45e90de0d67d133581c0db9c39415920acf | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED | request a separate blocked-disposition decision; no retry |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only controller invocation、evidence custody与fresh-absence correction contract | controller-agent | codex/phase5-readonly-snapshot-diagnostic-disposition-accepted | 1c2570e163ccd958630242ad53bc5299815f8c49 | 1c2570e163ccd958630242ad53bc5299815f8c49 | accepted | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only controller protocol correction |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION | phase-5 | Correct invocation、raw evidence custody与五维fresh-absence protocol using synthetic inputs only | controller-agent | repository-external protocol | d35b3f92663f90c146245b999125ce089d215ebc | d35b3f92663f90c146245b999125ce089d215ebc | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED | replaced by V2 blocked disposition; no rerun |
-| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V2 correction contract for all blocking protocol findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v2-disposition | c6695f231eed627b12f4e0884cb76d75b44d2266 | c6695f231eed627b12f4e0884cb76d75b44d2266 | ready | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED-DISPOSITION-SUBMITTED | await explicit user acceptance of the exact V2 Gate |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V2 correction contract for all blocking protocol findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v2-gate-accepted | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | accepted | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED | start synthetic-only V2 correction |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2 | phase-5 | Close all blocking controller protocol findings using synthetic inputs only | controller-agent | repository-external protocol V2 | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | ready | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED | start strict TDD without real inputs |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -156,18 +157,19 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 - 用户已接受read-only snapshot diagnostic blocked disposition；仅synthetic controller protocol correction已解锁，真实config、snapshot与任何retry继续locked
 - Controller protocol correction的frozen identity、`63/63`、`17/17`、synthetic exit `0`与raw zero均已fresh核验，但独立规格与质量pre-cleanup review分别以4个和6个blocking Important findings判定`BLOCKED`
 - Raw sinks与child private reference已于deadline前精确销毁并fresh file absence；该cleanup不关闭任何finding，post-cleanup五维review与新read-only diagnostic Gate均未启动
-- Controller protocol correction V2 blocked disposition已submitted；只有用户明确接受exact V2 Gate才可启动新的repository-external synthetic-only correction
+- 用户已明确接受controller protocol correction V2 Gate；仅repository-external synthetic-only correction已解锁，真实输入、runtime与任何diagnostic或retry继续locked
 
 ## Pending Feedback
 
-Controller protocol correction V2 blocked disposition已submitted；等待用户明确接受或拒绝exact named Gate
+无；controller protocol correction V2已ready，等待strict TDD实现与冻结双审结果
 
 ## Next Gate
 
-下一步只请求用户决定是否接受`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2`；接受前V2 correction、真实config或snapshot访问、read-only diagnostic retry、真实retry与`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步只允许完成`PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2`并提交`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-RESULT`；真实config或snapshot访问、read-only diagnostic retry、真实retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 read-only snapshot diagnostic controller protocol correction V2 Gate accepted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction blocked disposition submitted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction blocked](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic blocked disposition accepted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED.md)
