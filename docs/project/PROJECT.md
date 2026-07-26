@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 31
+source_version: 32
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T12:40:00+08:00
+updated_at: 2026-07-26T13:36:25+08:00
 updated_by: controller-agent
-current_phase: phase-5-real-retry-v4-blocked-disposition-submitted
-last_checkpoint: CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED
-next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTANCE
+current_phase: phase-5-snapshot-diagnostic-refinement
+last_checkpoint: CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED
+next_gate: GATE-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-RESULT
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTANCE
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | V4 blocked disposition submitted | Synthetic-only诊断细化方案已提交；接受前不启动修正且任何真实诊断或retry继续locked |
+| Phase 5 | Snapshot diagnostic refinement active | Synthetic-only固定原因码细化已解锁；任何真实诊断或retry继续locked |
 
 ## Active Work
 
@@ -51,7 +51,8 @@ next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTANCE
 | PHASE5-REAL-RETRY-EXECUTION-V3 | phase-5 | Execute one real isolated rehearsal using accepted snapshot-preflight identity after exact named confirmation | controller-agent | codex/phase5-real-retry-v3-preflight-blocked | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | cc874db3dc4b8be5cb7a59ff20f0351023d5d372 | blocked | DEC-0029 | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | design synthetic sanitized preflight diagnostics before any new Gate |
 | PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION | phase-5 | Add deterministic sanitized preflight stage and reason codes in a new synthetic-only candidate | controller-agent | codex/phase5-preflight-diagnostic-correction | 776267c1d5c56a35c61753df7d7d1b43405e2f40 | 641d2b5bb055a4e7f3682aebd062369e022a9336 | accepted | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED | request user decision before submitting any new named real retry Gate |
 | PHASE5-REAL-RETRY-EXECUTION-V4 | phase-5 | Execute one real isolated rehearsal using accepted diagnostic candidate | controller-agent | codex/phase5-real-retry-v4-blocked | 5151da73ba181e2d644799ad3ee1695f3919fe1b | 5151da73ba181e2d644799ad3ee1695f3919fe1b | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | request a separate blocked-disposition decision; no retry |
-| PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only fixed diagnostic reason refinement contract | controller-agent | codex/phase5-v4-blocked-disposition | 6a16b9e131e4ba7d92522bc02b11c87bc6b2b166 | 6a16b9e131e4ba7d92522bc02b11c87bc6b2b166 | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-SUBMITTED | merge submission, then request exact named acceptance |
+| PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only fixed diagnostic reason refinement contract | controller-agent | codex/phase5-v4-disposition-accepted | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | accepted | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only diagnostic refinement |
+| PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT | phase-5 | Refine fixed snapshot-preflight diagnostics using synthetic inputs only | controller-agent | repository-external candidate | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | ready | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | execute RED/GREEN, refreeze and independent reviews |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -149,14 +150,15 @@ next_gate: GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTANCE
 
 ## Pending Feedback
 
-Synthetic-only blocked-disposition方案已提交；等待合并后由用户明确接受或拒绝
+Synthetic-only诊断细化已接受；等待RED/GREEN、refreeze与独立双审结果
 
 ## Next Gate
 
-下一步仅为`GATE-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION`明确接受；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为synthetic-only诊断细化与result checkpoint；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 real retry V4 blocked disposition accepted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED.md)
 - [Phase 5 real retry V4 blocked disposition submitted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 real retry Execution V4 blocked](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED.md)
 - [Phase 5 real retry Execution V4 Gate accepted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED.md)
