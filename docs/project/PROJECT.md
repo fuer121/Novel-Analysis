@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 32
+source_version: 33
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T13:36:25+08:00
+updated_at: 2026-07-26T14:30:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-snapshot-diagnostic-refinement
-last_checkpoint: CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED
-next_gate: GATE-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-RESULT
+current_phase: phase-5-snapshot-diagnostic-refinement-accepted
+last_checkpoint: CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED
+next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-SUBMISSION
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-RESULT
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Snapshot diagnostic refinement active | Synthetic-only固定原因码细化已解锁；任何真实诊断或retry继续locked |
+| Phase 5 | Snapshot diagnostic refinement accepted | Synthetic candidate通过`63/63`与独立双审；任何只读真实诊断或retry仍需新Gate |
 
 ## Active Work
 
@@ -52,7 +52,7 @@ next_gate: GATE-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-RESULT
 | PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION | phase-5 | Add deterministic sanitized preflight stage and reason codes in a new synthetic-only candidate | controller-agent | codex/phase5-preflight-diagnostic-correction | 776267c1d5c56a35c61753df7d7d1b43405e2f40 | 641d2b5bb055a4e7f3682aebd062369e022a9336 | accepted | CP-20260725-PHASE5-REAL-RETRY-EXECUTION-V3-PREFLIGHT-BLOCKED | CP-20260726-PHASE5-PREFLIGHT-DIAGNOSTIC-CORRECTION-ACCEPTED | request user decision before submitting any new named real retry Gate |
 | PHASE5-REAL-RETRY-EXECUTION-V4 | phase-5 | Execute one real isolated rehearsal using accepted diagnostic candidate | controller-agent | codex/phase5-real-retry-v4-blocked | 5151da73ba181e2d644799ad3ee1695f3919fe1b | 5151da73ba181e2d644799ad3ee1695f3919fe1b | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | request a separate blocked-disposition decision; no retry |
 | PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only fixed diagnostic reason refinement contract | controller-agent | codex/phase5-v4-disposition-accepted | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | accepted | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only diagnostic refinement |
-| PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT | phase-5 | Refine fixed snapshot-preflight diagnostics using synthetic inputs only | controller-agent | repository-external candidate | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | ready | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | execute RED/GREEN, refreeze and independent reviews |
+| PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT | phase-5 | Refine fixed snapshot-preflight diagnostics using synthetic inputs only | controller-agent | repository-external candidate | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | accepted | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED | submit a separate read-only real snapshot diagnostic Gate |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -150,14 +150,15 @@ next_gate: GATE-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-RESULT
 
 ## Pending Feedback
 
-Synthetic-only诊断细化已接受；等待RED/GREEN、refreeze与独立双审结果
+Synthetic-only诊断细化已accepted；等待用户决定是否允许提交只读真实snapshot诊断Gate
 
 ## Next Gate
 
-下一步仅为synthetic-only诊断细化与result checkpoint；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC`提交决策；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 snapshot diagnostic refinement accepted](checkpoints/CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED.md)
 - [Phase 5 real retry V4 blocked disposition accepted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED.md)
 - [Phase 5 real retry V4 blocked disposition submitted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 real retry Execution V4 blocked](checkpoints/CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED.md)
