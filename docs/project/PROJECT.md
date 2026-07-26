@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 37
+source_version: 38
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T17:35:01+08:00
+updated_at: 2026-07-26T17:47:23+08:00
 updated_by: controller-agent
-current_phase: phase-5-readonly-snapshot-diagnostic-blocked-disposition-submitted
-last_checkpoint: CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED
-next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTANCE
+current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction
+last_checkpoint: CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED
+next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-RESULT
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTAN
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Read-only snapshot diagnostic blocked disposition submitted | Synthetic-only controller protocol correction方案已提交；接受前不启动修正且任何真实diagnostic或retry继续locked |
+| Phase 5 | Read-only snapshot diagnostic controller protocol correction active | Synthetic-only invocation、evidence custody与fresh-absence correction已解锁；任何真实diagnostic或retry继续locked |
 
 ## Active Work
 
@@ -54,7 +54,8 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTAN
 | PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only fixed diagnostic reason refinement contract | controller-agent | codex/phase5-v4-disposition-accepted | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | accepted | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only diagnostic refinement |
 | PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT | phase-5 | Refine fixed snapshot-preflight diagnostics using synthetic inputs only | controller-agent | repository-external candidate | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | accepted | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED | submit a separate read-only real snapshot diagnostic Gate |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC | phase-5 | Run one candidate-owned read-only diagnostic against accepted real config and canonical snapshot | controller-agent | codex/phase5-readonly-snapshot-diagnostic-blocked | eb35a45e90de0d67d133581c0db9c39415920acf | eb35a45e90de0d67d133581c0db9c39415920acf | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED | request a separate blocked-disposition decision; no retry |
-| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only controller invocation、evidence custody与fresh-absence correction contract | controller-agent | codex/phase5-readonly-snapshot-diagnostic-blocked-disposition | 93e28562781f21cb8d5bf355f448283e58fa3ad5 | 93e28562781f21cb8d5bf355f448283e58fa3ad5 | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-SUBMITTED | merge submission, then request exact named acceptance |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only controller invocation、evidence custody与fresh-absence correction contract | controller-agent | codex/phase5-readonly-snapshot-diagnostic-disposition-accepted | 1c2570e163ccd958630242ad53bc5299815f8c49 | 1c2570e163ccd958630242ad53bc5299815f8c49 | accepted | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only controller protocol correction |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION | phase-5 | Correct invocation、raw evidence custody与五维fresh-absence protocol using synthetic inputs only | controller-agent | repository-external protocol | 1c2570e163ccd958630242ad53bc5299815f8c49 | 1c2570e163ccd958630242ad53bc5299815f8c49 | ready | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED | execute RED/GREEN, freeze evidence protocol and complete independent reviews |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -151,17 +152,19 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTAN
 - Preflight diagnostic correction已通过`57/57`与独立双审，固定allowlist、合法链形、截断拒绝、status一致性与synthetic cleanup均已验证；真实retry继续locked
 - Read-only snapshot diagnostic唯一attempt在accepted wrapper启动前因direct execution of `0600` member返回`126`并产生ordinary stderr而BLOCKED；snapshot未访问、授权已消耗且禁止retry
 - Diagnostic raw stderr在独立review前已销毁，无法排除私有路径输出；process、key、TCP与runtime fresh absence证据不完整，规格与质量review均为BLOCKED
+- 用户已接受read-only snapshot diagnostic blocked disposition；仅synthetic controller protocol correction已解锁，真实config、snapshot与任何retry继续locked
 
 ## Pending Feedback
 
-Synthetic-only blocked-disposition方案已提交；等待submission合并后由用户明确接受或拒绝
+Synthetic-only controller protocol correction已接受；等待RED/GREEN、protocol冻结与独立双审结果
 
 ## Next Gate
 
-下一步仅为`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION`明确接受；任何synthetic correction、read-only diagnostic retry、真实retry与`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为synthetic-only controller protocol correction与result checkpoint；任何真实config或snapshot访问、read-only diagnostic retry、真实retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 read-only snapshot diagnostic blocked disposition accepted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-ACCEPTED.md)
 - [Phase 5 read-only snapshot diagnostic blocked disposition submitted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 read-only snapshot diagnostic blocked](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic Gate accepted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-ACCEPTED.md)
