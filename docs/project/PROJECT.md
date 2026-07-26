@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 33
+source_version: 34
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-26T14:30:00+08:00
+updated_at: 2026-07-26T15:59:17+08:00
 updated_by: controller-agent
-current_phase: phase-5-snapshot-diagnostic-refinement-accepted
+current_phase: phase-5-readonly-snapshot-diagnostic-gate-submitted
 last_checkpoint: CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED
-next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-SUBMISSION
+next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-ACCEPTANCE
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-SUBMISSION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Snapshot diagnostic refinement accepted | Synthetic candidate通过`63/63`与独立双审；任何只读真实诊断或retry仍需新Gate |
+| Phase 5 | Read-only snapshot diagnostic Gate submitted | Synthetic candidate通过`63/63`与独立双审；等待用户接受named Gate，真实诊断尚未授权 |
 
 ## Active Work
 
@@ -53,6 +53,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-SUBMISSION
 | PHASE5-REAL-RETRY-EXECUTION-V4 | phase-5 | Execute one real isolated rehearsal using accepted diagnostic candidate | controller-agent | codex/phase5-real-retry-v4-blocked | 5151da73ba181e2d644799ad3ee1695f3919fe1b | 5151da73ba181e2d644799ad3ee1695f3919fe1b | blocked | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-GATE-ACCEPTED | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | request a separate blocked-disposition decision; no retry |
 | PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION | phase-5 | Submit synthetic-only fixed diagnostic reason refinement contract | controller-agent | codex/phase5-v4-disposition-accepted | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | fc88d3522dd6d24c8593d6e429d9d0aa494a8d2a | accepted | CP-20260726-PHASE5-REAL-RETRY-EXECUTION-V4-BLOCKED | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only diagnostic refinement |
 | PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT | phase-5 | Refine fixed snapshot-preflight diagnostics using synthetic inputs only | controller-agent | repository-external candidate | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | 5c449a30dcec4137edbbe9b5404f1cebfa6dc9ba | accepted | CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED | CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED | submit a separate read-only real snapshot diagnostic Gate |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC | phase-5 | Run one candidate-owned read-only diagnostic against accepted real config and canonical snapshot | controller-agent | codex/phase5-readonly-snapshot-diagnostic-gate | 8969d56a586743bd659ebda916f09834dd77c2a2 | 8969d56a586743bd659ebda916f09834dd77c2a2 | planned | CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-SUBMITTED | wait for exact named Gate acceptance; do not access real inputs |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -147,17 +148,19 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-SUBMISSION
 - Snapshot preflight correction已通过`46/46`、规格与质量双审，恢复standalone sidecar absence与exact `PRAGMA integrity_check`；Execution V3 Gate仍未提交
 - Execution V3 accepted Gate要求snapshot前验证六个resource name absence，但candidate只在snapshot与key后生成runId且anonymous storage name仅在create后存在；attempt未开始且未消耗
 - Preflight diagnostic correction已通过`57/57`与独立双审，固定allowlist、合法链形、截断拒绝、status一致性与synthetic cleanup均已验证；真实retry继续locked
+- Read-only snapshot diagnostic Gate已submitted；只有用户在submission PR合并后明确接受exact Gate名称，才授权一次candidate preflight与一次snapshot-preflight，PASS、FAIL或hard stop都会消耗授权且禁止自动retry
 
 ## Pending Feedback
 
-Synthetic-only诊断细化已accepted；等待用户决定是否允许提交只读真实snapshot诊断Gate
+`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC`已submitted；等待submission PR完成CI与合并后由用户明确接受或拒绝
 
 ## Next Gate
 
-下一步仅为`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC`提交决策；任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
+下一步仅为`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC` acceptance decision；接受前任何真实诊断、retry与`GATE-PHASE5-FEISHU-UAT`继续locked
 
 ## Evidence Index
 
+- [Phase 5 read-only snapshot diagnostic Gate submitted](checkpoints/CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-GATE-SUBMITTED.md)
 - [Phase 5 snapshot diagnostic refinement accepted](checkpoints/CP-20260726-PHASE5-SNAPSHOT-DIAGNOSTIC-REFINEMENT-ACCEPTED.md)
 - [Phase 5 real retry V4 blocked disposition accepted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-ACCEPTED.md)
 - [Phase 5 real retry V4 blocked disposition submitted](checkpoints/CP-20260726-PHASE5-REAL-RETRY-V4-BLOCKED-DISPOSITION-SUBMITTED.md)
