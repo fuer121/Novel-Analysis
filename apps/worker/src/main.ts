@@ -15,7 +15,15 @@ import { LibraryImportExecutor } from "./library-executor.js";
 import { AnalysisExecutor } from "./analysis-executor.js";
 import { QueryExecutor } from "./query-executor.js";
 import { RebuildExecutor } from "./rebuild-executor.js";
+import {
+  clearWorkerReadiness,
+  createReadinessAwareShutdown,
+  markWorkerReady,
+  prepareWorkerReadiness,
+} from "./readiness.js";
 
+const readinessFile = process.env.WORKER_READY_FILE ?? "/tmp/novel-worker.ready";
+await prepareWorkerReadiness(readinessFile);
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is required");
 
@@ -73,9 +81,13 @@ const worker = new JobWorker({
   queryConcurrency: queryConfig.queryConcurrency,
 });
 
-const shutdown = createCoordinatedShutdown({
+const shutdownResources = createCoordinatedShutdown({
   stopWorker: () => worker.stop(),
   destroyDatabase: () => destroyDatabase(database),
+});
+const shutdown = createReadinessAwareShutdown({
+  clearReadiness: () => clearWorkerReadiness(readinessFile),
+  stopResources: shutdownResources,
 });
 
 function handleShutdownSignal(): void {
@@ -98,6 +110,7 @@ installBossErrorShutdown({
 
 try {
   await worker.start();
+  await markWorkerReady(readinessFile);
 } catch (startupError) {
   try {
     await shutdown();

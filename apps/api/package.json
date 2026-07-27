@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "bootstrap:first-admin": "node --import tsx src/bootstrap-admin-main.ts",
     "start": "node --import tsx src/main.ts",
     "test": "vitest run --root ../.. apps/api/src",
     "typecheck": "tsc -p tsconfig.json"

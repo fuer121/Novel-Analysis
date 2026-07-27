@@ -1,6 +1,6 @@
 import { createContentCipher, createDatabase, destroyDatabase } from "@novel-analysis/database";
 
-import { createApp } from "./app.js";
+import { createDeploymentApp } from "./deployment-app.js";
 import { loadApiConfig } from "./config.js";
 import { FeishuHttpOAuthAdapter } from "./auth/feishu-http-adapter.js";
 
@@ -27,13 +27,14 @@ const port = Number(process.env.PORT ?? "3001");
 if (!Number.isInteger(port) || port < 1 || port > 65_535) throw new Error("PORT is invalid");
 
 const database = createDatabase(databaseUrl);
-const app = createApp({
+const app = createDeploymentApp({
   database,
   config: loadApiConfig(process.env),
   feishu: new FeishuHttpOAuthAdapter({ appId: feishuAppId, appSecret: feishuAppSecret }),
   contentCipher: createContentCipher({ activeKeyVersion: contentKeyVersion, keys: { [contentKeyVersion]: decodedContentKey } }),
   queryHmacKey: decodedContentHmacKey,
   advancedAnalysisExecutionConfig: { model: analysisModel, reasoningEffort: analysisReasoningEffort, executorVersion: analysisExecutorVersion },
+  webStaticDir: process.env.WEB_STATIC_DIR,
 });
 const server = app.listen(port);
 

@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "healthcheck": "node --import tsx src/readiness-healthcheck.ts",
     "start": "node --import tsx src/main.ts",
     "test": "vitest run --root ../.. apps/worker/src",
     "typecheck": "tsc -p tsconfig.json"
