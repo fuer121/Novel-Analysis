@@ -1,11 +1,11 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 58
+source_version: 59
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-27T15:11:07+08:00
+updated_at: 2026-07-27T15:19:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v6-blocked
+current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v6-blocked-disposition
 last_checkpoint: CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-DEADLINE-CUSTODY-SCHEDULED
 next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION
 ---
@@ -186,17 +186,19 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 - V6独立规格与质量pre-cleanup review均为failed，并确认post-publication failure缺少真实orchestration recovery或deadline-cleanup路径的consolidated Important finding
 - V6两项failed verdict已由frozen registrar登记；三项`0400` raw sinks、sealed custody anchor与private reference必须保持custody至`2026-07-28T14:51:53.003+08:00`，deadline到达时通过frozen path exact-target cleanup并保持`BLOCKED`
 - V6 blocked result已通过PR #237合并并完成post-merge verification；既有custody heartbeat保持V2首次schedule不变，并在V2、V3、V4与V5 durable cleanup后顺序恢复V6 deadline cleanup
+- V6 blocked disposition已提交synthetic-only V7 correction contract，仅关闭attempt-zero fixture eligibility与post-publication frozen orchestration recovery两个finding；在named confirmation前不得启动V7
 
 ## Pending Feedback
 
-Controller protocol correction V6结果为`BLOCKED`且deadline custody已顺序调度；等待提交独立V6 blocked disposition，deadline前不得cleanup或补跑
+Controller protocol correction V6为`BLOCKED`且deadline custody已顺序调度；V6 blocked disposition Gate已submitted，等待用户named confirmation，deadline前不得cleanup或补跑
 
 ## Next Gate
 
-下一步只允许保持V2、V3、V4、V5与V6 raw custody并提交`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION`；不得自动启动V7或新的read-only snapshot diagnostic Gate，真实config或snapshot访问、read-only diagnostic、目标服务器演练、真实retry、飞书UAT、部署与切换继续locked
+下一步只允许保持V2、V3、V4、V5与V6 raw custody并等待用户明确接受`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION`；在named confirmation前不得启动V7或新的read-only snapshot diagnostic Gate，真实config或snapshot访问、read-only diagnostic、目标服务器演练、真实retry、飞书UAT、部署与切换继续locked
 
 ## Evidence Index
 
+- [Phase 5 read-only snapshot diagnostic controller protocol correction V6 blocked disposition submitted](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V6 deadline custody scheduled](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-DEADLINE-CUSTODY-SCHEDULED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V6 blocked](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V5 blocked disposition accepted](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V5-BLOCKED-DISPOSITION-ACCEPTED.md)
