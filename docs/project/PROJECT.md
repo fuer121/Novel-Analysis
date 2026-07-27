@@ -1,11 +1,11 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 65
+source_version: 66
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-27T19:02:03+08:00
+updated_at: 2026-07-27T19:11:18+08:00
 updated_by: controller-agent
-current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v8-blocked-disposition
+current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v8-blocked-disposition-submitted
 last_checkpoint: CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED
 next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED-DISPOSITION
 ---
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Controller protocol correction V8 blocked | V8双pre-cleanup review failed；V2至V8 custody及所有真实操作保持locked |
+| Phase 5 | Controller protocol correction V8 blocked disposition submitted | V9 synthetic-only contract待用户exact named confirmation；V2至V8 custody及所有真实操作保持locked |
 
 ## Active Work
 
@@ -70,6 +70,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7 | phase-5 | Close fixture eligibility and frozen orchestration recovery findings using synthetic inputs only | controller-agent | repository-external protocol V7 | 37356c54231caa1d2bb0c449f86ca3057065a0bd | 37356c54231caa1d2bb0c449f86ca3057065a0bd | blocked | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CUSTODY-SCHEDULED | preserve V2-V7 sequential deadline custody and submit a separate V7 blocked disposition; no cleanup or rerun |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V8 correction contract for the two blocking V7 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v8-gate-accepted | b97cf3919660899f860fb9d689d85ff94c1abe42 | b97cf3919660899f860fb9d689d85ff94c1abe42 | accepted | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CUSTODY-SCHEDULED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only V8 correction |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8 | phase-5 | Close pre-mutation clock and frozen harness dependency findings using synthetic inputs only | controller-agent | repository-external protocol V8 | b97cf3919660899f860fb9d689d85ff94c1abe42 | b97cf3919660899f860fb9d689d85ff94c1abe42 | blocked | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED | preserve V2-V8 sequential deadline custody and submit a separate V8 blocked disposition; no cleanup or rerun |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V9 correction contract for the three blocking V8 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v9-gate-submitted | b6109b743878eab6b0a217c3ba55aa1212ae5b41 | b6109b743878eab6b0a217c3ba55aa1212ae5b41 | ready | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED-DISPOSITION-SUBMITTED | await exact named user confirmation; V9 remains locked |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
