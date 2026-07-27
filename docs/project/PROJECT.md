@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 69
+source_version: 70
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-28T00:09:09+08:00
+updated_at: 2026-07-28T00:30:00+08:00
 updated_by: controller-agent
 current_phase: phase-5-deployment-readiness-correction-blocked
-last_checkpoint: CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED
+last_checkpoint: CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-DEADLINE-CLEANUP-BLOCKED
 next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
 ---
 
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Deployment readiness correction blocked | Production Router仍有2个high findings；synthetic smoke未启动；V9、V3至V8 custody与所有真实操作保持locked |
+| Phase 5 | Deployment readiness correction blocked | Production Router仍有2个high findings；synthetic smoke未启动；V9、V4至V8 custody与所有真实操作保持locked |
 
 ## Active Work
 
@@ -59,7 +59,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V2 correction contract for all blocking protocol findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v2-gate-accepted | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | c842d0c9c1e4db1e146fbe1720dd16aa2c183462 | accepted | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-BLOCKED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED | start synthetic-only V2 correction |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2 | phase-5 | Close all blocking controller protocol findings using synthetic inputs only | controller-agent | codex/phase5-v2-deadline-cleanup | 991db86faace6ae756008bf600c582f7cc92db40 | 991db86faace6ae756008bf600c582f7cc92db40 | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-GATE-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-DEADLINE-CLEANUP-BLOCKED | deadline cleanup与五维fresh absence已完成；保持blocked且不得补跑 |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V3 correction contract for the two blocking V2 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v3-gate-accepted | a8df0a3edcd5879784ad22ebfa263f105c0b45d8 | a8df0a3edcd5879784ad22ebfa263f105c0b45d8 | accepted | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-DEADLINE-CUSTODY-SCHEDULED | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only V3 correction |
-| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3 | phase-5 | Close deadline validation and raw seal ordering findings using synthetic inputs only | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v3-custody-checkpoint | a8df0a3edcd5879784ad22ebfa263f105c0b45d8 | ae604cd98413c4f85b7063c142e9fe28b287030b | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-DEADLINE-CUSTODY-SCHEDULED | preserve V3 raw custody through scheduled hard-deadline cleanup and request a separate blocked disposition; no cleanup or rerun |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3 | phase-5 | Close deadline validation and raw seal ordering findings using synthetic inputs only | controller-agent | codex/phase5-v3-deadline-cleanup | 22745e15dc0a1ed281ce86069a483b280e01c89e | 22745e15dc0a1ed281ce86069a483b280e01c89e | blocked | CP-20260726-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-BLOCKED-DISPOSITION-ACCEPTED | CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-DEADLINE-CLEANUP-BLOCKED | deadline cleanup与五维fresh absence已完成；保持blocked且不得补跑 |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V4 correction contract for the three blocking V3 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v4-gate-accepted | b273ffa4be393e6bd432f3f1c79936b0cde6713e | b273ffa4be393e6bd432f3f1c79936b0cde6713e | accepted | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-DEADLINE-CUSTODY-SCHEDULED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only V4 correction |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4 | phase-5 | Close canonical deadline, raw seal postcondition and all-path ordering findings using synthetic inputs only | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v4-custody-checkpoint | 95d4424dc47236d051d8b8601cde6e6879086fd5 | 6beb00c7b66ec60c74e8d912b8dfb20a254cdfc7 | blocked | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-BLOCKED-DISPOSITION-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4-DEADLINE-CUSTODY-SCHEDULED | preserve V2/V3/V4 sequential deadline custody and request a separate blocked disposition; no cleanup or rerun |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V5 correction contract for the four blocking V4 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v5-gate-accepted | f7914d557708c773b3f8ebd3817927dec19320cf | 47870ceefe88f48b4b37e8083c1d361867b2941f | accepted | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4-DEADLINE-CUSTODY-SCHEDULED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only V5 correction |
@@ -181,6 +181,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
 - Controller protocol correction V3已通过`63/63` accepted baseline、`50/50` focused protocol、exact 13-file frozen identity与唯一synthetic exit `0`，但独立规格与质量pre-cleanup review发现canonical deadline、raw seal postcondition与prepared-deadline ordering三个consolidated Important findings
 - V3两项failed verdict已由frozen registrar登记；三项exact-zero `0400` raw sinks与private reference必须保持custody至`2026-07-28T00:12:36.047+08:00`，deadline到达时无条件exact-target cleanup并保持`BLOCKED`
 - V3 blocked result已通过PR #224合并并完成post-merge verification；既有V2 heartbeat保持原deadline执行，并在V2 durable cleanup后顺序重排为V3 deadline cleanup
+- V3 hard custody deadline到达后已通过sealed frozen wrapper销毁exact三项raw targets与private reference，五维fresh absence及frozen identity unchanged通过；V3继续`BLOCKED`且未启动post-cleanup approval review
 - V3 blocked disposition已提交synthetic-only V4 correction contract，仅关闭canonical deadline、raw seal postcondition与prepared-at-deadline ordering三个finding；在named confirmation前不得启动V4
 - 用户已明确接受V3 blocked disposition Gate；仅repository-external synthetic-only V4 correction已解锁，V2与V3 custody、真实输入、runtime、UAT、部署与切换继续locked
 - 用户已明确接受V4 blocked disposition Gate；仅repository-external synthetic-only V5 correction已解锁，V2、V3与V4 custody、真实输入、runtime、UAT、部署与切换继续locked
@@ -214,6 +215,7 @@ Deployment readiness correction因production Router仍有2个high findings而`BL
 
 - [Phase 5 deployment readiness correction blocked](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED.md)
 - [Phase 5 deployment readiness correction Gate accepted](checkpoints/CP-20260727-PHASE5-DEPLOYMENT-READINESS-CORRECTION-GATE-ACCEPTED.md)
+- [Phase 5 read-only snapshot diagnostic controller protocol correction V3 deadline cleanup blocked](checkpoints/CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-DEADLINE-CLEANUP-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V2 deadline cleanup blocked](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V2-DEADLINE-CLEANUP-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V7 blocked disposition accepted](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION-ACCEPTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V7 blocked disposition submitted](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION-SUBMITTED.md)
