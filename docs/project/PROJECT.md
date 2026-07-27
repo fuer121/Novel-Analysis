@@ -1,11 +1,11 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 62
+source_version: 63
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-27T17:26:28+08:00
+updated_at: 2026-07-27T17:32:08+08:00
 updated_by: controller-agent
-current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v7
+current_phase: phase-5-readonly-snapshot-diagnostic-controller-protocol-correction-v7-blocked-disposition
 last_checkpoint: CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CUSTODY-SCHEDULED
 next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION
 ---
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Controller protocol correction V7 blocked / custody scheduled | V2至V7 sequential hard-deadline cleanup已调度；真实config、snapshot、diagnostic、UAT、部署及retry保持locked |
+| Phase 5 | Controller protocol correction V7 blocked disposition submitted | Synthetic-only V8 contract等待named confirmation；V2至V7 custody及所有真实操作保持locked |
 
 ## Active Work
 
@@ -68,6 +68,7 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6 | phase-5 | Close mandatory clock, atomic custody publication and deadline cleanup availability findings using synthetic inputs only | controller-agent | repository-external protocol V6 | d73cfe9af9a383b3ce972dac7a0ae61075978bed | d73cfe9af9a383b3ce972dac7a0ae61075978bed | blocked | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V5-BLOCKED-DISPOSITION-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-DEADLINE-CUSTODY-SCHEDULED | preserve V2-V6 sequential deadline custody and submit a separate V6 blocked disposition; no cleanup or rerun |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V7 correction contract for the two blocking V6 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v7-gate-accepted | 37356c54231caa1d2bb0c449f86ca3057065a0bd | 37356c54231caa1d2bb0c449f86ca3057065a0bd | accepted | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-DEADLINE-CUSTODY-SCHEDULED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION-ACCEPTED | start synthetic-only V7 correction |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7 | phase-5 | Close fixture eligibility and frozen orchestration recovery findings using synthetic inputs only | controller-agent | repository-external protocol V7 | 37356c54231caa1d2bb0c449f86ca3057065a0bd | 37356c54231caa1d2bb0c449f86ca3057065a0bd | blocked | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CUSTODY-SCHEDULED | preserve V2-V7 sequential deadline custody and submit a separate V7 blocked disposition; no cleanup or rerun |
+| PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V8 correction contract for the two blocking V7 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v8-gate-submitted | 31edb977995817c7acb7ecafd3213659c42013b7 | 31edb977995817c7acb7ecafd3213659c42013b7 | blocked | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CUSTODY-SCHEDULED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION-SUBMITTED | await exact named user confirmation; do not start V8 |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -194,17 +195,19 @@ next_gate: GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTI
 - V7独立规格review从frozen identity只能复现`6/16` focused，质量review确认rollback clock在custody mutation后才被拒绝；两项均为Important且blocking
 - V7两项failed verdict已由frozen registrar登记；三项`0400` raw sinks、sealed custody context、sealed custody anchor与private reference必须保持custody至`2026-07-28T17:07:17.937+08:00`
 - V7 blocked result已通过PR #241合并并完成post-merge verification；既有custody heartbeat保持V2首次schedule不变，并在V2至V6 durable cleanup后顺序恢复V7 deadline cleanup
+- V7 blocked disposition已提交synthetic-only V8 correction contract，仅关闭pre-mutation rollback clock rejection与hermetic frozen harness dependency resolution两个finding；在named confirmation前不得启动V8
 
 ## Pending Feedback
 
-Controller protocol correction V7结果为`BLOCKED`且deadline custody已接续，等待独立blocked disposition；不得自动启动V8
+Controller protocol correction V7为`BLOCKED`且deadline custody已顺序调度；V7 blocked disposition Gate已submitted，等待用户named confirmation，deadline前不得cleanup或补跑
 
 ## Next Gate
 
-下一步只允许提交独立`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION`；不得自动启动V8或提交新的read-only snapshot diagnostic Gate，真实config或snapshot访问、read-only diagnostic、目标服务器演练、真实retry、飞书UAT、部署与切换继续locked
+下一步只允许保持V2至V7 raw custody并等待用户明确接受`GATE-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION`；在named confirmation前不得启动V8或新的read-only snapshot diagnostic Gate，真实config或snapshot访问、read-only diagnostic、目标服务器演练、真实retry、飞书UAT、部署与切换继续locked
 
 ## Evidence Index
 
+- [Phase 5 read-only snapshot diagnostic controller protocol correction V7 blocked disposition submitted](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION-SUBMITTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V7 deadline custody scheduled](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CUSTODY-SCHEDULED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V7 blocked](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V6 blocked disposition accepted](checkpoints/CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-BLOCKED-DISPOSITION-ACCEPTED.md)
