@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 73
+source_version: 74
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-28T09:56:25+08:00
+updated_at: 2026-07-28T10:22:00+08:00
 updated_by: controller-agent
-current_phase: phase-5-controller-protocol-v4-deadline-cleanup-blocked
-last_checkpoint: CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4-DEADLINE-CLEANUP-BLOCKED
-next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESUME
+current_phase: phase-5-deployment-readiness-synthetic-smoke-gate-accepted
+last_checkpoint: CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-GATE-ACCEPTED
+next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESULT
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESUME
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Router security correction accepted；V4 deadline cleanup complete and blocked | production critical/high已归零；synthetic smoke未启动；V9、V5至V8 custody与所有真实操作保持locked |
+| Phase 5 | Synthetic deployment smoke Gate accepted；V4 deadline cleanup complete and blocked | 仅repository-only synthetic smoke已解锁；V9、V5至V8 custody与所有真实操作保持locked |
 
 ## Active Work
 
@@ -73,6 +73,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESUME
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V9 correction contract for the three blocking V8 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v9-gate-submitted | b6109b743878eab6b0a217c3ba55aa1212ae5b41 | b6109b743878eab6b0a217c3ba55aa1212ae5b41 | ready | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED-DISPOSITION-SUBMITTED | await exact named user confirmation; V9 remains locked |
 | PHASE5-DEPLOYMENT-READINESS-CORRECTION | phase-5 | Close six bounded repository deployment-readiness gaps without external runtime access | controller-agent | codex/phase5-deployment-readiness-correction | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | blocked | CP-20260727-PHASE5-DEPLOYMENT-READINESS-CORRECTION-GATE-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED | request bounded Router security disposition; no deployment |
 | PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION | phase-5 | Replace vulnerable Web Router dependency with a bounded internal module while preserving current navigation semantics | controller-agent | codex/phase5-router-security-correction | 8acdfdd4696e50a9d62e40a65e1ccfd3bf644e72 | 0cbbd4cc324ea930ec00ff61bf9885750a5f3bf0 | accepted | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-ACCEPTED | request named synthetic deployment smoke resume Gate; no smoke or deployment |
+| PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE | phase-5 | Verify committed deployment artifacts and local synthetic runtime without external access | controller-agent | codex/phase5-deployment-readiness-synthetic-smoke-gate-accepted | 3524da696eaa9e599529d8353a1b9fd5be199bfa | 3524da696eaa9e599529d8353a1b9fd5be199bfa | ready | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-GATE-ACCEPTED | execute strict TDD repository-only synthetic smoke |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -207,17 +208,19 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESUME
 - Router security correction已移除`react-router`与`react-router-dom`生产依赖，保持现有navigation语义并通过`73/73` Web tests、完整repository验证与独立双审
 - Fresh production audit为`0 critical / 0 high / 1 moderate / 1 low`，Router production tree与source import均为零
 - Router correction result已接受；synthetic deployment smoke仍未启动，V9、V5至V8 custody、目标服务器、UAT、部署与切换继续locked
+- 用户已明确接受synthetic smoke resume Gate；只解锁repository-only smoke，所有真实输入、runtime、目标服务器、UAT、部署与切换继续locked
 
 ## Pending Feedback
 
-Router security correction result已接受；等待`GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESUME`的named user decision，V9与所有真实操作保持locked
+Synthetic smoke resume Gate已接受；等待repository-only strict TDD实现与result checkpoint，V9与所有真实操作保持locked
 
 ## Next Gate
 
-下一Gate为`GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESUME`；named confirmation只能恢复原accepted deployment-readiness correction中的repository-only synthetic smoke，不得访问Docker daemon、真实config、credentials、database、网络服务、目标服务器或部署环境，也不得自动进入UAT、Deployment Gate、真实部署或切换
+下一Gate为`GATE-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-RESULT`；只有repository-only smoke、完整验证与审查均无Critical、Important或阻塞finding时才能提交accepted result，不得自动进入目标服务器演练、UAT、Deployment Gate、真实部署或切换
 
 ## Evidence Index
 
+- [Phase 5 deployment readiness synthetic smoke Gate accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-GATE-ACCEPTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V4 deadline cleanup blocked](checkpoints/CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4-DEADLINE-CLEANUP-BLOCKED.md)
 - [Phase 5 deployment readiness Router security correction accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-ACCEPTED.md)
 - [Phase 5 deployment readiness Router security disposition accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION-ACCEPTED.md)
