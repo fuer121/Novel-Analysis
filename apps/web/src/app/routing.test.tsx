@@ -4,7 +4,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { Link, RouterRoot, useLocation } from "./routing.js";
+import { Link, NavLink, RouterRoot, useLocation } from "./routing.js";
 
 function BrowserProbe() {
   const location = useLocation();
@@ -52,5 +52,15 @@ describe("browser history routing", () => {
         <Link to={target}>不安全目标</Link>
       </RouterRoot>,
     )).toThrow("internal_navigation_required");
+  });
+
+  it.each(["/BOOKS", "/%62OOKS"])("matches decoded active links case-insensitively: %s", (path) => {
+    render(
+      <RouterRoot initialEntries={[path]}>
+        <NavLink to="/books">书库</NavLink>
+      </RouterRoot>,
+    );
+
+    expect(screen.getByRole("link", { name: "书库" }).getAttribute("aria-current")).toBe("page");
   });
 });

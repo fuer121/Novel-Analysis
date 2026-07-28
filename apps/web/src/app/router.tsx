@@ -25,6 +25,10 @@ const bookTabs: Record<string, ReactNode> = {
   analysis: <AdvancedAnalysisPage />,
 };
 
+function bookTab(segment: string): ReactNode | undefined {
+  return Object.hasOwn(bookTabs, segment) ? bookTabs[segment] : undefined;
+}
+
 function UnknownPage() {
   return (
     <main className="centered-state">
@@ -48,7 +52,7 @@ function protectedRoute(element: ReactNode) {
 
 function bookRoute(bookId: string, segment: string | undefined) {
   const basePath = `/books/${encodeURIComponent(bookId)}`;
-  const page = segment ? bookTabs[segment] : <Navigate to="overview" replace />;
+  const page = segment ? bookTab(segment) : <Navigate to="overview" replace />;
   if (!page) return <UnknownPage />;
   return protectedRoute(
     <RouteScope basePath={basePath} params={{ bookId }}>

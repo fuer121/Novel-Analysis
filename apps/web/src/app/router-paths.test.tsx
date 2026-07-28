@@ -59,3 +59,10 @@ it("renders the safe unknown route for malformed encoded parameters", () => {
   expect(screen.getByRole("heading", { name: "页面不存在" })).toBeTruthy();
   expect(screen.getByRole("link", { name: "返回任务中心" }).getAttribute("href")).toBe("/tasks");
 });
+
+it.each(["__proto__", "constructor"])("renders the safe unknown route for an undeclared inherited tab: %s", (tab) => {
+  renderPath(`/books/book-1/${tab}`);
+
+  expect(screen.getByRole("heading", { name: "页面不存在" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "返回任务中心" }).getAttribute("href")).toBe("/tasks");
+});

@@ -47,6 +47,14 @@ function parseLocation(value: string): LocationValue {
   return { pathname: url.pathname, search: url.search };
 }
 
+function comparablePath(pathname: string): string {
+  try {
+    return pathname.split("/").map((segment) => decodeURIComponent(segment).toLowerCase()).join("/");
+  } catch {
+    return pathname.toLowerCase();
+  }
+}
+
 function browserLocation(): LocationValue {
   return { pathname: window.location.pathname, search: window.location.search };
 }
@@ -188,7 +196,9 @@ export function NavLink({ className, ...props }: LinkProps) {
   const { basePath } = useContext(RouteContext);
   const href = resolveHref(props.to, basePath);
   const targetPath = parseLocation(href).pathname;
-  const active = pathname === targetPath || pathname.startsWith(`${targetPath}/`);
+  const currentComparable = comparablePath(pathname);
+  const targetComparable = comparablePath(targetPath);
+  const active = currentComparable === targetComparable || currentComparable.startsWith(`${targetComparable}/`);
   const classes = [className, active ? "active" : null].filter(Boolean).join(" ");
   return <Link {...props} className={classes || undefined} aria-current={active ? "page" : undefined} />;
 }
