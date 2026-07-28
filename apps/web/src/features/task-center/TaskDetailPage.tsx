@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "../../app/routing.js";
 
 import type { JobResponse, PublicJob } from "@novel-analysis/contracts";
 import { apiRead, apiWrite } from "../../shared/api.js";

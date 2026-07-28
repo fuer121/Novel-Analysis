@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { useParams } from "react-router-dom";
+import { useParams } from "../../app/routing.js";
 import { apiRead } from "../../shared/api.js";
 import type { IndexCoverage } from "./types.js";
 import { CoverageStrip } from "./ScopePreview.js";

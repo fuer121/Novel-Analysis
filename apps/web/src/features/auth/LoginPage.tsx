@@ -1,4 +1,4 @@
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useSearchParams } from "../../app/routing.js";
 import { safeReturnTo } from "./return-to.js";
 
 export function LoginPage() {

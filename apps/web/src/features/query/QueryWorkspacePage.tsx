@@ -1,7 +1,7 @@
 import type { QuerySession } from "@novel-analysis/contracts";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useOutletContext, useSearchParams } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "../../app/routing.js";
 
 import { ApiError, apiRead } from "../../shared/api.js";
 import type { BookSummary, IndexGroup } from "../library/types.js";

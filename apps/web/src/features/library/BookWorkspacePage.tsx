@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import { NavLink, Navigate, Outlet, useParams } from "react-router-dom";
+import { NavLink, Navigate, Outlet, useParams } from "../../app/routing.js";
 
 import { apiRead } from "../../shared/api.js";
 import type { BookAnalysisReadiness, BookSummary } from "./types.js";

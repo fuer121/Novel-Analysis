@@ -5,7 +5,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event";
 import { readFileSync } from "node:fs";
 import { URL as NodeUrl } from "node:url";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter } from "../../app/routing.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "../../app/AppShell.js";

@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookOpen, Plus } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "../../app/routing.js";
 
 import { apiRead, apiWrite } from "../../shared/api.js";
 import type { BookSummary } from "./types.js";

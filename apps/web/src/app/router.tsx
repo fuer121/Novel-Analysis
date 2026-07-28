@@ -1,11 +1,4 @@
-import { useMemo } from "react";
-import {
-  createBrowserRouter,
-  createMemoryRouter,
-  Navigate,
-  RouterProvider,
-  type RouteObject,
-} from "react-router-dom";
+import type { ReactNode } from "react";
 
 import { AdminMembersPage } from "../features/admin/AdminMembersPage.js";
 import { AdvancedAnalysisPage } from "../features/analysis/AdvancedAnalysisPage.js";
@@ -21,45 +14,90 @@ import { L2Panel } from "../features/library/L2Panel.js";
 import { LibraryPage } from "../features/library/LibraryPage.js";
 import { QueryWorkspacePage } from "../features/query/QueryWorkspacePage.js";
 import { AppShell } from "./AppShell.js";
+import { Navigate, OutletSlot, RouterRoot, RouteScope, useLocation } from "./routing.js";
 
-const routes: RouteObject[] = [
-  { path: "/login", element: <LoginPage /> },
-  { path: "/auth/complete", element: <AuthCompletePage /> },
-  {
-    element: <AppShell />,
-    children: [
-      { path: "/books", element: <LibraryPage /> },
-      { path: "/books/:bookId", element: <BookWorkspacePage />, children: [
-        { index: true, element: <Navigate to="overview" replace /> },
-        { path: "overview", element: <BookOverview /> },
-        { path: "import", element: <ImportPanel /> },
-        { path: "l1", element: <L1Panel /> },
-        { path: "l2", element: <L2Panel /> },
-        { path: "query", element: <QueryWorkspacePage /> },
-        { path: "analysis", element: <AdvancedAnalysisPage /> },
-      ] },
-      { path: "/tasks", element: <TaskCenterPage /> },
-      { path: "/tasks/:id", element: <TaskDetailPage /> },
-      { path: "/admin/members", element: <AdminMembersPage /> },
-    ],
-  },
-  {
-    path: "*",
-    element: (
-      <main className="centered-state">
-        <div>
-          <h1>页面不存在</h1>
-          <a className="primary-button" href="/tasks">返回任务中心</a>
-        </div>
-      </main>
-    ),
-  },
-];
+const bookTabs: Record<string, ReactNode> = {
+  overview: <BookOverview />,
+  import: <ImportPanel />,
+  l1: <L1Panel />,
+  l2: <L2Panel />,
+  query: <QueryWorkspacePage />,
+  analysis: <AdvancedAnalysisPage />,
+};
+
+function UnknownPage() {
+  return (
+    <main className="centered-state">
+      <div>
+        <h1>页面不存在</h1>
+        <a className="primary-button" href="/tasks">返回任务中心</a>
+      </div>
+    </main>
+  );
+}
+
+function protectedRoute(element: ReactNode) {
+  return (
+    <RouteScope basePath="/">
+      <OutletSlot element={element}>
+        <AppShell />
+      </OutletSlot>
+    </RouteScope>
+  );
+}
+
+function bookRoute(bookId: string, segment: string | undefined) {
+  const basePath = `/books/${encodeURIComponent(bookId)}`;
+  const page = segment ? bookTabs[segment] : <Navigate to="overview" replace />;
+  if (!page) return <UnknownPage />;
+  return protectedRoute(
+    <RouteScope basePath={basePath} params={{ bookId }}>
+      <OutletSlot element={page}>
+        <BookWorkspacePage />
+      </OutletSlot>
+    </RouteScope>,
+  );
+}
+
+function Routes() {
+  const { pathname } = useLocation();
+  const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
+
+  if (normalized === "/login") return <LoginPage />;
+  if (normalized === "/auth/complete") return <AuthCompletePage />;
+  if (normalized === "/books") return protectedRoute(<LibraryPage />);
+  if (normalized === "/tasks") return protectedRoute(<TaskCenterPage />);
+  if (normalized === "/admin/members") return protectedRoute(<AdminMembersPage />);
+
+  const task = normalized.match(/^\/tasks\/([^/]+)$/);
+  if (task) {
+    try {
+      return protectedRoute(
+        <RouteScope basePath={normalized} params={{ id: decodeURIComponent(task[1]!) }}>
+          <TaskDetailPage />
+        </RouteScope>,
+      );
+    } catch {
+      return <UnknownPage />;
+    }
+  }
+
+  const book = normalized.match(/^\/books\/([^/]+)(?:\/([^/]+))?$/);
+  if (book) {
+    try {
+      return bookRoute(decodeURIComponent(book[1]!), book[2]);
+    } catch {
+      return <UnknownPage />;
+    }
+  }
+
+  return <UnknownPage />;
+}
 
 export function AppRouter({ initialEntries }: { initialEntries?: string[] }) {
-  const router = useMemo(
-    () => initialEntries ? createMemoryRouter(routes, { initialEntries }) : createBrowserRouter(routes),
-    [initialEntries],
+  return (
+    <RouterRoot initialEntries={initialEntries}>
+      <Routes />
+    </RouterRoot>
   );
-  return <RouterProvider router={router} />;
 }
