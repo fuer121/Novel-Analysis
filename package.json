@@ -35,6 +35,7 @@
     "test:phase4:e2e": "TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/postgres vitest run --config vitest.phase4.config.ts",
     "test:phase5": "TEST_DATABASE_URL=postgres://novel:novel_dev_only@127.0.0.1:55432/postgres vitest run --config vitest.phase5.config.ts",
     "phase5:preflight": "node scripts/phase5-preflight.mjs",
+    "phase5:deployment:smoke": "vitest run --config vitest.deployment.config.ts",
     "phase5:acceptance": "node scripts/phase5-acceptance.mjs",
     "phase5:stage:build": "node scripts/phase5-rehearsal-stage/build.mjs",
     "phase5:stage:check": "npm run typecheck:phase5:stage && node scripts/phase5-rehearsal-stage/check-artifact.mjs",
