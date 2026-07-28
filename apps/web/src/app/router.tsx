@@ -62,33 +62,31 @@ function bookRoute(bookId: string, segment: string | undefined) {
 function Routes() {
   const { pathname } = useLocation();
   const normalized = pathname.length > 1 ? pathname.replace(/\/+$/, "") : pathname;
-
-  if (normalized === "/login") return <LoginPage />;
-  if (normalized === "/auth/complete") return <AuthCompletePage />;
-  if (normalized === "/books") return protectedRoute(<LibraryPage />);
-  if (normalized === "/tasks") return protectedRoute(<TaskCenterPage />);
-  if (normalized === "/admin/members") return protectedRoute(<AdminMembersPage />);
-
-  const task = normalized.match(/^\/tasks\/([^/]+)$/);
-  if (task) {
-    try {
-      return protectedRoute(
-        <RouteScope basePath={normalized} params={{ id: decodeURIComponent(task[1]!) }}>
-          <TaskDetailPage />
-        </RouteScope>,
-      );
-    } catch {
-      return <UnknownPage />;
-    }
+  let segments: string[];
+  try {
+    segments = normalized.split("/").slice(1).map((segment) => decodeURIComponent(segment));
+  } catch {
+    return <UnknownPage />;
   }
 
-  const book = normalized.match(/^\/books\/([^/]+)(?:\/([^/]+))?$/);
-  if (book) {
-    try {
-      return bookRoute(decodeURIComponent(book[1]!), book[2]);
-    } catch {
-      return <UnknownPage />;
-    }
+  const staticSegments = segments.map((segment) => segment.toLowerCase());
+  if (segments.length === 1 && staticSegments[0] === "login") return <LoginPage />;
+  if (segments.length === 2 && staticSegments[0] === "auth" && staticSegments[1] === "complete") return <AuthCompletePage />;
+  if (segments.length === 1 && staticSegments[0] === "books") return protectedRoute(<LibraryPage />);
+  if (segments.length === 1 && staticSegments[0] === "tasks") return protectedRoute(<TaskCenterPage />);
+  if (segments.length === 2 && staticSegments[0] === "admin" && staticSegments[1] === "members") return protectedRoute(<AdminMembersPage />);
+
+  if (segments.length === 2 && staticSegments[0] === "tasks") {
+    const id = segments[1]!;
+    return protectedRoute(
+      <RouteScope basePath={`/tasks/${encodeURIComponent(id)}`} params={{ id }}>
+        <TaskDetailPage />
+      </RouteScope>,
+    );
+  }
+
+  if ((segments.length === 2 || segments.length === 3) && staticSegments[0] === "books") {
+    return bookRoute(segments[1]!, staticSegments[2]);
   }
 
   return <UnknownPage />;

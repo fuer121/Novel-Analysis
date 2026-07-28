@@ -52,9 +52,15 @@ function browserLocation(): LocationValue {
 }
 
 function resolveHref(to: string, basePath: string): string {
+  const target = to.trimStart();
+  if (/^[a-z][a-z\d+.-]*:/i.test(target) || target.startsWith("//")) {
+    throw new Error("internal_navigation_required");
+  }
   const base = basePath.endsWith("/") ? basePath : `${basePath}/`;
   const url = new URL(to, `${internalOrigin}${base}`);
-  if (url.origin !== internalOrigin) throw new Error("internal_navigation_required");
+  if (url.protocol !== "http:" || url.origin !== internalOrigin) {
+    throw new Error("internal_navigation_required");
+  }
   return `${url.pathname}${url.search}${url.hash}`;
 }
 

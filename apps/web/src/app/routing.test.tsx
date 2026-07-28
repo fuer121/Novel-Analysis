@@ -42,6 +42,9 @@ describe("browser history routing", () => {
 
   it.each([
     "javascript:alert(1)",
+    "blob:http://internal-router/path",
+    "http://internal-router/path",
+    "//internal-router/path",
     "https://outside.example/tasks",
   ])("rejects a non-internal navigation target: %s", (target) => {
     expect(() => render(
