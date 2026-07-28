@@ -230,7 +230,7 @@ Result Gate接受前，任何migration、capacity、server profile、report、ma
 - Fresh base与branch HEAD均为`18b686e75d7ae3753e0739ab4966c0f534667438`，隔离worktree除本checkpoint外无其他task-owned修改
 - Public committed records只包含fresh enrollment要求、旧target不可继承边界与既有migration、capacity、custody约束，没有可绑定的新target asset reference、Owner、Approver、window、isolation、server profile或custody enrollment
 - 本submission的future review binding为checkpoint ID、branch、base/head SHA、accepted disposition与exact atomic case inventory；future frozen contract manifest尚未创建，不能被本submission推断或接受
-- Exact atomic case inventory为`132`个unique IDs，其中`131`个failure IDs与`1`个success-state ID `PUBLICATION_VALID`
+- Exact atomic case inventory为`133`个unique IDs，其中`132`个failure IDs与`1`个success-state ID `PUBLICATION_VALID`
 - Independent specification与quality review尚未对committed submission形成最终verdict，不能由草案review或本文本推断
 - Future review只允许验证本BLOCKED contract文档，不构成future pre-Gate synthetic matrix执行；全部真实execution与全部future synthetic case run均未启动
 - `npm run test:project-source`在本submission形成前为`42/42 PASS`，untracked file通过explicit no-index whitespace validation
