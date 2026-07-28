@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 75
+source_version: 76
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-28T10:38:45+08:00
+updated_at: 2026-07-28T10:56:11+08:00
 updated_by: controller-agent
-current_phase: phase-5-deployment-readiness-synthetic-smoke-accepted
-last_checkpoint: CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-ACCEPTED
-next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION
+current_phase: phase-5-deployment-readiness-target-server-rehearsal-disposition-accepted
+last_checkpoint: CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION-ACCEPTED
+next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Synthetic deployment smoke accepted；V4 deadline cleanup complete and blocked | repository-only deployment readiness已通过；V9、V5至V8 custody与所有真实操作保持locked |
+| Phase 5 | Target-server rehearsal disposition accepted；V4 deadline cleanup complete and blocked | 只解锁repository-only rehearsal contract准备；V9、V5至V8 custody与所有真实操作保持locked |
 
 ## Active Work
 
@@ -74,6 +74,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION
 | PHASE5-DEPLOYMENT-READINESS-CORRECTION | phase-5 | Close six bounded repository deployment-readiness gaps without external runtime access | controller-agent | codex/phase5-deployment-readiness-correction | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | blocked | CP-20260727-PHASE5-DEPLOYMENT-READINESS-CORRECTION-GATE-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED | request bounded Router security disposition; no deployment |
 | PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION | phase-5 | Replace vulnerable Web Router dependency with a bounded internal module while preserving current navigation semantics | controller-agent | codex/phase5-router-security-correction | 8acdfdd4696e50a9d62e40a65e1ccfd3bf644e72 | 0cbbd4cc324ea930ec00ff61bf9885750a5f3bf0 | accepted | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-ACCEPTED | request named synthetic deployment smoke resume Gate; no smoke or deployment |
 | PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE | phase-5 | Verify committed deployment artifacts and local synthetic runtime without external access | controller-agent | codex/phase5-deployment-readiness-synthetic-smoke-result | cabd90409f63626971c6c89b3cfab12b8eb9c3f3 | 86f486ebaf8424b90b5fdcfce2de8b436f9b9ffb | accepted | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-ACCEPTED | submit separate target-server rehearsal disposition Gate; no real operation |
+| PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-CONTRACT | phase-5 | Prepare a fresh target-identified rehearsal execution contract without external access | controller-agent | codex/phase5-target-server-rehearsal-disposition-accepted | 9a39849cf91e7b0ad76e3dd9474b02fcef69dccb | 9a39849cf91e7b0ad76e3dd9474b02fcef69dccb | accepted | CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION-ACCEPTED | prepare bounded contract and submit separate named execution Gate; no real operation |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -210,17 +211,19 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION
 - Router correction result已接受；synthetic deployment smoke仍未启动，V9、V5至V8 custody、目标服务器、UAT、部署与切换继续locked
 - 用户已明确接受synthetic smoke resume Gate；只解锁repository-only smoke，所有真实输入、runtime、目标服务器、UAT、部署与切换继续locked
 - Synthetic deployment smoke已通过`9/9`、完整repository验证、production critical/high归零与规格质量审查；真实目标服务器与后续操作仍locked
+- 用户已明确接受target-server rehearsal disposition Gate；只解锁repository-only的新contract准备，不复用旧blocked Gate、旧target decision或旧execution evidence
 
 ## Pending Feedback
 
-Synthetic smoke result已接受；等待`GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION`的named user decision，V9与所有真实操作保持locked
+Target-server rehearsal disposition已接受；当前只准备fresh target-identified execution contract，V9、V5至V8 custody与所有真实操作保持locked
 
 ## Next Gate
 
-下一Gate为`GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION`；named confirmation只能授权准备一个新的、有界且目标身份明确的rehearsal contract，不得复用既有blocked execution授权，不得自动读取真实输入、连接目标服务器、执行演练、UAT、Deployment Gate、真实部署或切换
+下一Gate为`GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION`；只能在新contract完成、target identity、Owner、Approver、window、isolation与custody全部明确并通过独立审查后提交，当前不得读取真实输入、连接目标服务器、执行演练、UAT、Deployment Gate、真实部署或切换
 
 ## Evidence Index
 
+- [Phase 5 deployment readiness target-server rehearsal disposition accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION-ACCEPTED.md)
 - [Phase 5 deployment readiness synthetic smoke accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-ACCEPTED.md)
 - [Phase 5 deployment readiness synthetic smoke Gate accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-GATE-ACCEPTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V4 deadline cleanup blocked](checkpoints/CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V4-DEADLINE-CLEANUP-BLOCKED.md)
