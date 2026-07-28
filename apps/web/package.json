@@ -13,8 +13,7 @@
     "@novel-analysis/contracts": "*",
     "@tanstack/react-query": "5.101.2",
     "react": "19.2.6",
-    "react-dom": "19.2.6",
-    "react-router-dom": "7.18.1"
+    "react-dom": "19.2.6"
   },
   "devDependencies": {
     "@testing-library/dom": "10.4.1",

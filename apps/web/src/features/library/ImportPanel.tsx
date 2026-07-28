@@ -1,4 +1,4 @@
-import { useParams } from "react-router-dom";
+import { useParams } from "../../app/routing.js";
 import { WritePanel } from "./WritePanel.js";
 
 export function ImportPanel() {

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { useOutletContext, useParams } from "react-router-dom";
+import { useOutletContext, useParams } from "../../app/routing.js";
 
 import { apiRead } from "../../shared/api.js";
 import { FactReview } from "./FactReview.js";

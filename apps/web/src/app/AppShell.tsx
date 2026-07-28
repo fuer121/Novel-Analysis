@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { BookOpen, ListTodo, Users } from "lucide-react";
-import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Outlet, useLocation, useNavigate } from "./routing.js";
 
 import { subscribeSessionExpired } from "../shared/api.js";
 import { useCurrentUser } from "../features/auth/useCurrentUser.js";

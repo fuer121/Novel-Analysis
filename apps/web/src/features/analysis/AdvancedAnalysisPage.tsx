@@ -2,7 +2,7 @@ import type { AnalysisMode, AnalysisRunDetail, AnalysisScopePreview, AnalysisTem
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { List, Plus } from "lucide-react";
 import { useCallback, useRef, useState, type FormEvent } from "react";
-import { useOutletContext, useSearchParams } from "react-router-dom";
+import { useOutletContext, useSearchParams } from "../../app/routing.js";
 
 import { ApiError, apiRead } from "../../shared/api.js";
 import type { BookSummary, IndexGroup } from "../library/types.js";

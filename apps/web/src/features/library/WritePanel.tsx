@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Eye, Play } from "lucide-react";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "../../app/routing.js";
 
 import type { PublicJob } from "@novel-analysis/contracts";
 import { ApiError, apiWrite } from "../../shared/api.js";

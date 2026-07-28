@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "../../app/routing.js";
 
 import { refreshCurrentUser } from "../../shared/api.js";
 import { currentUserKey } from "./useCurrentUser.js";
