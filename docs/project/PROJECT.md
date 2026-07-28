@@ -1,12 +1,12 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 79
+source_version: 80
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-28T17:28:00+08:00
+updated_at: 2026-07-28T17:38:10+08:00
 updated_by: controller-agent
-current_phase: phase-5-deployment-readiness-target-server-rehearsal-disposition-accepted
-last_checkpoint: CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CLEANUP-BLOCKED
+current_phase: phase-5-deployment-readiness-target-server-rehearsal-contract-blocked-accepted
+last_checkpoint: CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-CONTRACT-BLOCKED-ACCEPTED
 next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION
 ---
 
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Target-server rehearsal disposition accepted；V7 deadline cleanup complete and blocked | 只解锁repository-only rehearsal contract准备；V9、V8 custody与所有真实操作保持locked |
+| Phase 5 | Target-server rehearsal contract accepted as BLOCKED；V7 deadline cleanup complete | 七项fresh enrollment缺失，Execution Gate未提交；V9、V8 custody与所有真实操作保持locked |
 
 ## Active Work
 
@@ -74,7 +74,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION
 | PHASE5-DEPLOYMENT-READINESS-CORRECTION | phase-5 | Close six bounded repository deployment-readiness gaps without external runtime access | controller-agent | codex/phase5-deployment-readiness-correction | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | blocked | CP-20260727-PHASE5-DEPLOYMENT-READINESS-CORRECTION-GATE-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED | request bounded Router security disposition; no deployment |
 | PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION | phase-5 | Replace vulnerable Web Router dependency with a bounded internal module while preserving current navigation semantics | controller-agent | codex/phase5-router-security-correction | 8acdfdd4696e50a9d62e40a65e1ccfd3bf644e72 | 0cbbd4cc324ea930ec00ff61bf9885750a5f3bf0 | accepted | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-ACCEPTED | request named synthetic deployment smoke resume Gate; no smoke or deployment |
 | PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE | phase-5 | Verify committed deployment artifacts and local synthetic runtime without external access | controller-agent | codex/phase5-deployment-readiness-synthetic-smoke-result | cabd90409f63626971c6c89b3cfab12b8eb9c3f3 | 86f486ebaf8424b90b5fdcfce2de8b436f9b9ffb | accepted | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-ACCEPTED | submit separate target-server rehearsal disposition Gate; no real operation |
-| PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-CONTRACT | phase-5 | Prepare a fresh target-identified rehearsal execution contract without external access | controller-agent | codex/phase5-target-server-rehearsal-disposition-accepted | 9a39849cf91e7b0ad76e3dd9474b02fcef69dccb | 9a39849cf91e7b0ad76e3dd9474b02fcef69dccb | accepted | CP-20260728-PHASE5-DEPLOYMENT-READINESS-SYNTHETIC-SMOKE-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION-ACCEPTED | prepare bounded contract and submit separate named execution Gate; no real operation |
+| PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-CONTRACT | phase-5 | Prepare a fresh target-identified rehearsal execution contract without external access | controller-agent | codex/phase5-target-server-rehearsal-contract | 18b686e75d7ae3753e0739ab4966c0f534667438 | 91b26a48277b635719bd57e3e2895d2bc2623704 | blocked | CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-DISPOSITION-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-CONTRACT-BLOCKED-ACCEPTED | collect seven fresh enrollment facts before any frozen identity or execution Gate submission |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -215,17 +215,20 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION
 - V5 hard-deadline cleanup已通过sealed frozen wrapper完成；exact raw targets与private reference absent、五维fresh absence通过、sealed anchor保留且结果继续blocked
 - V6 hard-deadline cleanup已通过sealed frozen wrapper完成；exact raw targets与private reference absent、五维fresh absence通过、sealed anchor保留且结果继续blocked
 - V7 hard-deadline cleanup已通过sealed frozen wrapper完成；exact raw targets与private reference absent、五维fresh absence通过、sealed context与anchor保留且结果继续blocked
+- Target-server rehearsal contract已通过修正后的独立规格与质量双审，但七项fresh enrollment事实全部缺失；contract作为BLOCKED事实接受，Execution Gate保持unsubmitted
 
 ## Pending Feedback
 
-Target-server rehearsal disposition已接受但仍缺少fresh target identity等必要输入；V7 deadline cleanup已完成，V9、V8 custody与所有真实操作保持locked
+Target-server rehearsal contract已接受为`BLOCKED`；fresh target asset reference、Owner、Approver、absolute window、isolation、server profile与custody enrollment均缺失。V7 deadline cleanup已完成，V9、V8 custody与所有真实操作保持locked
 
 ## Next Gate
 
-下一Gate为`GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION`；只能在新contract完成、target identity、Owner、Approver、window、isolation与custody全部明确并通过独立审查后提交，当前不得读取真实输入、连接目标服务器、执行演练、UAT、Deployment Gate、真实部署或切换
+下一Gate名称为`GATE-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-EXECUTION`，当前为`UNSUBMITTED / LOCKED`；只能在七项fresh enrollment完成、future frozen identity与全部atomic synthetic matrix形成并通过新的独立双审后提交，当前不得读取真实输入、连接目标服务器、执行演练、UAT、Deployment Gate、真实部署或切换
 
 ## Evidence Index
 
+- [Phase 5 deployment readiness target-server rehearsal contract blocked accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-CONTRACT-BLOCKED-ACCEPTED.md)
+- [Phase 5 deployment readiness target-server rehearsal contract blocked submitted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-TARGET-SERVER-REHEARSAL-CONTRACT-BLOCKED-SUBMITTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V7 deadline cleanup blocked](checkpoints/CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-DEADLINE-CLEANUP-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V6 deadline cleanup blocked](checkpoints/CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V6-DEADLINE-CLEANUP-BLOCKED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V5 deadline cleanup blocked](checkpoints/CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V5-DEADLINE-CLEANUP-BLOCKED.md)
