@@ -1,13 +1,13 @@
 ---
 project_id: novel-analysis-refactor
-source_version: 70
+source_version: 71
 baseline_commit: d7c4697c3053311e0b1d4680ecfda2a2a7f1e267
 baseline_status: current
-updated_at: 2026-07-28T00:30:00+08:00
+updated_at: 2026-07-28T08:24:22+08:00
 updated_by: controller-agent
-current_phase: phase-5-deployment-readiness-correction-blocked
-last_checkpoint: CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-DEADLINE-CLEANUP-BLOCKED
-next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
+current_phase: phase-5-deployment-readiness-router-security-correction
+last_checkpoint: CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION-ACCEPTED
+next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-RESULT
 ---
 
 # Novel Analysis Refactor Project Source
@@ -36,7 +36,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
 | Phase 2 | accepted | `GATE-PHASE2-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 3 | accepted | `GATE-PHASE3-IMPLEMENTATION-ACCEPTED` 已通过 |
 | Phase 4 | accepted | `GATE-PHASE4-IMPLEMENTATION-ACCEPTED` 已通过 |
-| Phase 5 | Deployment readiness correction blocked | Production Router仍有2个high findings；synthetic smoke未启动；V9、V4至V8 custody与所有真实操作保持locked |
+| Phase 5 | Router security correction accepted | 有界内部Router replacement已解锁；2个production high尚未关闭；synthetic smoke未启动；V9、V4至V8 custody与所有真实操作保持locked |
 
 ## Active Work
 
@@ -72,6 +72,7 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8 | phase-5 | Close pre-mutation clock and frozen harness dependency findings using synthetic inputs only | controller-agent | repository-external protocol V8 | b97cf3919660899f860fb9d689d85ff94c1abe42 | b97cf3919660899f860fb9d689d85ff94c1abe42 | blocked | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V7-BLOCKED-DISPOSITION-ACCEPTED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED | preserve V2-V8 sequential deadline custody and submit a separate V8 blocked disposition; no cleanup or rerun |
 | PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED-DISPOSITION | phase-5 | Submit a synthetic-only V9 correction contract for the three blocking V8 findings | controller-agent | codex/phase5-readonly-snapshot-diagnostic-protocol-v9-gate-submitted | b6109b743878eab6b0a217c3ba55aa1212ae5b41 | b6109b743878eab6b0a217c3ba55aa1212ae5b41 | ready | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED | CP-20260727-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V8-BLOCKED-DISPOSITION-SUBMITTED | await exact named user confirmation; V9 remains locked |
 | PHASE5-DEPLOYMENT-READINESS-CORRECTION | phase-5 | Close six bounded repository deployment-readiness gaps without external runtime access | controller-agent | codex/phase5-deployment-readiness-correction | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | b1abb2fc1564a56756cd8bd4f1bb77be79c19c78 | blocked | CP-20260727-PHASE5-DEPLOYMENT-READINESS-CORRECTION-GATE-ACCEPTED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED | request bounded Router security disposition; no deployment |
+| PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION | phase-5 | Replace vulnerable Web Router dependency with a bounded internal module while preserving current navigation semantics | controller-agent | codex/phase5-router-security-gate-accepted | 1bca248f3767acb0dc9868d93ce9059f51f41a10 | 1bca248f3767acb0dc9868d93ce9059f51f41a10 | ready | CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED | CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION-ACCEPTED | start strict TDD repository-only Router replacement |
 | PHASE5-STAGE-INTERFACE-V2 | phase-5 | Consume verified sensitive inputs and bind migration/capacity resource IDs without relaxing Gate | controller-agent | codex/phase5-stage-interface-v2 | 4fc2472d0e7e89d733a5d7b16f9e41da4b69c2fb | 7fc0d0d6d0c8d872237dbd3710b2c61247ffd31f | merged | DEC-0023 | CP-20260725-PHASE5-STAGE-INTERFACE-V2-MERGED | none |
 
 ## Phase Ledgers
@@ -205,14 +206,15 @@ next_gate: GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION
 
 ## Pending Feedback
 
-Deployment readiness correction因production Router仍有2个high findings而`BLOCKED`；等待是否授权有界Router replacement或等待upstream security release，V9与所有真实操作保持locked
+用户已接受Router security disposition并选择有界内部replacement；等待strict TDD实现、production audit与result review，V9与所有真实操作保持locked
 
 ## Next Gate
 
-下一Gate为`GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION`；只有用户明确选择有界Router replacement或等待upstream security release后才能继续。不得隐藏dependency、忽略audit、自动执行synthetic deployment smoke、目标服务器演练、UAT、Deployment Gate、真实部署或切换
+下一Gate为`GATE-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-CORRECTION-RESULT`；只有内部Router replacement保持全部现有navigation语义、production critical/high归零并完成规定验证与审查后才能提交。不得自动执行synthetic deployment smoke、目标服务器演练、UAT、Deployment Gate、真实部署或切换
 
 ## Evidence Index
 
+- [Phase 5 deployment readiness Router security disposition accepted](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-ROUTER-SECURITY-DISPOSITION-ACCEPTED.md)
 - [Phase 5 deployment readiness correction blocked](checkpoints/CP-20260728-PHASE5-DEPLOYMENT-READINESS-CORRECTION-BLOCKED.md)
 - [Phase 5 deployment readiness correction Gate accepted](checkpoints/CP-20260727-PHASE5-DEPLOYMENT-READINESS-CORRECTION-GATE-ACCEPTED.md)
 - [Phase 5 read-only snapshot diagnostic controller protocol correction V3 deadline cleanup blocked](checkpoints/CP-20260728-PHASE5-READONLY-SNAPSHOT-DIAGNOSTIC-CONTROLLER-PROTOCOL-CORRECTION-V3-DEADLINE-CLEANUP-BLOCKED.md)
